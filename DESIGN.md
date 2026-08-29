@@ -91,14 +91,14 @@ Disabled deadline controls change both colour and interaction.
 
 ## Review Evidence
 
-Reference captures live under `.impeccable/review/`:
+UI review captures are generated locally under `.impeccable/review/`. They are
+gitignored and are not published with the repository. Regenerate them with:
 
-- `main-window.png`
-- `inbox.png`
-- `tasks.png`
-- `subjects.png`
-- `settings.png`
-- `filing-prompt.png`
+```powershell
+.\.venv\Scripts\python.exe .\scripts\capture_ui.py `
+    --output-dir .impeccable\review `
+    --temp-dir $env:TEMP
+```
 
 The shipping application contains no generated raster assets; its mark is
 drawn programmatically in `src/organizador/ui/icons.py`.

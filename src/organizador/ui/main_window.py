@@ -7,9 +7,7 @@ stamps, thin rules, and dense filing rows. STORY: see what arrived, decide its
 destination, then retrieve it or attach a deadline. FIRST VIEWPORT: a fixed
 ink sidebar frames one intake strip above recent files and approaching work;
 the primary folder action stays at the upper right. FORM: campus filing docket,
-grounded candidate seven, seed 0268781f. FINISH: unreviewed and undocumented is
-unfinished; this build ends with the finish review, the verdict, DESIGN.md, and
-every shipping raster carrying its provenance.
+grounded candidate seven, seed 0268781f.
 """
 
 from __future__ import annotations
