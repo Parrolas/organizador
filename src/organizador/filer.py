@@ -5,10 +5,18 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from organizador.config import AppConfig
+from organizador.config import MANUAL_IMPORT_BATCH_LIMIT, AppConfig
 from organizador.db import Database
-from organizador.models import FILE_KINDS, FiledDocument, InboxItem, Subject
+from organizador.models import (
+    FILE_KINDS,
+    ExistingDownload,
+    ExistingDownloadsPlan,
+    FiledDocument,
+    InboxItem,
+    Subject,
+)
 from organizador.paths import (
+    IncompleteMoveError,
     is_direct_child,
     move_without_overwrite,
     sanitise_component,
@@ -30,33 +38,86 @@ class FilingService:
         self.config = config
         self.database = database
 
-    def ingest(self, source: Path) -> InboxItem | None:
+    def plan_existing_downloads(self) -> ExistingDownloadsPlan:
+        """Build a deterministic, read-only plan for a confirmed manual import."""
+
+        try:
+            paths = sorted(
+                self.config.downloads_dir.iterdir(),
+                key=lambda path: (path.name.casefold(), path.name),
+            )
+        except OSError as exc:
+            raise FilingError("Não foi possível ler a pasta Downloads configurada.") from exc
+
+        candidates: list[ExistingDownload] = []
+        for path in paths:
+            if not self.config.accepts(path):
+                continue
+            candidate = ExistingDownload.capture(path)
+            if candidate is None or candidate.size < self.config.minimum_file_size:
+                continue
+            candidates.append(candidate)
+        return ExistingDownloadsPlan(len(candidates), tuple(candidates[:MANUAL_IMPORT_BATCH_LIMIT]))
+
+    def ingest(
+        self,
+        source: Path,
+        *,
+        expected: ExistingDownload | None = None,
+    ) -> InboxItem | None:
         """Move one completed eligible download into the university inbox."""
 
+        source = source.absolute()
         if not self.config.accepts(source) or not is_direct_child(
             source, self.config.downloads_dir
         ):
             return None
-        try:
-            size = source.stat().st_size
-        except OSError as exc:
+        current = ExistingDownload.capture(source)
+        if current is None:
+            if source.exists():
+                return None
+            exc = FileNotFoundError(source)
             raise FilingError(f"Já não foi possível encontrar {source.name}.") from exc
+        if expected is not None and current != expected:
+            return None
+        size = current.size
         if size < self.config.minimum_file_size:
             return None
 
-        self.config.inbox_dir.mkdir(parents=True, exist_ok=True)
-        destination = unique_path(self.config.inbox_dir, source.name)
-        move_without_overwrite(source, destination)
+        try:
+            self.config.inbox_dir.mkdir(parents=True, exist_ok=True)
+            destination = unique_path(self.config.inbox_dir, source.name)
+            if expected is not None and not expected.still_matches():
+                return None
+            expected_identity = (
+                (expected.device, expected.inode, expected.size, expected.modified_ns)
+                if expected is not None
+                else None
+            )
+            move_without_overwrite(source, destination, expected_identity=expected_identity)
+        except IncompleteMoveError as exc:
+            raise FilingError(
+                f"{source.name} ficou em Downloads, mas uma cópia incompleta pode ter ficado "
+                f"em {exc.leftover_path}. Compara os ficheiros antes de a remover."
+            ) from exc
+        except OSError as exc:
+            raise FilingError(
+                f"{source.name} mudou ou ainda está a ser usado e ficou em Downloads."
+            ) from exc
         try:
             return self.database.add_inbox_item(destination, source, source.name, size)
         except Exception as exc:
             rollback = unique_path(source.parent, source.name)
             try:
                 move_without_overwrite(destination, rollback)
-            except OSError:
+            except OSError as rollback_error:
                 LOGGER.exception("Failed to roll back an inbox move")
+                raise FilingError(
+                    f"Não foi possível registar {source.name}. O ficheiro ficou em {destination}."
+                ) from rollback_error
             raise FilingError(
-                f"{source.name} foi devolvido porque não foi possível registar o movimento."
+                f"Não foi possível registar {source.name}; foi devolvido a Downloads "
+                f"como {rollback.name}."
             ) from exc
 
     def file_document(

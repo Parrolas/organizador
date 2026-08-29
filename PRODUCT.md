@@ -55,7 +55,10 @@ undo trail.
   documents.
 - Scanned image-only PDFs require future OCR support and are not searchable in
   the first version.
-- Existing files in Downloads are not moved automatically on first launch.
+- Existing files in Downloads are never moved automatically. The user may scan
+  the top level explicitly, confirm the exact candidate count, and import no
+  more than 25 into the inbox per confirmation; each still needs a filing
+  decision.
 - Learned suggestions require at least two matching confirmed filings, abstain
   when choices conflict, and never bypass human confirmation.
 

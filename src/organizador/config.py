@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - only relevant outside Windows
 
 APP_NAME = "Organizador"
 DOWNLOADS_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"
+MANUAL_IMPORT_BATCH_LIMIT = 25
 DEFAULT_EXTENSIONS = (
     ".pdf",
     ".doc",

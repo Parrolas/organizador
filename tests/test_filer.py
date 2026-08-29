@@ -64,6 +64,53 @@ def test_small_or_unsupported_files_remain_in_downloads(
     assert unsupported.exists()
 
 
+def test_existing_download_plan_is_top_level_deterministic_and_capped(
+    app_config: AppConfig, filer: FilingService
+) -> None:
+    for index in range(30):
+        _download(app_config, f"documento_{index:02}.pdf")
+    _download(app_config, "demasiado_pequeno.pdf", size=2)
+    _download(app_config, "ignorado.exe")
+    nested = app_config.downloads_dir / "Pasta"
+    nested.mkdir()
+    (nested / "aninhado.pdf").write_bytes(b"x" * 200)
+    (app_config.downloads_dir / "pasta.pdf").mkdir()
+
+    plan = filer.plan_existing_downloads()
+
+    assert plan.total == 30
+    assert len(plan.selected) == 25
+    assert plan.selected[0].path.name == "documento_00.pdf"
+    assert plan.selected[-1].path.name == "documento_24.pdf"
+
+
+def test_manual_import_rejects_a_file_changed_after_confirmation(
+    app_config: AppConfig, filer: FilingService
+) -> None:
+    source = _download(app_config, "confirmado.pdf")
+    plan = filer.plan_existing_downloads()
+    candidate = plan.selected[0]
+    source.write_bytes(b"changed after confirmation" * 20)
+
+    assert filer.ingest(source, expected=candidate) is None
+    assert source.exists()
+
+
+def test_new_download_can_reuse_a_path_while_an_older_item_is_pending(
+    app_config: AppConfig, filer: FilingService
+) -> None:
+    source = _download(app_config, "repetido.pdf")
+    first = filer.ingest(source)
+    assert first is not None
+    source.write_bytes(b"a genuinely newer download" * 10)
+
+    second = filer.ingest(source)
+
+    assert second is not None
+    assert second.id != first.id
+    assert second.path.name == "repetido (2).pdf"
+
+
 def test_non_university_file_returns_without_overwrite(
     app_config: AppConfig, filer: FilingService
 ) -> None:

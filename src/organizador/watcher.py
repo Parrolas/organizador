@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
@@ -20,17 +20,21 @@ from watchdog.events import (
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
-from organizador.config import AppConfig
+from organizador.config import MANUAL_IMPORT_BATCH_LIMIT, AppConfig
+from organizador.models import ExistingDownload
 from organizador.stabilizer import wait_until_stable
 
 LOGGER = logging.getLogger(__name__)
-CandidateCallback = Callable[[Path], None]
+DownloadCandidate = Path | ExistingDownload
+PathCandidateCallback = Callable[[Path], None]
+CandidateCallback = Callable[[DownloadCandidate], None]
+ImportCompleteCallback = Callable[[int], None]
 
 
 class DownloadEventHandler(FileSystemEventHandler):
     """Convert watchdog events into final-path candidates."""
 
-    def __init__(self, enqueue: CandidateCallback) -> None:
+    def __init__(self, enqueue: PathCandidateCallback) -> None:
         super().__init__()
         self.enqueue = enqueue
 
@@ -46,12 +50,20 @@ class DownloadEventHandler(FileSystemEventHandler):
 class DownloadWatcher:
     """Observe final download names without blocking watchdog's event thread."""
 
-    def __init__(self, config: AppConfig, on_ready: CandidateCallback) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        on_ready: CandidateCallback,
+        on_import_complete: ImportCompleteCallback | None = None,
+    ) -> None:
         self.config = config
         self.on_ready = on_ready
-        self._queue: Queue[Path | None] = Queue()
+        self.on_import_complete = on_import_complete
+        self._queue: Queue[DownloadCandidate | None] = Queue()
         self._pending: set[Path] = set()
         self._known: set[Path] = set()
+        self._manual_pending: set[Path] = set()
+        self._manual_skipped = 0
         self._ignored_until: dict[Path, float] = {}
         self._lock = Lock()
         self._stop = Event()
@@ -67,29 +79,45 @@ class DownloadWatcher:
         return self._observer is not None and self._observer.is_alive()
 
     @property
+    def active(self) -> bool:
+        """Return whether the shared stabilization worker is active."""
+
+        return self._worker is not None and self._worker.is_alive()
+
+    @property
+    def manual_import_running(self) -> bool:
+        """Return whether a confirmed existing-file batch is still being checked."""
+
+        with self._lock:
+            return bool(self._manual_pending)
+
+    @property
     def paused(self) -> bool:
         """Return whether new candidates are temporarily ignored."""
 
         return self._paused.is_set()
 
-    def start(self) -> None:
-        """Start native observation and the safety-net sweeper."""
+    def start(self, *, observe: bool = True) -> None:
+        """Start the worker and optionally native observation and its safety net."""
 
-        if self.running:
+        if self.active:
             return
         self.config.downloads_dir.mkdir(parents=True, exist_ok=True)
         self._stop.clear()
-        self._known = self._snapshot()
-        self._observer = Observer()
-        self._observer.schedule(
-            DownloadEventHandler(self.enqueue), str(self.config.downloads_dir), recursive=False
-        )
-        self._observer.start()
+        self._known = self._snapshot() if observe else set()
         self._worker = Thread(target=self._work, name="download-stabilizer", daemon=True)
         self._worker.start()
-        self._sweeper = Thread(target=self._sweep, name="download-sweeper", daemon=True)
-        self._sweeper.start()
-        LOGGER.info("Watching Downloads at %s", self.config.downloads_dir)
+        if observe:
+            self._observer = Observer()
+            self._observer.schedule(
+                DownloadEventHandler(self.enqueue), str(self.config.downloads_dir), recursive=False
+            )
+            self._observer.start()
+            self._sweeper = Thread(target=self._sweep, name="download-sweeper", daemon=True)
+            self._sweeper.start()
+            LOGGER.info("Watching Downloads at %s", self.config.downloads_dir)
+        else:
+            LOGGER.info("Manual Downloads import ready at %s", self.config.downloads_dir)
 
     def stop(self) -> None:
         """Stop all watcher threads cleanly."""
@@ -108,6 +136,8 @@ class DownloadWatcher:
         self._sweeper = None
         with self._lock:
             self._pending.clear()
+            self._manual_pending.clear()
+            self._manual_skipped = 0
 
     def set_paused(self, paused: bool) -> None:
         """Pause or resume candidate intake."""
@@ -131,15 +161,18 @@ class DownloadWatcher:
     def enqueue(self, path: Path) -> None:
         """Queue one eligible final filename for stabilization."""
 
-        if self._stop.is_set() or self._paused.is_set() or not self.config.accepts(path):
+        if self._stop.is_set() or not self.config.accepts(path):
             return
         try:
-            candidate = path.resolve()
-            if candidate.parent != self.config.downloads_dir.resolve():
+            candidate = path.absolute()
+            if candidate.parent.resolve() != self.config.downloads_dir.resolve():
                 return
         except OSError:
             return
         with self._lock:
+            if self._paused.is_set():
+                self._known.add(candidate)
+                return
             ignored_until = self._ignored_until.get(candidate)
             if ignored_until is not None and ignored_until >= monotonic():
                 self._known.add(candidate)
@@ -151,28 +184,84 @@ class DownloadWatcher:
             self._pending.add(candidate)
         self._queue.put(candidate)
 
+    def enqueue_existing(self, candidates: Sequence[ExistingDownload]) -> int:
+        """Queue one explicitly confirmed batch while enforcing the fixed safety cap."""
+
+        if self._stop.is_set() or not self.active:
+            return 0
+        selected = candidates[:MANUAL_IMPORT_BATCH_LIMIT]
+        queued: list[ExistingDownload] = []
+        skipped = 0
+        with self._lock:
+            if self._manual_pending:
+                return 0
+            for candidate in selected:
+                path = candidate.path
+                try:
+                    eligible = (
+                        self.config.accepts(path)
+                        and path.parent.resolve() == self.config.downloads_dir.resolve()
+                        and candidate.still_matches()
+                    )
+                except OSError:
+                    eligible = False
+                if not eligible or path in self._pending:
+                    skipped += 1
+                    continue
+                self._pending.add(path)
+                self._manual_pending.add(path)
+                queued.append(candidate)
+            self._manual_skipped = skipped
+            if not queued:
+                self._manual_skipped = 0
+        for candidate in queued:
+            self._queue.put(candidate)
+        return len(queued)
+
     def _work(self) -> None:
         while not self._stop.is_set():
             try:
-                path = self._queue.get(timeout=0.5)
+                queued = self._queue.get(timeout=0.5)
             except Empty:
                 continue
-            if path is None:
+            if queued is None:
                 return
+            if isinstance(queued, ExistingDownload):
+                manual_candidate = queued
+                path = queued.path
+            else:
+                manual_candidate = None
+                path = queued
+            delivered = False
             try:
-                stable = wait_until_stable(
-                    path,
-                    minimum_size=self.config.minimum_file_size,
-                    stop_event=self._stop,
+                unchanged_before = manual_candidate is None or manual_candidate.still_matches()
+                stable = unchanged_before and wait_until_stable(
+                    path, minimum_size=self.config.minimum_file_size, stop_event=self._stop
                 )
-                if stable and not self._paused.is_set():
-                    self.on_ready(path)
+                unchanged_after = manual_candidate is None or manual_candidate.still_matches()
+                if (
+                    stable
+                    and unchanged_after
+                    and (manual_candidate is not None or not self._paused.is_set())
+                ):
+                    self.on_ready(queued)
+                    delivered = True
             except Exception:
                 LOGGER.exception("Failed while handling download candidate %s", path)
             finally:
+                completed_skips: int | None = None
                 with self._lock:
                     self._pending.discard(path)
+                    if manual_candidate is not None:
+                        if not delivered:
+                            self._manual_skipped += 1
+                        self._manual_pending.discard(path)
+                        if not self._manual_pending:
+                            completed_skips = self._manual_skipped
+                            self._manual_skipped = 0
                 self._queue.task_done()
+                if completed_skips is not None and self.on_import_complete is not None:
+                    self.on_import_complete(completed_skips)
 
     def _sweep(self) -> None:
         while not self._stop.wait(20.0):
@@ -191,9 +280,10 @@ class DownloadWatcher:
 
     def _snapshot(self) -> set[Path]:
         try:
-            return {
-                path.resolve() for path in self.config.downloads_dir.iterdir() if path.is_file()
-            }
+            candidates = (
+                ExistingDownload.capture(path) for path in self.config.downloads_dir.iterdir()
+            )
+            return {candidate.path for candidate in candidates if candidate is not None}
         except OSError:
             LOGGER.exception("Could not scan Downloads")
             return set()

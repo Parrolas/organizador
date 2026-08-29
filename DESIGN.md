@@ -70,6 +70,8 @@ Portuguese diacritics and long file names must be tested at the shipping DPI.
 - **Subject/type chip:** selected by filled teal state and keyboard shortcut.
 - **Input:** inset navy surface, one-pixel cool rule, two-pixel teal focus.
 - **Empty state:** explains what will appear and the next useful action.
+- **Inbox import:** a heading action opens a count-bearing, default-cancel
+  confirmation and disables itself while the capped batch is checked.
 
 ## States And Motion
 
@@ -79,6 +81,9 @@ arrival. Content is visible before animation and remains static afterward.
 
 Native Windows checkboxes and spin controls preserve familiar state marks.
 Disabled deadline controls change both colour and interaction.
+Manual import progress stays in the Inbox page. Its completion copy distinguishes
+imported, skipped and failed files and states that remaining files stayed in
+Downloads.
 
 ## Accessibility
 

@@ -163,7 +163,7 @@ class FilingPrompt(QWidget):
         self.error_label.clear()
         self.name_edit.setText(item.path.name)
         self.name_edit.selectAll()
-        self.meta_label.setText(f"{format_size(item.size)}  ·  acabou de chegar a Downloads")
+        self.meta_label.setText(f"{format_size(item.size)}  ·  recebido da pasta Downloads")
         self.guess_label.setText(
             f"Sugestão {guess.confidence}%" if guess.subject_id is not None else "Escolhe uma opção"
         )

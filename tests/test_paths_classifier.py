@@ -5,9 +5,17 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import pytest
+
+import organizador.paths as path_operations
 from organizador.classifier import extract_due_date, guess_filing, normalise
-from organizador.models import FilingHint, Subject
-from organizador.paths import sanitise_component, sanitise_filename, unique_path
+from organizador.models import ExistingDownload, FilingHint, Subject
+from organizador.paths import (
+    move_without_overwrite,
+    sanitise_component,
+    sanitise_filename,
+    unique_path,
+)
 
 
 def test_windows_components_remove_invalid_and_reserved_names() -> None:
@@ -21,6 +29,94 @@ def test_unique_path_adds_a_human_readable_counter(tmp_path: Path) -> None:
     (tmp_path / "Aula (2).pdf").write_bytes(b"two")
 
     assert unique_path(tmp_path, "Aula.pdf").name == "Aula (3).pdf"
+
+
+def test_move_without_overwrite_refuses_an_existing_destination(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    target = tmp_path / "target.pdf"
+    source.write_bytes(b"new material")
+    target.write_bytes(b"existing material")
+
+    with pytest.raises(FileExistsError):
+        move_without_overwrite(source, target)
+
+    assert source.read_bytes() == b"new material"
+    assert target.read_bytes() == b"existing material"
+
+
+def test_move_without_overwrite_revalidates_confirmed_identity(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    target = tmp_path / "target.pdf"
+    source.write_bytes(b"confirmed material")
+    confirmed = ExistingDownload.capture(source)
+    assert confirmed is not None
+    source.write_bytes(b"replacement material with another size")
+
+    with pytest.raises(OSError, match="changed"):
+        move_without_overwrite(
+            source,
+            target,
+            expected_identity=(
+                confirmed.device,
+                confirmed.inode,
+                confirmed.size,
+                confirmed.modified_ns,
+            ),
+        )
+
+    assert source.read_bytes() == b"replacement material with another size"
+    assert not target.exists()
+
+
+def test_windows_copy_fallback_is_exclusive_and_removes_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.pdf"
+    target = tmp_path / "target.pdf"
+    source.write_bytes(b"cross-volume style copy")
+    monkeypatch.setattr(path_operations, "_rename_windows_handle", lambda *_args: False)
+
+    move_without_overwrite(source, target)
+
+    assert not source.exists()
+    assert target.read_bytes() == b"cross-volume style copy"
+
+
+def test_destination_created_during_move_is_never_overwritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.pdf"
+    target = tmp_path / "target.pdf"
+    source.write_bytes(b"new material")
+
+    def create_competing_target(*_args: object) -> bool:
+        target.write_bytes(b"competing material")
+        return False
+
+    monkeypatch.setattr(path_operations, "_rename_windows_handle", create_competing_target)
+
+    with pytest.raises(FileExistsError):
+        move_without_overwrite(source, target)
+
+    assert source.read_bytes() == b"new material"
+    assert target.read_bytes() == b"competing material"
+
+
+def test_failed_copy_cleanup_reports_the_leftover_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.pdf"
+    target = tmp_path / "target.pdf"
+    source.write_bytes(b"material")
+    monkeypatch.setattr(path_operations, "_rename_windows_handle", lambda *_args: False)
+    monkeypatch.setattr(path_operations, "_delete_windows_handle", lambda *_args: False)
+
+    with pytest.raises(path_operations.IncompleteMoveError) as error:
+        move_without_overwrite(source, target)
+
+    assert error.value.leftover_path == target
+    assert source.exists()
+    assert target.exists()
 
 
 def test_normalise_folds_portuguese_accents() -> None:

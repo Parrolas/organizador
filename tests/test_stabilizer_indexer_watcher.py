@@ -6,12 +6,13 @@ import json
 from pathlib import Path
 from threading import Event
 
+import pytest
 from watchdog.events import FileCreatedEvent, FileMovedEvent
 
 from organizador.config import AppConfig
 from organizador.db import Database
 from organizador.indexer import DocumentIndexer
-from organizador.models import Subject
+from organizador.models import ExistingDownload, Subject
 from organizador.stabilizer import wait_until_stable
 from organizador.watcher import DownloadEventHandler, DownloadWatcher
 
@@ -77,6 +78,42 @@ def test_native_watcher_ignores_a_file_returned_by_the_app(app_config: AppConfig
         watcher.set_paused(False)
 
         assert not ready.wait(3.0), "the watcher re-ingested its own returned file"
+    finally:
+        watcher.stop()
+
+
+def test_confirmed_existing_batch_bypasses_pause_and_enforces_cap(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates: list[ExistingDownload] = []
+    for index in range(30):
+        path = app_config.downloads_dir / f"existing_{index:02}.pdf"
+        path.write_bytes(b"completed existing download")
+        candidate = ExistingDownload.capture(path)
+        assert candidate is not None
+        candidates.append(candidate)
+    ready: list[Path | ExistingDownload] = []
+    completed = Event()
+    skipped: list[int] = []
+
+    def import_completed(count: int) -> None:
+        skipped.append(count)
+        completed.set()
+
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", lambda *_args, **_kwargs: True)
+    watcher = DownloadWatcher(app_config, ready.append, import_completed)
+    snapshot_calls: list[bool] = []
+    monkeypatch.setattr(watcher, "_snapshot", lambda: snapshot_calls.append(True) or set())
+    watcher.start(observe=False)
+    watcher.set_paused(True)
+    try:
+        assert watcher.enqueue_existing(candidates) == 25
+        assert completed.wait(3.0), "manual import batch did not complete"
+        assert len(ready) == 25
+        assert all(isinstance(item, ExistingDownload) for item in ready)
+        assert skipped == [0]
+        assert not watcher.running
+        assert snapshot_calls == []
     finally:
         watcher.stop()
 

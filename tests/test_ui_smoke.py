@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from PySide6.QtGui import QCursor, QGuiApplication, QPalette
-from PySide6.QtWidgets import QApplication, QButtonGroup, QLabel
+from PySide6.QtWidgets import QApplication, QButtonGroup, QLabel, QMessageBox
 
 from organizador.classifier import guess_filing
 from organizador.config import AppConfig
@@ -38,6 +40,10 @@ def test_main_window_builds_and_refreshes_all_pages(
     assert qt_app.palette().color(QPalette.ColorRole.Window).name() == CANVAS.casefold()
     visible_copy = [item.text() for item in window.subjects_page.findChildren(QLabel)]
     assert any(subject.name in text for text in visible_copy)
+    import_requests: list[bool] = []
+    window.inbox_page.import_existing_requested.connect(lambda: import_requests.append(True))
+    window.inbox_page.import_button.click()
+    assert import_requests == [True]
     window.allow_close = True
     window.close()
 
@@ -156,6 +162,60 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
     assert calls == [True, False]
     assert not app_config.launch_at_login
     assert "sem espaço" in controller.main_window.settings_page.status_label.text()
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
+
+
+def test_confirmed_existing_download_import_is_capped_and_uses_normal_inbox_flow(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database, subject
+    app_config.watch_enabled = False
+    for index in range(30):
+        path = app_config.downloads_dir / f"existing_{index:02}.pdf"
+        path.write_bytes(b"existing university material")
+    confirmation_copy: list[str] = []
+    answers = [QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Yes]
+
+    def confirm(*args: object, **_kwargs: object) -> QMessageBox.StandardButton:
+        confirmation_copy.append(str(args[2]))
+        return answers.pop(0)
+
+    monkeypatch.setattr(QMessageBox, "question", confirm)
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", lambda *_args, **_kwargs: True)
+    controller = AppController(app_config)
+    controller._restart_watcher()
+    controller._import_existing_downloads()
+    assert controller.database.count_inbox_items() == 0
+    assert len(list(app_config.downloads_dir.glob("*.pdf"))) == 30
+
+    controller._import_existing_downloads()
+
+    deadline = time.monotonic() + 5.0
+    while controller._manual_import_active and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(0.01)
+    qt_app.processEvents()
+
+    assert not controller._manual_import_active
+    assert controller.database.count_inbox_items() == 25
+    assert len(list(app_config.downloads_dir.glob("*.pdf"))) == 5
+    assert len(confirmation_copy) == 2
+    assert "30 ficheiros elegíveis" in confirmation_copy[1]
+    assert "no máximo 25" in confirmation_copy[1]
+    assert "25 importados" in controller.main_window.inbox_page.import_status_label.text()
+    assert controller.prompt.current_item_id is not None
+
+    if controller.watcher is not None:
+        controller.watcher.stop()
+    controller.prompt.timer.stop()
+    controller.prompt.hide()
     controller.indexer.shutdown()
     controller.tray.hide()
     controller.main_window.allow_close = True

@@ -21,7 +21,7 @@ from organizador.config import AppConfig, parse_extensions
 from organizador.db import Database
 from organizador.filer import FilingError, FilingService
 from organizador.indexer import DocumentIndexer
-from organizador.models import FilingGuess, Subject
+from organizador.models import ExistingDownload, FilingGuess, InboxItem, Subject
 from organizador.startup import set_launch_at_login
 from organizador.ui.dialogs import OnboardingDialog, SubjectDialog
 from organizador.ui.main_window import MainWindow
@@ -38,6 +38,7 @@ class AppController(QObject):
 
     download_ready = Signal(object)
     index_completed = Signal(int, str)
+    import_completed = Signal(int)
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
@@ -55,6 +56,12 @@ class AppController(QObject):
         self.prompt_queue: deque[int] = deque()
         self.notified_tasks: set[int] = set()
         self.hide_notice_shown = False
+        self._manual_import_active = False
+        self._manual_imported = 0
+        self._manual_import_skipped = 0
+        self._manual_import_failed = 0
+        self._manual_import_deferred = 0
+        self._manual_import_errors: list[str] = []
 
         self.main_window = MainWindow(self.database, config)
         self.prompt = FilingPrompt(config.prompt_timeout_seconds)
@@ -125,6 +132,7 @@ class AppController(QObject):
     def _connect_signals(self) -> None:
         self.download_ready.connect(self._ingest_download)
         self.index_completed.connect(self._index_finished)
+        self.import_completed.connect(self._manual_import_finished)
         self.tray.open_requested.connect(lambda: self.show_main("inicio"))
         self.tray.inbox_requested.connect(lambda: self.show_main("inbox"))
         self.tray.pause_requested.connect(self._set_paused)
@@ -141,6 +149,9 @@ class AppController(QObject):
         self.main_window.inbox_page.organise_requested.connect(self._organise_item)
         self.main_window.inbox_page.return_requested.connect(self._return_item)
         self.main_window.inbox_page.open_path.connect(self._open_path)
+        self.main_window.inbox_page.import_existing_requested.connect(
+            self._import_existing_downloads
+        )
         self.main_window.search_page.open_path.connect(self._open_path)
         self.main_window.search_page.reveal_path.connect(self._reveal_path)
         self.main_window.tasks_page.changed.connect(self._refresh)
@@ -158,15 +169,15 @@ class AppController(QObject):
         if self.watcher is not None:
             self.watcher.stop()
             self.watcher = None
-        if not (
-            self.config.initialized
-            and self.config.watch_enabled
-            and self.database.count_subjects() > 0
-        ):
+        if not (self.config.initialized and self.database.count_subjects() > 0):
             return
-        candidate = DownloadWatcher(self.config, lambda path: self.download_ready.emit(path))
+        candidate = DownloadWatcher(
+            self.config,
+            lambda download: self.download_ready.emit(download),
+            lambda skipped: self.import_completed.emit(skipped),
+        )
         try:
-            candidate.start()
+            candidate.start(observe=self.config.watch_enabled)
         except Exception as exc:
             LOGGER.exception("Could not start the Downloads watcher")
             with suppress(Exception):
@@ -179,25 +190,138 @@ class AppController(QObject):
             return
         self.watcher = candidate
 
-    def _ingest_download(self, path: Path) -> None:
+    def _ingest_download(self, candidate: Path | ExistingDownload) -> None:
+        if isinstance(candidate, ExistingDownload):
+            manual_candidate = candidate
+            path = candidate.path
+        else:
+            manual_candidate = None
+            path = candidate
         try:
-            item = self.filer.ingest(path)
+            item = self.filer.ingest(path, expected=manual_candidate)
         except FilingError as exc:
             LOGGER.exception("Could not ingest %s", path)
-            self.tray.notify("Não foi possível recolher o ficheiro", str(exc))
+            if manual_candidate is not None:
+                self._manual_import_failed += 1
+                self._manual_import_errors.append(f"{path.name}: {exc}")
+            else:
+                self.tray.notify("Não foi possível recolher o ficheiro", str(exc))
             return
         if item is None:
+            if manual_candidate is not None:
+                self._manual_import_skipped += 1
             return
+        if manual_candidate is not None:
+            self._manual_imported += 1
+        self._queue_ingested_item(item, notify=manual_candidate is None)
+
+    def _queue_ingested_item(self, item: InboxItem, *, notify: bool) -> None:
+        """Classify an ingested item and queue the normal human decision prompt."""
+
         subjects = self.database.list_subjects()
         guess = self._filing_guess(item.original_name, subjects)
         self.database.update_inbox_suggestion(item.id, guess.subject_id, guess.kind)
-        self.prompt_queue.append(item.id)
-        self.tray.notify(
-            "Novo material na Caixa de Entrada",
-            f"{item.original_name} está pronto para organizar.",
-        )
-        self._refresh()
+        if item.id not in self.prompt_queue and self.prompt.current_item_id != item.id:
+            self.prompt_queue.append(item.id)
+        if notify:
+            self.tray.notify(
+                "Novo material na Caixa de Entrada",
+                f"{item.original_name} está pronto para organizar.",
+            )
+            self._refresh()
         self._show_next_prompt()
+
+    def _import_existing_downloads(self) -> None:
+        watcher = self.watcher
+        if watcher is None or not watcher.active:
+            QMessageBox.warning(
+                self.main_window,
+                "Importação indisponível",
+                "Conclui a configuração da aplicação antes de importar ficheiros.",
+            )
+            return
+        if self._manual_import_active or watcher.manual_import_running:
+            QMessageBox.information(
+                self.main_window,
+                "Importação em curso",
+                "Espera que o lote atual termine antes de iniciar outro.",
+            )
+            return
+        try:
+            plan = self.filer.plan_existing_downloads()
+        except FilingError as exc:
+            QMessageBox.warning(self.main_window, "Não foi possível procurar", str(exc))
+            return
+        if not plan.selected:
+            QMessageBox.information(
+                self.main_window,
+                "Nada para importar",
+                "Não existem ficheiros elegíveis no nível principal de Downloads.",
+            )
+            return
+
+        selected_count = len(plan.selected)
+        remaining = plan.total - selected_count
+        remaining_copy = (
+            f" Os outros {remaining} ficam em Downloads para um próximo lote." if remaining else ""
+        )
+        answer = QMessageBox.question(
+            self.main_window,
+            "Importar ficheiros existentes?",
+            f"Foram encontrados {plan.total} ficheiros elegíveis. "
+            f"Serão verificados no máximo {selected_count} e movidos para a Caixa de Entrada."
+            f"{remaining_copy}\n\nCada ficheiro continuará a precisar da tua confirmação.",
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._manual_import_active = True
+        self._manual_imported = 0
+        self._manual_import_skipped = 0
+        self._manual_import_failed = 0
+        self._manual_import_deferred = remaining
+        self._manual_import_errors.clear()
+        self.main_window.inbox_page.set_import_running(True)
+        self.main_window.inbox_page.set_import_status(
+            f"A verificar {selected_count} ficheiro{'s' if selected_count != 1 else ''}…"
+        )
+        queued = watcher.enqueue_existing(plan.selected)
+        if queued == 0:
+            self._manual_import_active = False
+            self.main_window.inbox_page.set_import_running(False)
+            self.main_window.inbox_page.set_import_status(
+                "Os ficheiros mudaram ou já estavam a ser processados e ficaram em Downloads."
+            )
+
+    def _manual_import_finished(self, worker_skipped: int) -> None:
+        if not self._manual_import_active:
+            return
+        skipped = self._manual_import_skipped + worker_skipped
+        imported = self._manual_imported
+        failed = self._manual_import_failed
+        parts = [f"{imported} importado{'s' if imported != 1 else ''}"]
+        if skipped:
+            parts.append(f"{skipped} ignorado{'s' if skipped != 1 else ''}")
+        if failed:
+            parts.append(f"{failed} com erro")
+        message = ", ".join(parts) + "."
+        if self._manual_import_deferred:
+            message += (
+                f" {self._manual_import_deferred} não entraram neste lote e ficaram em Downloads."
+            )
+        if self._manual_import_errors:
+            shown_errors = "; ".join(self._manual_import_errors[:3])
+            if len(self._manual_import_errors) > 3:
+                shown_errors += f"; e mais {len(self._manual_import_errors) - 3}"
+            message += f" Revê: {shown_errors}."
+        message += " Nenhum ficheiro foi substituído ou apagado."
+        self._manual_import_active = False
+        self.main_window.inbox_page.set_import_running(False)
+        self.main_window.inbox_page.set_import_status(message)
+        self._refresh()
+        self.tray.notify("Importação de Downloads concluída", message)
 
     def _organise_item(self, inbox_id: int) -> None:
         if self.prompt.current_item_id == inbox_id:
@@ -262,9 +386,10 @@ class AppController(QObject):
 
     def _return_item(self, inbox_id: int) -> None:
         watcher = self.watcher
-        was_paused = watcher.paused if watcher is not None else False
+        observing = watcher is not None and watcher.running
+        was_paused = watcher.paused if observing and watcher is not None else False
         destination: Path | None = None
-        if watcher is not None and not was_paused:
+        if observing and watcher is not None and not was_paused:
             watcher.set_paused(True)
         try:
             destination = self.filer.return_to_downloads(inbox_id)
@@ -280,7 +405,7 @@ class AppController(QObject):
         finally:
             if watcher is not None and destination is not None:
                 watcher.ignore_self_move(destination)
-            if watcher is not None and not was_paused:
+            if observing and watcher is not None and not was_paused:
                 watcher.set_paused(False)
         if destination is None:  # pragma: no cover - success assigns a path
             return
@@ -384,6 +509,12 @@ class AppController(QObject):
             self._refresh()
 
     def _save_settings(self, values: SettingsPayload) -> None:
+        if self._manual_import_active:
+            self.main_window.settings_page.set_status(
+                "Espera que a importação de Downloads termine antes de guardar.",
+                error=True,
+            )
+            return
         previous = copy.deepcopy(self.config)
         startup_changed = False
         try:
@@ -428,14 +559,16 @@ class AppController(QObject):
         self.config.initialized = previous.initialized
 
     def _set_paused(self, paused: bool) -> None:
-        if self.watcher is not None:
+        if self.watcher is not None and self.watcher.running:
             self.watcher.set_paused(paused)
+        else:
+            paused = False
         self.tray.set_paused(paused)
         self._refresh()
 
     def _refresh(self) -> None:
         watching = self.watcher is not None and self.watcher.running
-        paused = self.watcher.paused if self.watcher is not None else False
+        paused = self.watcher.paused if watching and self.watcher is not None else False
         self.main_window.refresh_all(watching=watching, paused=paused)
         self.tray.update_inbox_count(self.database.count_inbox_items())
         self.tray.set_paused(paused)

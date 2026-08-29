@@ -211,21 +211,41 @@ class InboxPage(QWidget):
     organise_requested = Signal(int)
     return_requested = Signal(int)
     open_path = Signal(object)
+    import_existing_requested = Signal()
 
     def __init__(self, database: Database, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.database = database
         layout = _page_layout(self)
+        self.import_button = button("Importar de Downloads…")
+        self.import_button.clicked.connect(self.import_existing_requested.emit)
         layout.addWidget(
             PageHeading(
                 "Caixa de Entrada",
                 "Nada é arquivado sem uma decisão. Organiza agora ou deixa para mais tarde.",
+                [self.import_button],
             )
         )
         self.summary_label = label("", "PageSubtitle")
         layout.addWidget(self.summary_label)
+        self.import_status_label = label("", "Muted")
+        self.import_status_label.setWordWrap(True)
+        self.import_status_label.hide()
+        layout.addWidget(self.import_status_label)
         area, _, self.items_layout = _scroll_list()
         layout.addWidget(area, 1)
+
+    def set_import_running(self, running: bool) -> None:
+        """Prevent overlapping confirmed batches while the worker checks files."""
+
+        self.import_button.setEnabled(not running)
+        self.import_button.setText("A importar…" if running else "Importar de Downloads…")
+
+    def set_import_status(self, message: str) -> None:
+        """Show non-modal progress or aggregate batch feedback."""
+
+        self.import_status_label.setText(message)
+        self.import_status_label.setVisible(bool(message))
 
     def refresh(self) -> None:
         """Rebuild the pending-file list."""

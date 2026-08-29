@@ -17,6 +17,8 @@ documento devem ficar.
   nunca são substituídos.
 - Devolver um ficheiro que não seja da universidade a `Downloads`.
 - Desfazer a última organização.
+- Importação manual dos ficheiros que já estavam em `Downloads`, sempre com
+  confirmação e em lotes de até 25.
 - Pesquisa local dentro de PDF, DOCX, PPTX, XLSX, TXT, Markdown, CSV e notebooks
   Jupyter.
 - Tarefas, prazos e notificações para trabalhos vencidos ou a vencer hoje.
@@ -37,6 +39,9 @@ O Organizador nunca apaga documentos. Um ficheiro só é movido depois de:
    movimento é revertido.
 
 Os documentos e o índice de pesquisa ficam apenas neste computador.
+Os ficheiros antigos em `Downloads` só entram na Caixa de Entrada através da
+ação explícita na respetiva página. A confirmação mostra quantos foram
+encontrados e nunca autoriza mais de 25 por lote.
 
 ## Instalação para desenvolvimento
 
@@ -79,6 +84,8 @@ aviso na primeira execução.
 6. Usa `Desfazer última organização` no menu do tabuleiro.
 7. Organiza dois ficheiros com o mesmo padrão de nome e confirma que o terceiro
    recebe a mesma sugestão, mas continua a exigir confirmação.
+8. Na Caixa de Entrada, escolhe `Importar de Downloads…`, revê a contagem e
+   cancela uma vez para confirmar que nenhum ficheiro é movido.
 
 ## Qualidade
 
@@ -101,9 +108,9 @@ real.
 
 ## Limitações atuais
 
-- Ficheiros que já estavam em `Downloads` antes de a app arrancar não são
-  movidos automaticamente. Isto evita reorganizar centenas de ficheiros sem
-  confirmação.
+- Ficheiros que já estavam em `Downloads` antes de a app arrancar continuam a
+  ser ignorados automaticamente. Podem ser importados pelo utilizador, apenas
+  no nível principal da pasta e em lotes confirmados de até 25.
 - PDFs digitalizados apenas como imagem precisam de OCR e ainda não aparecem na
   pesquisa textual.
 - Os formatos Office antigos (`.doc`, `.ppt`, `.xls`) e ficheiros OneNote podem

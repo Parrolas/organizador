@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+from stat import S_ISREG
 
 FILE_KINDS: tuple[str, ...] = (
     "Slides",
@@ -107,6 +108,49 @@ class FilingHint:
     original_name: str
     subject_id: int
     kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingDownload:
+    """A top-level Downloads file captured before manual import confirmation."""
+
+    path: Path
+    size: int
+    modified_ns: int
+    device: int
+    inode: int
+
+    @classmethod
+    def capture(cls, path: Path) -> ExistingDownload | None:
+        """Capture a regular non-link file without following filesystem links."""
+
+        candidate = path.absolute()
+        try:
+            details = candidate.lstat()
+        except OSError:
+            return None
+        if not S_ISREG(details.st_mode):
+            return None
+        return cls(
+            candidate,
+            details.st_size,
+            details.st_mtime_ns,
+            details.st_dev,
+            details.st_ino,
+        )
+
+    def still_matches(self) -> bool:
+        """Return whether the same unchanged regular file is still present."""
+
+        return ExistingDownload.capture(self.path) == self
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingDownloadsPlan:
+    """A read-only, capped plan awaiting explicit user confirmation."""
+
+    total: int
+    selected: tuple[ExistingDownload, ...]
 
 
 @dataclass(frozen=True, slots=True)
