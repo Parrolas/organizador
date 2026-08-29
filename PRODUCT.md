@@ -22,9 +22,10 @@ without repeatedly navigating Windows Explorer.
 
 Organizador moves eligible completed downloads into a safe university inbox,
 asks for the relevant subject and document type, and files the document in the
-right folder. It also keeps subject-linked tasks and makes PDF contents
-searchable. Success means the Downloads folder no longer becomes an accidental
-archive and every move remains understandable and reversible.
+right folder. It also keeps subject-linked tasks and makes PDF, modern Office,
+text and notebook contents searchable. Success means the Downloads folder no
+longer becomes an accidental archive and every move remains understandable and
+reversible.
 
 ## Positioning
 
@@ -49,7 +50,8 @@ destination, learns from the user's choices, and preserves an undo trail.
 - Files must be complete and unlocked before the app moves them.
 - The app never overwrites or deletes a user file.
 - All filing operations are logged and the latest filing can be undone.
-- PDF text search is local and does not upload documents.
+- PDF, DOCX, PPTX, XLSX, text and notebook search is local and does not upload
+  documents.
 - Scanned image-only PDFs require future OCR support and are not searchable in
   the first version.
 - Existing files in Downloads are not moved automatically on first launch.

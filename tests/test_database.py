@@ -128,3 +128,46 @@ def test_stale_index_job_cannot_write_to_a_reused_file_id(
     assert replacement is not None
     assert replacement.indexed_at is None
     assert database.search("stale") == []
+
+
+def test_schema_migration_queues_existing_office_files_once(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "slides.pptx"
+    path.write_bytes(b"legacy presentation")
+    item = database.add_inbox_item(
+        path, tmp_path / "Downloads" / path.name, path.name, path.stat().st_size
+    )
+    document = database.record_filing(item.id, subject.id, "Slides", path)
+    database.replace_document_pages(
+        document.id,
+        subject.name,
+        document.original_name,
+        ("legacy searchable slide",),
+        expected_path=path,
+    )
+    assert database.search("legacy")
+    with database.connect() as connection:
+        connection.execute("PRAGMA user_version = 1")
+        connection.commit()
+
+    database.initialize()
+
+    pending = database.get_file(document.id)
+    assert pending is not None
+    assert pending.indexed_at is None
+    assert database.search("legacy") == []
+
+    database.replace_document_pages(
+        document.id,
+        subject.name,
+        document.original_name,
+        ("reindexed presentation",),
+        expected_path=path,
+    )
+    database.initialize()
+
+    retained = database.get_file(document.id)
+    assert retained is not None
+    assert retained.indexed_at is not None
+    assert database.search("reindexed")

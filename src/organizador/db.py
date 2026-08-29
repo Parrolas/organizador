@@ -18,6 +18,8 @@ from organizador.models import (
     Subject,
 )
 
+SCHEMA_VERSION = 2
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS subjects (
     id INTEGER PRIMARY KEY,
@@ -133,9 +135,32 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
+            version_row = connection.execute("PRAGMA user_version").fetchone()
+            previous_version = int(version_row[0]) if version_row is not None else 0
             connection.executescript(SCHEMA)
-            connection.execute("PRAGMA user_version = 1")
+            if previous_version < 2:
+                self._prepare_office_reindex(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             connection.commit()
+
+    @staticmethod
+    def _prepare_office_reindex(connection: sqlite3.Connection) -> None:
+        """Queue Office files handled before text extraction was supported."""
+
+        office_files = """
+            SELECT id FROM files
+            WHERE LOWER(current_path) LIKE '%.docx'
+               OR LOWER(current_path) LIKE '%.pptx'
+               OR LOWER(current_path) LIKE '%.xlsx'
+        """
+        connection.execute(
+            f"""DELETE FROM document_pages
+                 WHERE CAST(file_id AS INTEGER) IN ({office_files})"""
+        )
+        connection.execute(
+            f"""UPDATE files SET indexed_at = NULL
+                 WHERE id IN ({office_files})"""
+        )
 
     def add_subject(
         self,

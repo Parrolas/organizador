@@ -89,7 +89,7 @@ class StudyTask:
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
-    """A page-level PDF search result."""
+    """A page, slide or worksheet-level local search result."""
 
     file_id: int
     path: Path

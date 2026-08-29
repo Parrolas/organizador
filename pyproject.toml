@@ -9,8 +9,12 @@ description = "Organizador local de ficheiros e estudo para Windows"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "defusedxml>=0.7,<1",
+    "openpyxl>=3.1,<4",
     "PySide6-Essentials>=6.8,<7",
     "pypdf>=6,<7",
+    "python-docx>=1.1,<2",
+    "python-pptx>=1.0,<2",
     "rapidfuzz>=3.10,<4",
     "watchdog>=6,<7",
 ]
@@ -21,6 +25,7 @@ dev = [
     "pytest>=8.3,<9",
     "pytest-cov>=6,<7",
     "ruff>=0.11,<1",
+    "types-openpyxl>=3.1,<4",
 ]
 build = ["pyinstaller>=6.12,<7"]
 

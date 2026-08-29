@@ -301,7 +301,8 @@ class SearchPage(QWidget):
         layout.addWidget(
             PageHeading(
                 "Pesquisar nos apontamentos",
-                "Procura palavras dentro de PDFs, ficheiros de texto e notebooks já organizados.",
+                "Procura palavras dentro de PDFs, documentos Office, ficheiros de texto "
+                "e notebooks já organizados.",
             )
         )
         self.search_edit = QLineEdit()
@@ -375,7 +376,8 @@ class SearchPage(QWidget):
             copy.addWidget(label(result.title, "RowTitle"))
             copy.addWidget(
                 label(
-                    f"{result.subject_name}  ·  {result.kind}  ·  página {result.page}",
+                    f"{result.subject_name}  ·  {result.kind}  ·  "
+                    f"{self._location_copy(result.path, result.page)}",
                     "Muted",
                 )
             )
@@ -398,6 +400,17 @@ class SearchPage(QWidget):
             row_layout.addWidget(snippet)
             self.results_layout.addWidget(row)
         self.results_layout.addStretch(1)
+
+    @staticmethod
+    def _location_copy(path: Path, page: int) -> str:
+        suffix = path.suffix.casefold()
+        if suffix == ".pptx":
+            return f"diapositivo {page}"
+        if suffix == ".xlsx":
+            return f"folha {page}"
+        if suffix == ".docx":
+            return "documento"
+        return f"página {page}"
 
 
 class TasksPage(QWidget):

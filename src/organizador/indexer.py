@@ -1,4 +1,4 @@
-"""Background local text extraction for PDF and text study files."""
+"""Background local text extraction for supported study documents."""
 
 from __future__ import annotations
 
@@ -12,10 +12,13 @@ from threading import Event
 from pypdf import PdfReader
 
 from organizador.db import Database
+from organizador.extractors import OFFICE_SUFFIXES, extract_docx, extract_pptx, extract_xlsx
 from organizador.models import FiledDocument
 
 LOGGER = logging.getLogger(__name__)
 IndexCallback = Callable[[int, str], None]
+MAX_INDEX_BYTES = 50 * 1024 * 1024
+INDEXABLE_SUFFIXES = OFFICE_SUFFIXES | {".pdf", ".txt", ".md", ".csv", ".ipynb"}
 
 
 class DocumentIndexer:
@@ -57,6 +60,10 @@ class DocumentIndexer:
         subject = self.database.get_subject(document.subject_id)
         subject_name = subject.name if subject else ""
         suffix = path.suffix.casefold()
+        if suffix in INDEXABLE_SUFFIXES and document.size > MAX_INDEX_BYTES:
+            LOGGER.warning("Skipping oversized document index: %s", path)
+            self.database.mark_document_indexed(document.id, expected_path=document.current_path)
+            return
         pages: list[str] = []
         if suffix == ".pdf":
             reader = PdfReader(path)
@@ -86,6 +93,20 @@ class DocumentIndexer:
                 for cell in cells
                 if isinstance(cell, dict)
             ]
+        elif suffix in OFFICE_SUFFIXES:
+            try:
+                if suffix == ".docx":
+                    pages = extract_docx(path)
+                elif suffix == ".pptx":
+                    pages = extract_pptx(path)
+                else:
+                    pages = extract_xlsx(path)
+            except Exception:
+                LOGGER.exception("Failed to extract Office document %s", path)
+                self.database.mark_document_indexed(
+                    document.id, expected_path=document.current_path
+                )
+                return
         if not self._stop.is_set():
             self.database.replace_document_pages(
                 document.id,

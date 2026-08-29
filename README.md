@@ -16,7 +16,8 @@ documento devem ficar.
   nunca são substituídos.
 - Devolver um ficheiro que não seja da universidade a `Downloads`.
 - Desfazer a última organização.
-- Pesquisa local dentro de PDF, TXT, Markdown, CSV e notebooks Jupyter.
+- Pesquisa local dentro de PDF, DOCX, PPTX, XLSX, TXT, Markdown, CSV e notebooks
+  Jupyter.
 - Tarefas, prazos e notificações para trabalhos vencidos ou a vencer hoje.
 - Arranque opcional com o Windows, sem permissões de administrador.
 - Tema escuro em toda a aplicação e no popup de organização.
@@ -102,8 +103,10 @@ real.
   confirmação.
 - PDFs digitalizados apenas como imagem precisam de OCR e ainda não aparecem na
   pesquisa textual.
-- DOCX, PPTX e XLSX podem ser organizados, mas o conteúdo interno ainda não é
-  indexado.
+- Os formatos Office antigos (`.doc`, `.ppt`, `.xls`) e ficheiros OneNote podem
+  ser organizados, mas o conteúdo interno não é indexado.
+- Documentos com mais de 50 MB são organizados sem indexação para limitar o uso
+  de memória em segundo plano.
 - A classificação é baseada no nome do ficheiro; aprendizagem com correções é
   uma melhoria futura.
 
@@ -112,6 +115,6 @@ real.
 - `watcher.py` e `stabilizer.py`: eventos do Windows e conclusão do download.
 - `filer.py`: única camada autorizada a mover ficheiros.
 - `db.py`: SQLite, histórico, tarefas e FTS5.
-- `indexer.py`: extração de texto em background.
+- `extractors.py` e `indexer.py`: extração de texto e indexação em background.
 - `controller.py`: coordenação entre threads e Qt.
 - `ui/`: onboarding, popup, tabuleiro e páginas da aplicação.
