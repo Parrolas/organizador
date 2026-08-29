@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from organizador.db import Database
-from organizador.models import Subject
+from organizador.models import FilingHint, Subject
 
 
 def _file_record(database: Database, subject: Subject, tmp_path: Path) -> int:
@@ -88,6 +88,8 @@ def test_mark_filing_undone_restores_inbox_state(
     assert event is not None
     restored = tmp_path / "inbox" / "restored.txt"
 
+    assert database.filing_hints() == [FilingHint("aula.txt", subject.id, "Slides")]
+
     database.mark_filing_undone(event, restored)
 
     assert database.get_file(file_id) is None
@@ -95,6 +97,23 @@ def test_mark_filing_undone_restores_inbox_state(
     assert item is not None
     assert item.status == "pending"
     assert item.path == restored
+    assert database.filing_hints() == []
+
+
+def test_filing_hints_exclude_missing_files_and_archived_subjects(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    file_id = _file_record(database, subject, tmp_path)
+    document = database.get_file(file_id)
+    assert document is not None
+    assert database.filing_hints() == [FilingHint("aula.txt", subject.id, "Slides")]
+
+    document.current_path.unlink()
+    assert database.filing_hints() == []
+
+    document.current_path.write_text("restored", encoding="utf-8")
+    database.archive_subject(subject.id)
+    assert database.filing_hints() == []
 
 
 def test_stale_index_job_cannot_write_to_a_reused_file_id(

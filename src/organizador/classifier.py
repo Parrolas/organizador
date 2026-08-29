@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Sequence
 from datetime import date
+from typing import TypeVar
 
 from rapidfuzz import fuzz
 
-from organizador.models import FilingGuess, Subject
+from organizador.models import FILE_KINDS, FilingGuess, FilingHint, Subject
+
+LEARNED_CONFIDENCE = 70
+MIN_LEARNED_OBSERVATIONS = 2
+Choice = TypeVar("Choice", int, str)
 
 KIND_TERMS: dict[str, tuple[str, ...]] = {
     "Slides": ("slide", "slides", "aula", "lecture", "capitulo", "chapter", "teoria"),
@@ -45,7 +51,11 @@ def normalise(value: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", ascii_like.casefold()))
 
 
-def guess_filing(filename: str, subjects: list[Subject]) -> FilingGuess:
+def guess_filing(
+    filename: str,
+    subjects: Sequence[Subject],
+    hints: Sequence[FilingHint] = (),
+) -> FilingGuess:
     """Suggest a subject and document kind from a filename."""
 
     normalised_name = normalise(filename.rsplit(".", 1)[0])
@@ -79,7 +89,43 @@ def guess_filing(filename: str, subjects: list[Subject]) -> FilingGuess:
         best_score = 30
     if best_score < 28:
         best_subject_id = None
-    return FilingGuess(best_subject_id, kind, min(100, best_score))
+    confidence = min(100, best_score)
+
+    signature = _filing_signature(filename)
+    if signature:
+        matching_hints = [
+            hint for hint in hints if _filing_signature(hint.original_name) == signature
+        ]
+        active_subject_ids = {subject.id for subject in subjects}
+        learned_subject_id = _repeated_unanimous(
+            [hint.subject_id for hint in matching_hints if hint.subject_id in active_subject_ids]
+        )
+        learned_kind = _repeated_unanimous(
+            [hint.kind for hint in matching_hints if hint.kind in FILE_KINDS]
+        )
+        if learned_subject_id is not None:
+            if learned_subject_id == best_subject_id:
+                confidence = max(confidence, LEARNED_CONFIDENCE)
+            else:
+                best_subject_id = learned_subject_id
+                confidence = LEARNED_CONFIDENCE
+        if learned_kind is not None:
+            kind = learned_kind
+
+    return FilingGuess(best_subject_id, kind, confidence)
+
+
+def _filing_signature(filename: str) -> tuple[str, ...]:
+    tokens = tuple(
+        token for token in normalise(filename.rsplit(".", 1)[0]).split() if not token.isdigit()
+    )
+    return tokens if len(tokens) >= 2 else ()
+
+
+def _repeated_unanimous(values: list[Choice]) -> Choice | None:
+    if len(values) < MIN_LEARNED_OBSERVATIONS or len(set(values)) != 1:
+        return None
+    return values[0]
 
 
 def _guess_kind(tokens: set[str], normalised_name: str) -> str:

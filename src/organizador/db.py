@@ -10,7 +10,9 @@ from datetime import date, datetime
 from pathlib import Path
 
 from organizador.models import (
+    FILE_KINDS,
     FiledDocument,
+    FilingHint,
     HistoryEvent,
     InboxItem,
     SearchResult,
@@ -464,6 +466,42 @@ class Database:
                 "SELECT * FROM files ORDER BY filed_at DESC LIMIT ?", (limit,)
             ).fetchall()
         return [self._file(row) for row in rows]
+
+    def filing_hints(self) -> list[FilingHint]:
+        """Return live, confirmed filing choices for conservative local learning."""
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT f.inbox_id, f.original_name, f.subject_id, f.kind, f.current_path
+                FROM files AS f
+                JOIN inbox AS i ON i.id = f.inbox_id
+                JOIN subjects AS s ON s.id = f.subject_id
+                WHERE i.status = 'filed'
+                  AND s.active = 1
+                  AND EXISTS (
+                      SELECT 1 FROM events AS e
+                      WHERE e.action = 'file'
+                        AND e.file_id = f.id
+                        AND e.inbox_id = f.inbox_id
+                        AND e.undone_at IS NULL
+                  )
+                ORDER BY f.filed_at ASC, f.id ASC
+                """
+            ).fetchall()
+
+        hints: list[FilingHint] = []
+        seen_inbox_ids: set[int] = set()
+        for row in rows:
+            inbox_id = int(row["inbox_id"])
+            kind = str(row["kind"])
+            if inbox_id in seen_inbox_ids or kind not in FILE_KINDS:
+                continue
+            if not Path(str(row["current_path"])).is_file():
+                continue
+            seen_inbox_ids.add(inbox_id)
+            hints.append(FilingHint(str(row["original_name"]), int(row["subject_id"]), kind))
+        return hints
 
     def list_unindexed_documents(self, limit: int = 50) -> list[FiledDocument]:
         """List supported files waiting for text extraction."""

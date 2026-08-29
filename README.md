@@ -11,7 +11,8 @@ documento devem ficar.
 - Caixa de Entrada em `Universidade\_Caixa de Entrada`.
 - Escolha rápida de disciplina e tipo: Slides, Exercícios, Testes, Trabalhos ou
   Outros.
-- Sugestão de destino a partir do código, nome e palavras-chave da disciplina.
+- Sugestão de destino a partir do nome do ficheiro e de escolhas anteriores
+  confirmadas pelo utilizador.
 - Renomeação segura: a extensão original é preservada e ficheiros existentes
   nunca são substituídos.
 - Devolver um ficheiro que não seja da universidade a `Downloads`.
@@ -76,6 +77,8 @@ aviso na primeira execução.
 4. Escolhe a disciplina e `Slides` no popup.
 5. Confirma o destino em `Universidade\<Disciplina>\Slides`.
 6. Usa `Desfazer última organização` no menu do tabuleiro.
+7. Organiza dois ficheiros com o mesmo padrão de nome e confirma que o terceiro
+   recebe a mesma sugestão, mas continua a exigir confirmação.
 
 ## Qualidade
 
@@ -107,14 +110,15 @@ real.
   ser organizados, mas o conteúdo interno não é indexado.
 - Documentos com mais de 50 MB são organizados sem indexação para limitar o uso
   de memória em segundo plano.
-- A classificação é baseada no nome do ficheiro; aprendizagem com correções é
-  uma melhoria futura.
+- A aprendizagem só reconhece padrões de nome repetidos e concordantes; nomes
+  genéricos ou escolhas em conflito mantêm a sugestão normal.
 
 ## Estrutura técnica
 
 - `watcher.py` e `stabilizer.py`: eventos do Windows e conclusão do download.
 - `filer.py`: única camada autorizada a mover ficheiros.
-- `db.py`: SQLite, histórico, tarefas e FTS5.
+- `db.py`: SQLite, histórico, escolhas confirmadas, tarefas e FTS5.
+- `classifier.py`: sugestões transparentes por nome e padrões já confirmados.
 - `extractors.py` e `indexer.py`: extração de texto e indexação em background.
 - `controller.py`: coordenação entre threads e Qt.
 - `ui/`: onboarding, popup, tabuleiro e páginas da aplicação.

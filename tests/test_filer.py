@@ -10,7 +10,7 @@ import pytest
 from organizador.config import AppConfig
 from organizador.db import Database
 from organizador.filer import FilingError, FilingService
-from organizador.models import Subject
+from organizador.models import FilingHint, Subject
 
 
 def _download(config: AppConfig, name: str = "MAT101_ficha.pdf", size: int = 200) -> Path:
@@ -38,6 +38,7 @@ def test_ingest_and_file_document_are_collision_safe(
     assert document.current_path.name == "Ficha (2).pdf"
     assert document.current_path.read_bytes() == b"x" * 200
     assert database.count_inbox_items() == 0
+    assert database.filing_hints() == [FilingHint("MAT101_ficha.pdf", subject.id, "Exercícios")]
 
 
 def test_requested_extension_cannot_change_the_original(

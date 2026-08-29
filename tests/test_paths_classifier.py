@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from organizador.classifier import extract_due_date, guess_filing, normalise
-from organizador.models import Subject
+from organizador.models import FilingHint, Subject
 from organizador.paths import sanitise_component, sanitise_filename, unique_path
 
 
@@ -47,6 +47,52 @@ def test_classifier_does_not_force_an_unrelated_subject() -> None:
 
     assert guess.subject_id == 1  # A single configured subject remains a low-confidence shortcut.
     assert guess.confidence == 30
+
+
+def test_classifier_learns_only_after_two_matching_confirmations() -> None:
+    subjects = [
+        Subject(1, "Física", "FIS", "#000000", (), "FIS"),
+        Subject(2, "História", "HIS", "#000000", (), "HIS"),
+    ]
+    hints = [
+        FilingHint("folha_semanal_01.pdf", 2, "Testes"),
+        FilingHint("Folha Semanal 02.docx", 2, "Testes"),
+    ]
+    baseline = guess_filing("folha-semanal-03.pdf", subjects)
+
+    assert guess_filing("folha-semanal-03.pdf", subjects, hints[:1]) == baseline
+
+    learned = guess_filing("folha-semanal-03.pdf", subjects, hints)
+    assert learned.subject_id == 2
+    assert learned.kind == "Testes"
+    assert learned.confidence == 70
+
+
+def test_classifier_abstains_on_conflicting_learned_values() -> None:
+    subjects = [
+        Subject(1, "Física", "FIS", "#000000", (), "FIS"),
+        Subject(2, "História", "HIS", "#000000", (), "HIS"),
+    ]
+    hints = [
+        FilingHint("ficha_semanal_01.pdf", 1, "Slides"),
+        FilingHint("ficha semanal 02.pdf", 1, "Trabalhos"),
+    ]
+
+    guess = guess_filing("ficha-semanal-03.pdf", subjects, hints)
+
+    assert guess.subject_id == 1
+    assert guess.kind == "Exercícios"
+    assert guess.confidence == 70
+
+
+def test_classifier_ignores_generic_or_invalid_learning() -> None:
+    subjects = [Subject(1, "Física", "FIS", "#000000", (), "FIS")]
+    invalid = [
+        FilingHint("aula_01.pdf", 99, "Desconhecido"),
+        FilingHint("aula_02.pdf", 99, "Desconhecido"),
+    ]
+
+    assert guess_filing("aula_03.pdf", subjects, invalid) == guess_filing("aula_03.pdf", subjects)
 
 
 def test_due_date_supports_iso_and_portuguese_numeric_forms() -> None:

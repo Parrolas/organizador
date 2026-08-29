@@ -21,6 +21,7 @@ from organizador.config import AppConfig, parse_extensions
 from organizador.db import Database
 from organizador.filer import FilingError, FilingService
 from organizador.indexer import DocumentIndexer
+from organizador.models import FilingGuess, Subject
 from organizador.startup import set_launch_at_login
 from organizador.ui.dialogs import OnboardingDialog, SubjectDialog
 from organizador.ui.main_window import MainWindow
@@ -188,7 +189,7 @@ class AppController(QObject):
         if item is None:
             return
         subjects = self.database.list_subjects()
-        guess = guess_filing(item.original_name, subjects)
+        guess = self._filing_guess(item.original_name, subjects)
         self.database.update_inbox_suggestion(item.id, guess.subject_id, guess.kind)
         self.prompt_queue.append(item.id)
         self.tray.notify(
@@ -222,7 +223,7 @@ class AppController(QObject):
             if not subjects:
                 self.show_main("disciplinas")
                 return
-            guess = guess_filing(item.original_name, subjects)
+            guess = self._filing_guess(item.original_name, subjects)
             self.database.update_inbox_suggestion(item.id, guess.subject_id, guess.kind)
             refreshed = self.database.get_inbox_item(item.id)
             self.prompt.show_item(refreshed or item, subjects, guess)
@@ -301,7 +302,7 @@ class AppController(QObject):
             self.tray.notify("Nada para desfazer", "Ainda não existe uma organização reversível.")
             return
         subjects = self.database.list_subjects()
-        guess = guess_filing(item.original_name, subjects)
+        guess = self._filing_guess(item.original_name, subjects)
         self.database.update_inbox_suggestion(item.id, guess.subject_id, guess.kind)
         self.prompt_queue.appendleft(item.id)
         self.tray.notify(
@@ -310,6 +311,9 @@ class AppController(QObject):
         )
         self._refresh()
         self._show_next_prompt()
+
+    def _filing_guess(self, filename: str, subjects: list[Subject]) -> FilingGuess:
+        return guess_filing(filename, subjects, self.database.filing_hints())
 
     def _add_subject(self) -> None:
         dialog = SubjectDialog(parent=self.main_window)

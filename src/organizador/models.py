@@ -101,6 +101,15 @@ class SearchResult:
 
 
 @dataclass(frozen=True, slots=True)
+class FilingHint:
+    """A confirmed filing choice available to the local classifier."""
+
+    original_name: str
+    subject_id: int
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
 class FilingGuess:
     """The classifier's best subject and file-kind proposal."""
 

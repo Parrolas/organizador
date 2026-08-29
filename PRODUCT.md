@@ -31,7 +31,8 @@ reversible.
 
 The app joins file-system automation with a fast human confirmation step. It
 does not silently guess where important coursework belongs: it proposes a
-destination, learns from the user's choices, and preserves an undo trail.
+destination, learns only after repeated confirmed choices, and preserves an
+undo trail.
 
 ## Operating Context
 
@@ -55,6 +56,8 @@ destination, learns from the user's choices, and preserves an undo trail.
 - Scanned image-only PDFs require future OCR support and are not searchable in
   the first version.
 - Existing files in Downloads are not moved automatically on first launch.
+- Learned suggestions require at least two matching confirmed filings, abstain
+  when choices conflict, and never bypass human confirmation.
 
 ## Evidence on Hand
 
@@ -67,6 +70,7 @@ empty states must not be presented as real university data.
 - Ask once, then make the common action very fast.
 - Keep all document contents on the user's computer.
 - Prefer a visible inbox over an uncertain automatic classification.
+- Treat learned patterns as suggestions, never as permission to file silently.
 - Remain useful even when the main window is closed.
 
 ## Accessibility & Inclusion
