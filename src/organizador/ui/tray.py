@@ -1,0 +1,86 @@
+"""Windows system-tray presence and quick actions."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+from organizador.ui.icons import app_icon
+
+
+class TrayIcon(QObject):
+    """Keep the file watcher available when the main window is hidden."""
+
+    open_requested = Signal()
+    inbox_requested = Signal()
+    pause_requested = Signal(bool)
+    undo_requested = Signal()
+    settings_requested = Signal()
+    quit_requested = Signal()
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.tray = QSystemTrayIcon(app_icon(), self)
+        self.tray.setToolTip("Organizador · a preparar")
+        menu = QMenu()
+        self.open_action = menu.addAction("Abrir Organizador")
+        self.inbox_action = menu.addAction("Caixa de Entrada")
+        menu.addSeparator()
+        self.pause_action = menu.addAction("Pausar vigilância")
+        self.pause_action.setCheckable(True)
+        self.undo_action = menu.addAction("Desfazer última organização")
+        self.settings_action = menu.addAction("Definições")
+        menu.addSeparator()
+        self.quit_action = menu.addAction("Sair")
+        self.tray.setContextMenu(menu)
+
+        self.open_action.triggered.connect(self.open_requested)
+        self.inbox_action.triggered.connect(self.inbox_requested)
+        self.pause_action.toggled.connect(self.pause_requested)
+        self.undo_action.triggered.connect(self.undo_requested)
+        self.settings_action.triggered.connect(self.settings_requested)
+        self.quit_action.triggered.connect(self.quit_requested)
+        self.tray.activated.connect(self._activated)
+
+    @property
+    def available(self) -> bool:
+        """Return whether the desktop provides a system tray."""
+
+        return QSystemTrayIcon.isSystemTrayAvailable()
+
+    def show(self) -> None:
+        """Publish the tray icon."""
+
+        self.tray.show()
+
+    def hide(self) -> None:
+        """Remove the tray icon."""
+
+        self.tray.hide()
+
+    def update_inbox_count(self, count: int) -> None:
+        """Reflect pending files in both menu copy and tooltip."""
+
+        self.inbox_action.setText(f"Caixa de Entrada ({count})" if count else "Caixa de Entrada")
+        state = f"{count} por organizar" if count else "Caixa de Entrada vazia"
+        self.tray.setToolTip(f"Organizador · {state}")
+
+    def set_paused(self, paused: bool) -> None:
+        """Synchronise the checkable pause action without emitting a loop."""
+
+        self.pause_action.blockSignals(True)
+        self.pause_action.setChecked(paused)
+        self.pause_action.setText("Retomar vigilância" if paused else "Pausar vigilância")
+        self.pause_action.blockSignals(False)
+
+    def notify(self, title: str, message: str) -> None:
+        """Display a native tray notification."""
+
+        self.tray.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 4500)
+
+    def _activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in {
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        }:
+            self.open_requested.emit()

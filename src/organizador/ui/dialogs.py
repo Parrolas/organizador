@@ -1,0 +1,293 @@
+"""Focused setup and subject-editing dialogs."""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+from contextlib import suppress
+from pathlib import Path
+
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QColorDialog,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from organizador.config import AppConfig
+from organizador.db import Database
+from organizador.filer import FilingService
+from organizador.models import Subject
+from organizador.ui.theme import TEAL
+from organizador.ui.widgets import button, label
+
+
+class SubjectDialog(QDialog):
+    """Create or edit a subject's matching metadata."""
+
+    def __init__(self, subject: Subject | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.subject = subject
+        self.color = subject.color if subject else TEAL
+        self.setWindowTitle("Editar disciplina" if subject else "Nova disciplina")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 26, 28, 24)
+        root.setSpacing(18)
+        root.addWidget(
+            label("Editar disciplina" if subject else "Adicionar disciplina", "PageTitle")
+        )
+        root.addWidget(
+            label(
+                "As palavras-chave ajudam a reconhecer ficheiros pelo nome.",
+                "PageSubtitle",
+            )
+        )
+
+        form = QFormLayout()
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(14)
+        self.name_edit = QLineEdit(subject.name if subject else "")
+        self.name_edit.setPlaceholderText("Ex.: Cálculo I")
+        self.code_edit = QLineEdit(subject.code if subject else "")
+        self.code_edit.setPlaceholderText("Ex.: MAT101")
+        self.keywords_edit = QLineEdit(", ".join(subject.keywords) if subject else "")
+        self.keywords_edit.setPlaceholderText("Ex.: cálculo, derivadas, integrais")
+        self.color_button = QPushButton()
+        self.color_button.setMinimumWidth(120)
+        self.color_button.clicked.connect(self._choose_color)
+        self._update_color_button()
+        form.addRow("Nome", self.name_edit)
+        form.addRow("Código", self.code_edit)
+        form.addRow("Palavras-chave", self.keywords_edit)
+        form.addRow("Cor", self.color_button)
+        root.addLayout(form)
+
+        self.error_label = label("", "ErrorText")
+        self.error_label.setWordWrap(True)
+        root.addWidget(self.error_label)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel = button("Cancelar")
+        cancel.clicked.connect(self.reject)
+        save = button("Guardar disciplina", variant="primary")
+        save.clicked.connect(self._validate)
+        actions.addWidget(cancel)
+        actions.addWidget(save)
+        root.addLayout(actions)
+        self.name_edit.setFocus()
+
+    @property
+    def values(self) -> tuple[str, str, str, tuple[str, ...]]:
+        """Return validated name, code, colour and keywords."""
+
+        keywords = tuple(
+            item.strip() for item in re.split(r"[,;]", self.keywords_edit.text()) if item.strip()
+        )
+        return self.name_edit.text().strip(), self.code_edit.text().strip(), self.color, keywords
+
+    def _choose_color(self) -> None:
+        selected = QColorDialog.getColor(QColor(self.color), self, "Cor da disciplina")
+        if selected.isValid():
+            self.color = selected.name()
+            self._update_color_button()
+
+    def _update_color_button(self) -> None:
+        color = QColor(self.color)
+        channels = (color.redF(), color.greenF(), color.blueF())
+        linear = tuple(
+            value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+            for value in channels
+        )
+        luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+        foreground = "#08111D" if luminance > 0.18 else "#FFFFFF"
+        self.color_button.setText(self.color.upper())
+        self.color_button.setStyleSheet(
+            f"QPushButton {{ background: {self.color}; color: {foreground}; "
+            f"border-color: {self.color}; }}"
+        )
+
+    def _validate(self) -> None:
+        if not self.name_edit.text().strip():
+            self.error_label.setText("Escreve o nome da disciplina para continuar.")
+            self.name_edit.setFocus()
+            return
+        self.accept()
+
+
+class OnboardingDialog(QDialog):
+    """First-run setup for the university root and initial subject."""
+
+    def __init__(
+        self,
+        config: AppConfig,
+        database: Database,
+        filer: FilingService,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.config = config
+        self.database = database
+        self.filer = filer
+        self.setWindowTitle("Preparar o Organizador")
+        self.setModal(True)
+        self.setMinimumSize(820, 540)
+
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        statement = QFrame()
+        statement.setObjectName("Sidebar")
+        statement.setFixedWidth(292)
+        statement_layout = QVBoxLayout(statement)
+        statement_layout.setContentsMargins(32, 38, 32, 34)
+        statement_layout.setSpacing(14)
+        brand = label("Organizador", "Brand")
+        statement_layout.addWidget(brand)
+        promise = QLabel("Downloads arrumados\nantes de se perderem.")
+        promise.setStyleSheet("color: white; font-size: 27px; font-weight: 700;")
+        promise.setWordWrap(True)
+        statement_layout.addWidget(promise)
+        explanation = QLabel(
+            "Os ficheiros elegíveis passam primeiro por uma Caixa de Entrada segura. "
+            "Tu confirmas a disciplina e nada é substituído."
+        )
+        explanation.setStyleSheet("color: #C6D4DF; font-size: 14px; line-height: 1.4;")
+        explanation.setWordWrap(True)
+        statement_layout.addWidget(explanation)
+        statement_layout.addStretch(1)
+        privacy = QLabel("Tudo fica neste computador. Nenhum documento é enviado para a internet.")
+        privacy.setStyleSheet("color: #9EB2C2; font-size: 12px;")
+        privacy.setWordWrap(True)
+        statement_layout.addWidget(privacy)
+        outer.addWidget(statement)
+
+        content = QWidget()
+        content.setObjectName("Canvas")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(38, 34, 38, 30)
+        content_layout.setSpacing(18)
+        content_layout.addWidget(label("Escolhe o teu ponto de partida", "PageTitle"))
+        subtitle = label(
+            "Podes alterar estas opções depois. Começa por criar uma disciplina.",
+            "PageSubtitle",
+        )
+        subtitle.setWordWrap(True)
+        content_layout.addWidget(subtitle)
+
+        form = QFormLayout()
+        form.setVerticalSpacing(14)
+        form.setHorizontalSpacing(18)
+
+        folder_row = QHBoxLayout()
+        self.root_edit = QLineEdit(str(config.university_root))
+        choose = button("Escolher…")
+        choose.clicked.connect(self._choose_folder)
+        folder_row.addWidget(self.root_edit, 1)
+        folder_row.addWidget(choose)
+        form.addRow("Pasta Universidade", folder_row)
+
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Ex.: Cálculo I")
+        self.code_edit = QLineEdit()
+        self.code_edit.setPlaceholderText("Ex.: MAT101 (opcional)")
+        self.keywords_edit = QLineEdit()
+        self.keywords_edit.setPlaceholderText("Ex.: cálculo, derivadas, integrais")
+        form.addRow("Primeira disciplina", self.name_edit)
+        form.addRow("Código", self.code_edit)
+        form.addRow("Palavras-chave", self.keywords_edit)
+        content_layout.addLayout(form)
+
+        self.watch_check = QCheckBox("Começar a vigiar Downloads depois da configuração")
+        self.watch_check.setChecked(config.watch_enabled)
+        content_layout.addWidget(self.watch_check)
+        self.error_label = label("", "ErrorText")
+        self.error_label.setWordWrap(True)
+        content_layout.addWidget(self.error_label)
+        content_layout.addStretch(1)
+
+        action_row = QHBoxLayout()
+        action_row.addStretch(1)
+        finish = button("Criar a minha organização", variant="primary")
+        finish.setMinimumWidth(210)
+        finish.clicked.connect(self._finish)
+        action_row.addWidget(finish)
+        content_layout.addLayout(action_row)
+        outer.addWidget(content, 1)
+        self.name_edit.setFocus()
+
+    def reject(self) -> None:
+        """Confirm leaving first-run setup incomplete."""
+
+        answer = QMessageBox.question(
+            self,
+            "Sair da configuração?",
+            "Sem uma disciplina, a app não começa a mover downloads. "
+            "Podes voltar a configurar depois.",
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            super().reject()
+
+    def _choose_folder(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self, "Escolher pasta Universidade", self.root_edit.text()
+        )
+        if selected:
+            self.root_edit.setText(selected)
+
+    def _finish(self) -> None:
+        name = self.name_edit.text().strip()
+        root = Path(self.root_edit.text().strip()).expanduser()
+        if not name:
+            self.error_label.setText("Escreve o nome da primeira disciplina.")
+            self.name_edit.setFocus()
+            return
+        if not str(root).strip():
+            self.error_label.setText("Escolhe uma pasta para a Universidade.")
+            self.root_edit.setFocus()
+            return
+        old_root = self.config.university_root
+        old_watch_enabled = self.config.watch_enabled
+        old_initialized = self.config.initialized
+        created_subject: Subject | None = None
+        self.config.university_root = root
+        self.config.watch_enabled = self.watch_check.isChecked()
+        self.config.initialized = True
+        try:
+            self.config.ensure_directories()
+            code = self.code_edit.text().strip()
+            keywords = tuple(
+                item.strip()
+                for item in re.split(r"[,;]", self.keywords_edit.text())
+                if item.strip()
+            )
+            folder = self.filer.subject_folder_name(name, code)
+            created_subject = self.database.add_subject(name, code, TEAL, keywords, folder)
+            self.filer.ensure_subject_structure(created_subject)
+            self.config.save()
+        except (ValueError, OSError, sqlite3.IntegrityError) as exc:
+            if created_subject is not None:
+                with suppress(sqlite3.Error):
+                    self.database.delete_subject(created_subject.id)
+            self.config.university_root = old_root
+            self.config.watch_enabled = old_watch_enabled
+            self.config.initialized = old_initialized
+            self.error_label.setText(f"Não foi possível concluir: {exc}")
+            return
+        self.accept()
