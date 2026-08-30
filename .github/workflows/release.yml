@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    name: Build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13.5"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints-release.txt
+
+      - name: Install pinned release environment
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed" }
+          .\.venv\Scripts\python.exe -m pip install --upgrade "pip==26.2.1"
+          if ($LASTEXITCODE -ne 0) { throw "Pinned pip installation failed" }
+          $ConstraintPath = (Resolve-Path -LiteralPath "constraints-release.txt").Path
+          $env:PIP_CONSTRAINT = ([System.Uri]$ConstraintPath).AbsoluteUri
+          .\.venv\Scripts\python.exe -m pip install -c constraints-release.txt -e ".[dev,build]"
+          if ($LASTEXITCODE -ne 0) { throw "Pinned release environment installation failed" }
+          .\.venv\Scripts\python.exe -m pip check
+          if ($LASTEXITCODE -ne 0) { throw "Release environment dependency check failed" }
+
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $Version = (& .\.venv\Scripts\python.exe -c "from organizador import __version__; print(__version__)").Trim()
+          if ("v$Version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match package version v$Version"
+          }
+
+      - name: Build, test and smoke-test package
+        shell: pwsh
+        run: .\scripts\build.ps1
+
+      - name: Publish immutable release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $Version = (& .\.venv\Scripts\python.exe -c "from organizador import __version__; print(__version__)").Trim()
+          $Archive = "dist\releases\Organizador-$Version-windows-x64.zip"
+          $Checksum = "$Archive.sha256"
+          gh release view "v$Version" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Release v$Version already exists; published assets are immutable"
+          }
+          gh release create "v$Version" $Archive $Checksum --verify-tag --generate-notes --title "Organizador v$Version"
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release publication failed" }

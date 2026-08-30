@@ -1,131 +1,158 @@
 # Organizador
 
-Aplicação local para Windows que vigia novos ficheiros de estudo em `Downloads`,
-move-os para uma Caixa de Entrada segura e pergunta em que disciplina e tipo de
-documento devem ficar.
+Aplicação local para Windows 11 que vigia Downloads, pede a classificação dos
+ficheiros académicos e mantém uma biblioteca pesquisável por disciplina,
+tópico e tipo de conteúdo.
 
-## O que já funciona
+## Funcionalidades
 
-- Ícone no tabuleiro do sistema e vigilância em segundo plano.
-- Deteção de downloads terminados no Chrome, Edge e Firefox.
-- Caixa de Entrada em `Universidade\_Caixa de Entrada`.
-- Escolha rápida de disciplina e tipo: Slides, Exercícios, Testes, Trabalhos ou
-  Outros.
-- Sugestão de destino a partir do nome do ficheiro e de escolhas anteriores
-  confirmadas pelo utilizador.
-- Renomeação segura: a extensão original é preservada e ficheiros existentes
-  nunca são substituídos.
-- Devolver um ficheiro que não seja da universidade a `Downloads`.
-- Desfazer a última organização.
-- Importação manual dos ficheiros que já estavam em `Downloads`, sempre com
-  confirmação e em lotes de até 25.
-- Pesquisa local dentro de PDF, DOCX, PPTX, XLSX, TXT, Markdown, CSV e notebooks
-  Jupyter.
-- Tarefas, prazos e notificações para trabalhos vencidos ou a vencer hoje.
-- Arranque opcional com o Windows, sem permissões de administrador.
-- Tema escuro em toda a aplicação e no popup de organização.
-- Popup no canto inferior esquerdo para não ficar atrás das notificações do Windows.
-- Interface em português de Portugal.
+- Vigia apenas os novos ficheiros elegíveis na pasta Downloads configurada.
+- Move cada ficheiro para uma caixa de entrada segura antes de pedir uma decisão.
+- Permite escolher disciplina, tópico, semana e tipo de conteúdo.
+- Organiza sem substituir silenciosamente ficheiros existentes.
+- Mantém pesquisa local por nome, caminho, disciplina e tópico.
+- Permite importar ficheiros manualmente em lotes limitados.
+- Mantém histórico e permite desfazer a organização mais recente.
+- Recupera operações interrompidas sem adivinhar quando o estado é ambíguo.
+- Vive na área de notificação e pode iniciar com a sessão do Windows.
 
 ## Proteção dos ficheiros
 
-O Organizador nunca apaga documentos. Um ficheiro só é movido depois de:
+O Organizador não substitui nem elimina documentos silenciosamente. Aguarda que
+um download deixe de ser temporário e permaneça estável, usa nomes alternativos
+como `nome (2).pdf` em caso de colisão e regista cada movimento para permitir
+recuperação depois de uma interrupção. Estados ambíguos ficam visíveis para
+revisão manual em vez de serem corrigidos por tentativa.
 
-1. deixar de ter uma extensão temporária como `.crdownload` ou `.part`;
-2. manter o mesmo tamanho em várias leituras;
-3. poder ser aberto exclusivamente no Windows, sinal de que o browser terminou;
-4. encontrar um destino que não exista; em caso de colisão cria `nome (2).pdf`;
-5. conseguir registar o movimento na base de dados. Se o registo falhar, o
-   movimento é revertido.
+Ficheiros que já estavam em Downloads antes do arranque não são importados
+automaticamente. A importação manual exige confirmação e processa no máximo 25
+ficheiros de cada vez.
 
-Os documentos e o índice de pesquisa ficam apenas neste computador.
-Os ficheiros antigos em `Downloads` só entram na Caixa de Entrada através da
-ação explícita na respetiva página. A confirmação mostra quantos foram
-encontrados e nunca autoriza mais de 25 por lote.
+## Instalação no Windows
 
-## Instalação para desenvolvimento
+1. Abre a versão pretendida na página
+   [Releases](https://github.com/Parrolas/organizador/releases).
+2. Transfere `Organizador-<versão>-windows-x64.zip` e o ficheiro
+   `.zip.sha256` com o mesmo nome.
+3. Verifica o SHA-256 no PowerShell:
 
-Requisitos: Windows 10/11 e Python 3.11 ou superior.
+   ```powershell
+   Get-FileHash .\Organizador-0.1.0-windows-x64.zip -Algorithm SHA256
+   Get-Content .\Organizador-0.1.0-windows-x64.zip.sha256
+   ```
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\setup.ps1
-.\scripts\run.ps1
-```
+4. Confirma que os dois valores são iguais e extrai todo o ZIP para uma pasta
+   permanente.
+5. Executa `Organizador.exe`. Não movas apenas o executável: a pasta
+   `_internal` que o acompanha também é necessária.
 
-O script cria `.venv`, instala a aplicação e as ferramentas de qualidade. A
-primeira abertura pede a pasta Universidade e a primeira disciplina. A pasta
-proposta é `Documentos\Universidade`.
+O executável ainda não tem assinatura de código. O Microsoft Defender
+SmartScreen pode mostrar "O Windows protegeu o PC" na primeira execução. Se o
+ZIP veio da página oficial e o SHA-256 coincide, escolhe **Mais informações** e
+depois **Executar mesmo assim**. Não ignores o aviso se a origem ou o hash não
+forem os esperados.
 
-Para arrancar diretamente no tabuleiro do sistema:
+Na primeira execução, escolhe a pasta Universidade. Por predefinição, a
+aplicação usa `Documentos\Universidade`, cria `_Caixa de Entrada` dentro dessa
+pasta e vigia a pasta Downloads conhecida pelo Windows. Tudo pode ser alterado
+em **Definições**.
 
-```powershell
-.\scripts\run.ps1 -Background
-```
+## Área de notificação
 
-## Criar o executável
+Fechar a janela principal não termina a aplicação: esconde-a na área de
+notificação para continuar a vigiar Downloads. Usa **Sair** no menu do ícone do
+Organizador para a terminar completamente.
 
-```powershell
-.\scripts\build.ps1
-```
+## Dados e privacidade
 
-O resultado fica em `dist\Organizador\Organizador.exe`. O build executa `ruff`,
-`mypy`, os testes e um arranque real do executável antes de terminar. Como esta
-versão não tem assinatura de código, o Windows SmartScreen pode mostrar um
-aviso na primeira execução.
+O Organizador trabalha localmente. Não envia ficheiros, nomes, conteúdo ou
+estatísticas para serviços externos.
 
-## Testes manuais rápidos
+Os dados internos ficam em `%LOCALAPPDATA%\Organizador`:
 
-1. Abre a app e cria uma disciplina com código e palavras-chave.
-2. Descarrega um PDF pequeno cujo nome contenha esse código.
-3. Confirma que desaparece de `Downloads` apenas depois de terminar.
-4. Escolhe a disciplina e `Slides` no popup.
-5. Confirma o destino em `Universidade\<Disciplina>\Slides`.
-6. Usa `Desfazer última organização` no menu do tabuleiro.
-7. Organiza dois ficheiros com o mesmo padrão de nome e confirma que o terceiro
-   recebe a mesma sugestão, mas continua a exigir confirmação.
-8. Na Caixa de Entrada, escolhe `Importar de Downloads…`, revê a contagem e
-   cancela uma vez para confirmar que nenhum ficheiro é movido.
+- `settings.json`: definições da aplicação.
+- `organizador.db`: catálogo, histórico e índice de pesquisa SQLite.
+- `organizador.log`: diagnóstico local com rotação.
 
-## Qualidade
+Os documentos continuam na pasta Universidade escolhida pelo utilizador. A
+aplicação nunca usa a base de dados como cópia dos documentos.
 
-```powershell
-.\.venv\Scripts\python.exe -m ruff check src tests scripts
-.\.venv\Scripts\python.exe -m mypy src\organizador
-$env:QT_QPA_PLATFORM = "offscreen"
-.\.venv\Scripts\python.exe -m pytest
-```
+## Atualização e reversão
 
-Os testes usam apenas pastas temporárias. Nunca abrem nem alteram o `Downloads`
-real.
+Antes de atualizar:
 
-## Dados locais
+1. Usa **Sair** no ícone da área de notificação.
+2. Faz uma cópia de segurança de `%LOCALAPPDATA%\Organizador`.
+3. Conserva o ZIP da versão atual até confirmares a nova versão.
+4. Extrai a nova versão para uma pasta nova e executa-a.
 
-- Definições: `%LOCALAPPDATA%\Organizador\settings.json`
-- Base de dados e índice: `%LOCALAPPDATA%\Organizador\organizador.db`
-- Registo técnico: `%LOCALAPPDATA%\Organizador\organizador.log`
-- Documentos: a pasta Universidade escolhida pelo utilizador
+As migrações da base de dados são automáticas. Para reverter, termina a
+aplicação, volta ao ZIP anterior e restaura também a cópia dos dados feita por
+essa versão. Não mistures uma base de dados já migrada com um executável mais
+antigo. Os documentos da pasta Universidade não precisam de ser restaurados.
+
+## Desinstalação
+
+1. Em **Definições**, desativa **Iniciar o Organizador quando entro no Windows**
+   e guarda.
+2. Usa **Sair** no ícone da área de notificação.
+3. Elimina a pasta onde extraíste a aplicação.
+4. Se também quiseres apagar o catálogo, histórico, definições e logs, elimina
+   `%LOCALAPPDATA%\Organizador`.
+
+A desinstalação não deve eliminar a pasta Universidade nem os documentos nela
+guardados.
 
 ## Limitações atuais
 
-- Ficheiros que já estavam em `Downloads` antes de a app arrancar continuam a
-  ser ignorados automaticamente. Podem ser importados pelo utilizador, apenas
-  no nível principal da pasta e em lotes confirmados de até 25.
-- PDFs digitalizados apenas como imagem precisam de OCR e ainda não aparecem na
-  pesquisa textual.
-- Os formatos Office antigos (`.doc`, `.ppt`, `.xls`) e ficheiros OneNote podem
-  ser organizados, mas o conteúdo interno não é indexado.
-- Documentos com mais de 50 MB são organizados sem indexação para limitar o uso
-  de memória em segundo plano.
-- A aprendizagem só reconhece padrões de nome repetidos e concordantes; nomes
-  genéricos ou escolhas em conflito mantêm a sugestão normal.
+- PDFs digitalizados apenas como imagem precisam de OCR e não entram na pesquisa textual.
+- `.doc`, `.ppt`, `.xls` e ficheiros OneNote podem ser organizados, mas o conteúdo não é indexado.
+- Documentos com mais de 50 MB são organizados sem indexação para limitar memória em segundo plano.
+- As sugestões aprendidas dependem de padrões de nome repetidos e continuam a exigir confirmação.
 
-## Estrutura técnica
+## Desenvolvimento
 
-- `watcher.py` e `stabilizer.py`: eventos do Windows e conclusão do download.
-- `filer.py`: única camada autorizada a mover ficheiros.
-- `db.py`: SQLite, histórico, escolhas confirmadas, tarefas e FTS5.
-- `classifier.py`: sugestões transparentes por nome e padrões já confirmados.
-- `extractors.py` e `indexer.py`: extração de texto e indexação em background.
-- `controller.py`: coordenação entre threads e Qt.
-- `ui/`: onboarding, popup, tabuleiro e páginas da aplicação.
+Requisitos: Windows 11 e Python 3.13.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
+.\.venv\Scripts\python.exe -m organizador.main
+```
+
+Validação individual:
+
+```powershell
+.\.venv\Scripts\python.exe -m ruff check src tests scripts
+.\.venv\Scripts\python.exe -m ruff format --check src tests scripts
+.\.venv\Scripts\python.exe -m mypy src
+.\.venv\Scripts\python.exe -m pytest
+```
+
+## Build local
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
+```
+
+O script executa lint, verificação de formato, mypy, testes, PyInstaller e um
+arranque de diagnóstico do pacote. Depois adiciona as licenças e produz:
+
+- `dist\Organizador\Organizador.exe`
+- `dist\releases\Organizador-<versão>-windows-x64.zip`
+- `dist\releases\Organizador-<versão>-windows-x64.zip.sha256`
+
+As dependências exatas da versão são fixadas em `constraints-release.txt`.
+
+## Publicação
+
+Tags no formato `vMAJOR.MINOR.PATCH` ativam o workflow de release. O workflow
+confirma que a tag coincide com `organizador.__version__`, recria o ambiente a
+partir de `constraints-release.txt`, executa toda a validação e publica o ZIP e
+o SHA-256 numa nova GitHub Release. Uma release já publicada não é substituída
+por uma repetição do workflow.
+
+## Licenças
+
+O código do Organizador é distribuído sob a licença MIT em `LICENSE`. O pacote
+Windows inclui componentes de terceiros com licenças próprias, documentados em
+`LICENSES/THIRD-PARTY-NOTICES.md` e nos respetivos textos de licença.
