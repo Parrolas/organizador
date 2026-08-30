@@ -144,27 +144,56 @@ class FilingService:
         filename = self._name_with_original_extension(requested_name, item.original_name)
         folder = self.config.university_root / subject.folder_name / kind
         destination = unique_path(folder, filename)
-        self.database.set_inbox_status(inbox_id, "filing")
+        try:
+            pending = self.database.begin_document_filing(inbox_id, subject_id, kind, destination)
+        except Exception as exc:
+            raise FilingError("Não foi possível preparar o histórico da organização.") from exc
         try:
             move_without_overwrite(item.path, destination)
+        except IncompleteMoveError as exc:
+            raise FilingError(
+                "A organização ficou incompleta. O original e a cópia foram mantidos; "
+                "revê ambos na Caixa de Entrada antes de continuar."
+            ) from exc
         except OSError as exc:
-            self.database.set_inbox_status(inbox_id, "error", str(exc))
+            try:
+                self.database.cancel_pending_inbox_operation(
+                    pending.id, status="error", error=str(exc)
+                )
+            except Exception:
+                LOGGER.exception("Failed to cancel a prepared filing")
             raise FilingError(
                 "O ficheiro ainda está a ser usado por outra aplicação. Fecha-o e tenta novamente."
             ) from exc
 
         try:
-            return self.database.record_filing(inbox_id, subject_id, kind, destination)
+            return self.database.record_filing(
+                inbox_id,
+                subject_id,
+                kind,
+                destination,
+                pending_event_id=pending.id,
+            )
         except Exception as exc:
             rollback = unique_path(item.path.parent, item.path.name)
+            rolled_back = False
             try:
                 move_without_overwrite(destination, rollback)
-                self.database.set_inbox_status(inbox_id, "pending")
             except OSError:
                 LOGGER.exception("Failed to roll back a subject filing")
-            raise FilingError(
+            else:
+                try:
+                    self.database.cancel_pending_inbox_operation(pending.id, current_path=rollback)
+                    rolled_back = True
+                except Exception:
+                    LOGGER.exception("Failed to cancel the rolled-back filing")
+            message = (
                 "O movimento foi revertido porque não foi possível atualizar o histórico."
-            ) from exc
+                if rolled_back
+                else "Não foi possível atualizar o histórico. "
+                "Revê a Caixa de Entrada antes de repetir."
+            )
+            raise FilingError(message) from exc
 
     def return_to_downloads(self, inbox_id: int) -> Path:
         """Return non-university material to Downloads without overwriting."""
@@ -174,18 +203,39 @@ class FilingService:
             raise FilingError("O ficheiro já não está disponível para devolver.")
         destination = unique_path(self.config.downloads_dir, item.original_name)
         try:
+            pending = self.database.begin_return(inbox_id, destination)
+        except Exception as exc:
+            raise FilingError("Não foi possível preparar o histórico da devolução.") from exc
+        try:
             move_without_overwrite(item.path, destination)
-            self.database.record_return(inbox_id, destination)
+        except IncompleteMoveError as exc:
+            raise FilingError(
+                "A devolução ficou incompleta. O original e a cópia foram mantidos; "
+                "revê a Caixa de Entrada e Downloads antes de continuar."
+            ) from exc
         except OSError as exc:
+            try:
+                self.database.cancel_pending_inbox_operation(
+                    pending.id, status="error", error=str(exc)
+                )
+            except Exception:
+                LOGGER.exception("Failed to cancel a prepared return")
             raise FilingError(
                 "Não foi possível devolver o ficheiro. Fecha-o noutras aplicações e tenta de novo."
             ) from exc
+        try:
+            self.database.record_return(inbox_id, destination, pending_event_id=pending.id)
         except Exception as exc:
             rollback = unique_path(item.path.parent, item.path.name)
             try:
                 move_without_overwrite(destination, rollback)
             except OSError:
                 LOGGER.exception("Failed to roll back a return to Downloads")
+            else:
+                try:
+                    self.database.cancel_pending_inbox_operation(pending.id, current_path=rollback)
+                except Exception:
+                    LOGGER.exception("Failed to cancel the rolled-back return")
             raise FilingError("Não foi possível registar a devolução do ficheiro.") from exc
         return destination
 
@@ -201,18 +251,37 @@ class FilingService:
             )
         restored_path = unique_path(self.config.inbox_dir, event.source_path.name)
         try:
+            pending = self.database.begin_filing_undo(event, restored_path)
+        except Exception as exc:
+            raise FilingError("Não foi possível preparar o histórico para desfazer.") from exc
+        try:
             move_without_overwrite(event.destination_path, restored_path)
-            self.database.mark_filing_undone(event, restored_path)
+        except IncompleteMoveError as exc:
+            raise FilingError(
+                "A operação de desfazer ficou incompleta. O original e a cópia foram mantidos; "
+                "revê ambos na Caixa de Entrada antes de continuar."
+            ) from exc
         except OSError as exc:
+            try:
+                self.database.cancel_pending_undo(pending.id)
+            except Exception:
+                LOGGER.exception("Failed to cancel a prepared undo")
             raise FilingError(
                 "Não foi possível desfazer porque o ficheiro está a ser usado."
             ) from exc
+        try:
+            self.database.mark_filing_undone(event, restored_path)
         except Exception as exc:
             rollback = unique_path(event.destination_path.parent, event.destination_path.name)
             try:
                 move_without_overwrite(restored_path, rollback)
             except OSError:
                 LOGGER.exception("Failed to roll back an undo operation")
+            else:
+                try:
+                    self.database.cancel_pending_undo(pending.id)
+                except Exception:
+                    LOGGER.exception("Failed to cancel the rolled-back undo")
             raise FilingError("Não foi possível atualizar o histórico ao desfazer.") from exc
         if event.inbox_id is None:  # pragma: no cover - schema invariant
             return None

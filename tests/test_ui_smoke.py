@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 from PySide6.QtGui import QCursor, QGuiApplication, QPalette
-from PySide6.QtWidgets import QApplication, QButtonGroup, QLabel, QMessageBox
+from PySide6.QtWidgets import QApplication, QButtonGroup, QLabel, QMessageBox, QPushButton
 
+from organizador import __version__
 from organizador.classifier import guess_filing
 from organizador.config import AppConfig
 from organizador.controller import AppController
 from organizador.db import Database
 from organizador.filer import FilingService
 from organizador.models import Subject
+from organizador.paths import IncompleteMoveError
+from organizador.reconcile import scan as scan_reconciliation
 from organizador.ui.dialogs import OnboardingDialog, SubjectDialog
 from organizador.ui.main_window import MainWindow
 from organizador.ui.pages import SettingsPayload
@@ -40,10 +44,67 @@ def test_main_window_builds_and_refreshes_all_pages(
     assert qt_app.palette().color(QPalette.ColorRole.Window).name() == CANVAS.casefold()
     visible_copy = [item.text() for item in window.subjects_page.findChildren(QLabel)]
     assert any(subject.name in text for text in visible_copy)
+    settings_copy = [item.text() for item in window.settings_page.findChildren(QLabel)]
+    assert any(f"Organizador v{__version__}" in text for text in settings_copy)
     import_requests: list[bool] = []
     window.inbox_page.import_existing_requested.connect(lambda: import_requests.append(True))
     window.inbox_page.import_button.click()
     assert import_requests == [True]
+    window.allow_close = True
+    window.close()
+
+
+def test_recovery_row_offers_only_a_safe_folder_action(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    del subject
+    missing_path = app_config.inbox_dir / "em-recuperacao.pdf"
+    item = database.add_inbox_item(
+        missing_path,
+        app_config.downloads_dir / missing_path.name,
+        missing_path.name,
+        200,
+    )
+    assert database.mark_inbox_recovery_required(item.id, "Recuperação necessária")
+    window = MainWindow(database, app_config)
+    opened: list[object] = []
+    window.inbox_page.open_path.connect(opened.append)
+
+    window.inbox_page.refresh()
+    buttons = window.inbox_page.findChildren(QPushButton)
+    button_texts = {control.text() for control in buttons}
+
+    assert window.inbox_page.summary_label.text() == "1 ficheiro precisa de recuperação manual"
+    assert "Abrir Universidade" in button_texts
+    assert "Organizar" not in button_texts
+    assert "Não é da universidade" not in button_texts
+    next(control for control in buttons if control.text() == "Abrir Universidade").click()
+    assert opened == [app_config.university_root]
+    window.allow_close = True
+    window.close()
+
+
+def test_unresolved_history_path_is_visible_in_the_inbox(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    untracked = app_config.university_root / subject.folder_name / "Slides" / "sem-registo.pdf"
+    untracked.write_bytes(b"untracked but untouched")
+    window = MainWindow(database, app_config)
+    window.inbox_page.set_reconciliation_report(scan_reconciliation(app_config, database))
+
+    window.inbox_page.refresh()
+    visible_copy = [item.text() for item in window.inbox_page.findChildren(QLabel)]
+
+    assert "1 caminho do histórico precisa de revisão" in window.inbox_page.summary_label.text()
+    assert any("Encontrado numa disciplina sem registo" in text for text in visible_copy)
+    assert any(str(untracked) == text for text in visible_copy)
+    assert untracked.read_bytes() == b"untracked but untouched"
     window.allow_close = True
     window.close()
 
@@ -162,6 +223,93 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
     assert calls == [True, False]
     assert not app_config.launch_at_login
     assert "sem espaço" in controller.main_window.settings_page.status_label.text()
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
+
+
+def test_startup_reconciles_before_watcher_and_indexer(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database, subject
+    orphan = app_config.inbox_dir / "MAT101_arranque.pdf"
+    orphan.write_bytes(b"startup orphan university document")
+    controller = AppController(app_config)
+    order: list[str] = []
+
+    def observe_watcher_start() -> None:
+        recovered = controller.database.find_active_inbox_by_path(orphan)
+        assert recovered is not None
+        assert recovered.status == "pending"
+        order.append("watcher")
+
+    monkeypatch.setattr(controller, "_restart_watcher", observe_watcher_start)
+    monkeypatch.setattr(controller.indexer, "submit_pending", lambda: order.append("indexer"))
+
+    controller.start(smoke_test=True)
+    qt_app.processEvents()
+
+    recovered = controller.database.find_active_inbox_by_path(orphan)
+    assert recovered is not None
+    assert recovered.suggested_subject_id is not None
+    assert order == ["watcher", "indexer"]
+    controller.reminder_timer.stop()
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
+
+
+def test_incomplete_return_is_ignored_by_the_live_watcher(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database, subject
+    controller = AppController(app_config)
+    source = app_config.downloads_dir / "devolucao-parcial.pdf"
+    source.write_bytes(b"return source" * 20)
+    item = controller.filer.ingest(source)
+    assert item is not None
+
+    class WatcherStub:
+        running = True
+        paused = False
+
+        def __init__(self) -> None:
+            self.ignored: list[tuple[object, float]] = []
+
+        def set_paused(self, paused: bool) -> None:
+            self.paused = paused
+
+        def ignore_self_move(self, path: object, *, seconds: float = 30.0) -> None:
+            self.ignored.append((path, seconds))
+
+    watcher = WatcherStub()
+    controller.watcher = watcher  # type: ignore[assignment]
+
+    def leave_partial(_source: object, target: object, **_kwargs: object) -> object:
+        destination = Path(str(target))
+        destination.write_bytes(b"partial return copy")
+        raise IncompleteMoveError(destination)
+
+    monkeypatch.setattr("organizador.filer.move_without_overwrite", leave_partial)
+
+    controller._return_item(item.id)
+    qt_app.processEvents()
+
+    pending = controller.database.list_pending_returns()
+    assert len(pending) == 1
+    assert watcher.ignored == [(pending[0].destination_path, float("inf"))]
+    assert pending[0].destination_path.read_bytes() == b"partial return copy"
+    assert item.path.exists()
     controller.indexer.shutdown()
     controller.tray.hide()
     controller.main_window.allow_close = True

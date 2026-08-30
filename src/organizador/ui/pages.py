@@ -25,9 +25,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from organizador import __version__
 from organizador.config import AppConfig
 from organizador.db import Database
-from organizador.models import InboxItem, StudyTask, Subject
+from organizador.models import InboxItem, ReconciliationReport, StudyTask, Subject
 from organizador.ui.theme import DANGER_SOFT, MUTED, WARNING_SOFT
 from organizador.ui.widgets import (
     EmptyState,
@@ -213,9 +214,16 @@ class InboxPage(QWidget):
     open_path = Signal(object)
     import_existing_requested = Signal()
 
-    def __init__(self, database: Database, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        database: Database,
+        config: AppConfig,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.database = database
+        self.config = config
+        self.reconciliation_report: ReconciliationReport | None = None
         layout = _page_layout(self)
         self.import_button = button("Importar de Downloads…")
         self.import_button.clicked.connect(self.import_existing_requested.emit)
@@ -247,17 +255,46 @@ class InboxPage(QWidget):
         self.import_status_label.setText(message)
         self.import_status_label.setVisible(bool(message))
 
+    def set_reconciliation_report(self, report: ReconciliationReport) -> None:
+        """Retain unresolved startup findings for safe, path-specific review."""
+
+        self.reconciliation_report = report
+
     def refresh(self) -> None:
         """Rebuild the pending-file list."""
 
         items = self.database.list_inbox_items()
-        self.summary_label.setText(
-            f"{len(items)} ficheiro{'s' if len(items) != 1 else ''} por decidir"
-            if items
-            else "A caixa está vazia"
-        )
+        recovery_count = sum(item.status == "recovery" for item in items)
+        pending_count = len(items) - recovery_count
+        manual_findings = self._manual_findings()
+        summary_parts: list[str] = []
+        if pending_count and recovery_count:
+            summary_parts.append(
+                f"{pending_count} ficheiro{'s' if pending_count != 1 else ''} por decidir · "
+                f"{recovery_count} precisa{'m' if recovery_count != 1 else ''} de recuperação"
+            )
+        elif recovery_count:
+            summary_parts.append(
+                f"{recovery_count} ficheiro{'s' if recovery_count != 1 else ''} "
+                f"precisa{'m' if recovery_count != 1 else ''} de recuperação manual"
+            )
+        elif pending_count:
+            summary_parts.append(
+                f"{pending_count} ficheiro{'s' if pending_count != 1 else ''} por decidir"
+            )
+        if manual_findings:
+            count = len(manual_findings)
+            summary_parts.append(
+                f"{count} caminho{'s' if count != 1 else ''} do histórico "
+                f"precisa{'m' if count != 1 else ''} de revisão"
+            )
+        report = self.reconciliation_report
+        if report is not None and (report.incomplete or report.truncated):
+            summary_parts.append("verificação incompleta")
+        summary = " · ".join(summary_parts) if summary_parts else "A caixa está vazia"
+        self.summary_label.setText(summary)
         clear_layout(self.items_layout)
-        if not items:
+        if not items and not manual_findings:
             empty = EmptyState(
                 "Tudo no lugar",
                 "Quando terminares um download elegível, ele aparece aqui e num pequeno popup.",
@@ -268,6 +305,10 @@ class InboxPage(QWidget):
         subjects = {subject.id: subject for subject in self.database.list_subjects()}
         for item in items:
             self.items_layout.addWidget(self._row(item, subjects))
+        if manual_findings:
+            self.items_layout.addWidget(label("Revisão manual do histórico", "SectionTitle"))
+            for path, detail in manual_findings:
+                self.items_layout.addWidget(self._finding_row(path, detail))
         self.items_layout.addStretch(1)
 
     def _row(self, item: InboxItem, subjects: dict[int, Subject]) -> QFrame:
@@ -279,15 +320,21 @@ class InboxPage(QWidget):
 
         copy = QVBoxLayout()
         copy.setSpacing(3)
-        title = label(item.path.name, "RowTitle")
+        title = label(item.original_name, "RowTitle")
         title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         copy.addWidget(title)
-        subject = subjects.get(item.suggested_subject_id or -1)
-        suggestion = subject.name if subject else "Sem sugestão"
-        metadata = (
-            f"{format_size(item.size)}  ·  {item.detected_at.strftime('%d/%m às %H:%M')}  ·  "
-            f"Sugestão: {suggestion} / {item.suggested_kind}"
-        )
+        if item.status == "recovery":
+            metadata = (
+                f"Recuperação manual necessária  ·  {format_size(item.size)}  ·  "
+                f"{item.detected_at.strftime('%d/%m às %H:%M')}"
+            )
+        else:
+            subject = subjects.get(item.suggested_subject_id or -1)
+            suggestion = subject.name if subject else "Sem sugestão"
+            metadata = (
+                f"{format_size(item.size)}  ·  {item.detected_at.strftime('%d/%m às %H:%M')}  ·  "
+                f"Sugestão: {suggestion} / {item.suggested_kind}"
+            )
         copy.addWidget(label(metadata, "Muted"))
         if item.last_error:
             error = label(item.last_error, "ErrorText")
@@ -295,16 +342,93 @@ class InboxPage(QWidget):
             copy.addWidget(error)
         row_layout.addLayout(copy, 1)
 
-        open_button = button("Abrir", variant="quiet")
-        open_button.clicked.connect(lambda: self.open_path.emit(item.path))
+        open_button = button(
+            "Abrir Universidade" if item.status == "recovery" else "Abrir",
+            variant="quiet",
+        )
+        open_path = self.config.university_root if item.status == "recovery" else item.path
+        open_button.clicked.connect(lambda: self.open_path.emit(open_path))
+        row_layout.addWidget(open_button)
+        if item.status == "recovery":
+            downloads_button = button("Abrir Downloads")
+            downloads_button.clicked.connect(lambda: self.open_path.emit(self.config.downloads_dir))
+            row_layout.addWidget(downloads_button)
+            return row
         return_button = button("Não é da universidade")
         return_button.setToolTip("Devolver este ficheiro a Downloads")
         return_button.clicked.connect(lambda: self.return_requested.emit(item.id))
         organise = button("Organizar", variant="primary")
         organise.clicked.connect(lambda: self.organise_requested.emit(item.id))
-        row_layout.addWidget(open_button)
         row_layout.addWidget(return_button)
         row_layout.addWidget(organise)
+        return row
+
+    def _manual_findings(self) -> tuple[tuple[Path, str], ...]:
+        report = self.reconciliation_report
+        if report is None:
+            return ()
+        findings: dict[Path, str] = {}
+        for path in report.untracked_subject_files:
+            findings[path] = "Encontrado numa disciplina sem registo. Não foi movido nem alterado."
+        for document in report.missing_documents:
+            findings[document.current_path] = (
+                "Documento registado que já não está no destino esperado."
+            )
+        for event in report.broken_undo_events:
+            findings[event.destination_path] = (
+                "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta."
+            )
+        for event in report.pending_filing_events:
+            findings[event.source_path] = (
+                "Origem de uma organização interrompida; não foi alterada no arranque."
+            )
+            findings[event.destination_path] = (
+                "Destino de uma organização interrompida; compara antes de continuar."
+            )
+        for event in report.pending_return_events:
+            findings[event.source_path] = (
+                "Origem de uma devolução interrompida; não foi alterada no arranque."
+            )
+            findings[event.destination_path] = (
+                "Destino em Downloads de uma devolução interrompida; compara os ficheiros."
+            )
+        for event in report.pending_undo_events:
+            findings[event.source_path] = (
+                "Origem de uma operação de desfazer interrompida; não foi alterada no arranque."
+            )
+            findings[event.destination_path] = (
+                "Operação de desfazer interrompida; confirma as pastas antes de continuar."
+            )
+        for interrupted in report.legacy_interrupted_undos:
+            findings[interrupted.restored_file.path] = (
+                "Ficheiro restaurado por uma operação de desfazer interrompida."
+            )
+        for path in report.unsafe_paths:
+            findings[path] = (
+                "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado."
+            )
+        return tuple(findings.items())
+
+    def _finding_row(self, path: Path, detail: str) -> QFrame:
+        row = QFrame()
+        row.setObjectName("ListRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(17, 13, 13, 13)
+        copy = QVBoxLayout()
+        copy.setSpacing(3)
+        copy.addWidget(label(path.name, "RowTitle"))
+        detail_label = label(detail, "ErrorText")
+        detail_label.setWordWrap(True)
+        copy.addWidget(detail_label)
+        path_label = label(str(path), "Muted")
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        copy.addWidget(path_label)
+        row_layout.addLayout(copy, 1)
+        expected_parent = path.parent
+        target = expected_parent if expected_parent.is_dir() else self.config.university_root
+        open_button = button("Abrir pasta", variant="quiet")
+        open_button.clicked.connect(lambda: self.open_path.emit(target))
+        row_layout.addWidget(open_button)
         return row
 
 
@@ -750,6 +874,13 @@ class SettingsPage(QWidget):
         save.clicked.connect(self._save)
         action_row.addWidget(save)
         layout.addLayout(action_row)
+        version_label = label(
+            f"Organizador v{__version__} · código MIT · "
+            "componentes de terceiros com licenças próprias",
+            "Muted",
+        )
+        version_label.setWordWrap(True)
+        layout.addWidget(version_label)
         layout.addStretch(1)
         self.load_config(config)
 

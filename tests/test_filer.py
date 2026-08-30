@@ -11,6 +11,7 @@ from organizador.config import AppConfig
 from organizador.db import Database
 from organizador.filer import FilingError, FilingService
 from organizador.models import FilingHint, Subject
+from organizador.paths import IncompleteMoveError
 
 
 def _download(config: AppConfig, name: str = "MAT101_ficha.pdf", size: int = 200) -> Path:
@@ -137,6 +138,81 @@ def test_undo_restores_latest_document_to_inbox(
     assert restored.path.exists()
     assert restored.path.parent == app_config.inbox_dir
     assert not document.current_path.exists()
+    assert filer.database.list_pending_undos() == []
+
+
+def test_undo_never_skips_a_missing_newest_document(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+) -> None:
+    older_item = filer.ingest(_download(app_config, "anterior.pdf"))
+    assert older_item is not None
+    older = filer.file_document(older_item.id, subject.id, "Slides", "Anterior.pdf")
+    newest_item = filer.ingest(_download(app_config, "recente.pdf"))
+    assert newest_item is not None
+    newest = filer.file_document(newest_item.id, subject.id, "Slides", "Recente.pdf")
+    newest.current_path.unlink()
+
+    with pytest.raises(FilingError, match="último ficheiro organizado"):
+        filer.undo_latest_filing()
+
+    latest = database.latest_undoable_filing()
+    assert latest is not None
+    assert latest.destination_path == newest.current_path
+    assert older.current_path.exists()
+
+
+def test_incomplete_undo_keeps_its_recovery_marker(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = filer.ingest(_download(app_config, "parcial.pdf"))
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Slides", "Parcial.pdf")
+
+    def leave_partial(_source: Path, target: Path, **_kwargs: object) -> Path:
+        target.write_bytes(b"partial copy")
+        raise IncompleteMoveError(target)
+
+    monkeypatch.setattr("organizador.filer.move_without_overwrite", leave_partial)
+
+    with pytest.raises(FilingError, match="ficou incompleta"):
+        filer.undo_latest_filing()
+
+    assert document.current_path.exists()
+    assert len(database.list_pending_undos()) == 1
+    pending = database.list_pending_undos()[0]
+    assert pending.destination_path.read_bytes() == b"partial copy"
+
+
+def test_incomplete_filing_keeps_its_recovery_marker(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = filer.ingest(_download(app_config, "arquivo-parcial.pdf"))
+    assert item is not None
+
+    def leave_partial(_source: Path, target: Path, **_kwargs: object) -> Path:
+        target.write_bytes(b"partial filing copy")
+        raise IncompleteMoveError(target)
+
+    monkeypatch.setattr("organizador.filer.move_without_overwrite", leave_partial)
+
+    with pytest.raises(FilingError, match="ficou incompleta"):
+        filer.file_document(item.id, subject.id, "Slides", "Parcial.pdf")
+
+    assert item.path.exists()
+    assert len(database.list_pending_filings()) == 1
+    pending = database.list_pending_filings()[0]
+    assert pending.destination_path.read_bytes() == b"partial filing copy"
 
 
 def test_database_failure_rolls_subject_move_back(

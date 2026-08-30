@@ -70,6 +70,8 @@ class HistoryEvent:
     destination_path: Path
     file_id: int | None
     inbox_id: int | None
+    subject_id: int | None
+    kind: str
     created_at: datetime
     undone_at: datetime | None
 
@@ -124,10 +126,19 @@ class ExistingDownload:
     def capture(cls, path: Path) -> ExistingDownload | None:
         """Capture a regular non-link file without following filesystem links."""
 
+        try:
+            return cls.capture_strict(path)
+        except OSError:
+            return None
+
+    @classmethod
+    def capture_strict(cls, path: Path) -> ExistingDownload | None:
+        """Capture a file while preserving indeterminate filesystem errors."""
+
         candidate = path.absolute()
         try:
             details = candidate.lstat()
-        except OSError:
+        except FileNotFoundError:
             return None
         if not S_ISREG(details.st_mode):
             return None
@@ -151,6 +162,77 @@ class ExistingDownloadsPlan:
 
     total: int
     selected: tuple[ExistingDownload, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InterruptedUndo:
+    """A legacy undo move completed on disk but not in persistence."""
+
+    event: HistoryEvent
+    restored_file: ExistingDownload
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationReport:
+    """Read-only filesystem and database consistency findings."""
+
+    inbox_orphans: tuple[ExistingDownload, ...]
+    interrupted_filings: tuple[InboxItem, ...]
+    missing_inbox_items: tuple[InboxItem, ...]
+    untracked_subject_files: tuple[Path, ...]
+    missing_documents: tuple[FiledDocument, ...]
+    broken_undo_events: tuple[HistoryEvent, ...]
+    pending_filing_events: tuple[HistoryEvent, ...]
+    pending_return_events: tuple[HistoryEvent, ...]
+    pending_undo_events: tuple[HistoryEvent, ...]
+    legacy_interrupted_undos: tuple[InterruptedUndo, ...]
+    unsafe_paths: tuple[Path, ...]
+    truncated: bool = False
+    incomplete: bool = False
+
+    @property
+    def finding_count(self) -> int:
+        """Return the number of findings before database-only recovery."""
+
+        return (
+            len(self.inbox_orphans)
+            + len(self.interrupted_filings)
+            + len(self.missing_inbox_items)
+            + len(self.untracked_subject_files)
+            + len(self.missing_documents)
+            + len(self.broken_undo_events)
+            + len(self.pending_filing_events)
+            + len(self.pending_return_events)
+            + len(self.pending_undo_events)
+            + len(self.legacy_interrupted_undos)
+            + len(self.unsafe_paths)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationOutcome:
+    """Database changes made from a reconciliation report."""
+
+    recovered_items: tuple[InboxItem, ...]
+    reset_filing_ids: tuple[int, ...]
+    recovery_required_ids: tuple[int, ...]
+    completed_undo_event_ids: tuple[int, ...]
+    cancelled_undo_event_ids: tuple[int, ...]
+    completed_operation_event_ids: tuple[int, ...]
+    cancelled_operation_event_ids: tuple[int, ...]
+
+    @property
+    def change_count(self) -> int:
+        """Return the number of database records recovered or repaired."""
+
+        return (
+            len(self.recovered_items)
+            + len(self.reset_filing_ids)
+            + len(self.recovery_required_ids)
+            + len(self.cancelled_undo_event_ids)
+            + len(self.completed_operation_event_ids)
+            + len(self.cancelled_operation_event_ids)
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -190,3 +190,33 @@ def test_schema_migration_queues_existing_office_files_once(
     assert retained is not None
     assert retained.indexed_at is not None
     assert database.search("reindexed")
+
+
+def test_schema_v3_adds_operation_journal_metadata(database: Database) -> None:
+    with database.connect() as connection:
+        connection.execute("ALTER TABLE events DROP COLUMN subject_id")
+        connection.execute("ALTER TABLE events DROP COLUMN kind")
+        connection.execute("DROP INDEX idx_inbox_active_path")
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX idx_inbox_active_path
+            ON inbox(path) WHERE status IN ('pending', 'error', 'filing')
+            """
+        )
+        connection.execute("PRAGMA user_version = 2")
+        connection.commit()
+
+    database.initialize()
+
+    with database.connect() as connection:
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(events)").fetchall()
+        }
+        index_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'idx_inbox_active_path'"
+        ).fetchone()
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    assert {"subject_id", "kind"} <= columns
+    assert index_row is not None
+    assert "'returning'" in str(index_row["sql"])
+    assert version == 3

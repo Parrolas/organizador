@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from stat import S_IFLNK
 from threading import Event
 
 import pytest
@@ -160,3 +162,71 @@ def test_indexer_rejects_new_work_after_shutdown(
     refreshed = database.get_file(file_id)
     assert refreshed is not None
     assert refreshed.indexed_at is None
+
+
+def test_missing_document_remains_pending_for_future_indexing(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "temporariamente-ausente.txt"
+    path.write_text("conteúdo recuperável", encoding="utf-8")
+    file_id = _file_record(database, subject, path)
+    document = database.get_file(file_id)
+    assert document is not None
+    path.unlink()
+    indexer = DocumentIndexer(database)
+
+    indexer.index_document(document)
+    indexer.shutdown()
+
+    refreshed = database.get_file(file_id)
+    assert refreshed is not None
+    assert refreshed.indexed_at is None
+
+
+def test_missing_documents_do_not_starve_later_indexing_work(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    for index in range(51):
+        missing = tmp_path / f"missing-{index:02}.txt"
+        missing.write_text("temporarily missing", encoding="utf-8")
+        _file_record(database, subject, missing)
+        missing.unlink()
+    healthy = tmp_path / "healthy.txt"
+    healthy.write_text("ready to index", encoding="utf-8")
+    healthy_id = _file_record(database, subject, healthy)
+
+    pending = database.list_unindexed_documents(limit=50)
+
+    assert [document.id for document in pending] == [healthy_id]
+
+
+def test_symlinked_document_is_never_selected_or_indexed(
+    database: Database,
+    subject: Subject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "filed-link.txt"
+    path.write_text("original document", encoding="utf-8")
+    file_id = _file_record(database, subject, path)
+    document = database.get_file(file_id)
+    assert document is not None
+    original_lstat = Path.lstat
+    details = list(path.lstat())
+    details[0] = S_IFLNK | 0o777
+    symlink_details = os.stat_result(details)
+
+    def report_symlink(candidate: Path) -> os.stat_result:
+        return symlink_details if candidate == path else original_lstat(candidate)
+
+    monkeypatch.setattr(Path, "lstat", report_symlink)
+    indexer = DocumentIndexer(database)
+
+    assert database.list_unindexed_documents() == []
+    indexer.index_document(document)
+    indexer.shutdown()
+
+    refreshed = database.get_file(file_id)
+    assert refreshed is not None
+    assert refreshed.indexed_at is None
+    assert database.search("indexed") == []

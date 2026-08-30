@@ -22,6 +22,8 @@ from organizador.db import Database
 from organizador.filer import FilingError, FilingService
 from organizador.indexer import DocumentIndexer
 from organizador.models import ExistingDownload, FilingGuess, InboxItem, Subject
+from organizador.reconcile import apply as apply_reconciliation
+from organizador.reconcile import scan as scan_reconciliation
 from organizador.startup import set_launch_at_login
 from organizador.ui.dialogs import OnboardingDialog, SubjectDialog
 from organizador.ui.main_window import MainWindow
@@ -99,6 +101,7 @@ class AppController(QObject):
                     f"Revê as Definições antes de ativar a vigilância.\n\n{exc}",
                 )
             else:
+                self._reconcile_startup()
                 self._restart_watcher()
                 self.indexer.submit_pending()
                 self.reminder_timer.start()
@@ -108,6 +111,81 @@ class AppController(QObject):
             self.main_window.hide()
         else:
             self.main_window.show_from_tray("inicio" if configured else "disciplinas")
+
+    def _reconcile_startup(self) -> None:
+        """Repair safe inbox states before background services inspect the folders."""
+
+        try:
+            report = scan_reconciliation(self.config, self.database)
+            outcome = apply_reconciliation(self.database, report)
+            subjects = self.database.list_subjects()
+            for item in outcome.recovered_items:
+                guess = self._filing_guess(item.original_name, subjects)
+                self.database.update_inbox_suggestion(item.id, guess.subject_id, guess.kind)
+            remaining = scan_reconciliation(self.config, self.database)
+        except sqlite3.Error as exc:
+            LOGGER.exception("Startup reconciliation failed")
+            self.tray.notify(
+                "Verificação de segurança incompleta",
+                f"Não foi possível rever o histórico local: {exc}",
+            )
+            return
+
+        manual_paths = {
+            *remaining.untracked_subject_files,
+            *(document.current_path for document in remaining.missing_documents),
+            *(event.destination_path for event in remaining.broken_undo_events),
+            *(event.source_path for event in remaining.pending_filing_events),
+            *(event.destination_path for event in remaining.pending_filing_events),
+            *(event.source_path for event in remaining.pending_return_events),
+            *(event.destination_path for event in remaining.pending_return_events),
+            *(event.source_path for event in remaining.pending_undo_events),
+            *(event.destination_path for event in remaining.pending_undo_events),
+            *(item.restored_file.path for item in remaining.legacy_interrupted_undos),
+            *remaining.unsafe_paths,
+        }
+        self.main_window.inbox_page.set_reconciliation_report(remaining)
+        if report.finding_count:
+            LOGGER.info(
+                "Startup reconciliation found %s issue(s) and changed %s record(s)",
+                report.finding_count,
+                outcome.change_count,
+            )
+        for path in sorted(manual_paths, key=lambda value: str(value).casefold()):
+            LOGGER.warning("Manual file reconciliation required: %s", path)
+
+        if (
+            not outcome.change_count
+            and not manual_paths
+            and not remaining.truncated
+            and not remaining.incomplete
+        ):
+            return
+        details: list[str] = []
+        if outcome.change_count:
+            details.append(
+                f"{outcome.change_count} registo"
+                f"{'s' if outcome.change_count != 1 else ''} da Caixa de Entrada "
+                f"{'foram revistos' if outcome.change_count != 1 else 'foi revisto'}"
+            )
+        if manual_paths:
+            count = len(manual_paths)
+            details.append(
+                f"{count} ficheiro{'s' if count != 1 else ''} "
+                f"precisa{'m' if count != 1 else ''} de revisão manual"
+            )
+        if remaining.truncated:
+            details.append("a verificação atingiu o limite de segurança")
+        if remaining.incomplete:
+            details.append("alguns caminhos não puderam ser verificados")
+        self.tray.notify(
+            (
+                "Verificação de segurança incompleta"
+                if remaining.incomplete
+                else "Verificação de segurança concluída"
+            ),
+            ". ".join(details) + ". Abre a Caixa de Entrada para rever.",
+        )
 
     def shutdown(self) -> None:
         """Stop worker threads before terminating Qt."""
@@ -389,11 +467,25 @@ class AppController(QObject):
         observing = watcher is not None and watcher.running
         was_paused = watcher.paused if observing and watcher is not None else False
         destination: Path | None = None
+        ignore_seconds = 30.0
         if observing and watcher is not None and not was_paused:
             watcher.set_paused(True)
         try:
             destination = self.filer.return_to_downloads(inbox_id)
         except FilingError as exc:
+            pending_return = None
+            with suppress(sqlite3.Error):
+                pending_return = next(
+                    (
+                        event
+                        for event in self.database.list_pending_returns()
+                        if event.inbox_id == inbox_id
+                    ),
+                    None,
+                )
+            if pending_return is not None:
+                destination = pending_return.destination_path
+                ignore_seconds = float("inf")
             item = self.database.get_inbox_item(inbox_id)
             if item is not None:
                 self.prompt_queue.appendleft(inbox_id)
@@ -404,7 +496,7 @@ class AppController(QObject):
             return
         finally:
             if watcher is not None and destination is not None:
-                watcher.ignore_self_move(destination)
+                watcher.ignore_self_move(destination, seconds=ignore_seconds)
             if observing and watcher is not None and not was_paused:
                 watcher.set_paused(False)
         if destination is None:  # pragma: no cover - success assigns a path

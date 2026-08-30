@@ -13,7 +13,7 @@ from pypdf import PdfReader
 
 from organizador.db import Database
 from organizador.extractors import OFFICE_SUFFIXES, extract_docx, extract_pptx, extract_xlsx
-from organizador.models import FiledDocument
+from organizador.models import ExistingDownload, FiledDocument
 
 LOGGER = logging.getLogger(__name__)
 IndexCallback = Callable[[int, str], None]
@@ -54,8 +54,8 @@ class DocumentIndexer:
         if self._stop.is_set():
             return
         path = document.current_path
-        if not path.is_file():
-            self.database.mark_document_indexed(document.id, expected_path=document.current_path)
+        if ExistingDownload.capture(path) is None:
+            LOGGER.warning("Deferring index because the document is missing or unsafe: %s", path)
             return
         subject = self.database.get_subject(document.subject_id)
         subject_name = subject.name if subject else ""

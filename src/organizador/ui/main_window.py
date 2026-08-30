@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         self.home_page = HomePage(database)
-        self.inbox_page = InboxPage(database)
+        self.inbox_page = InboxPage(database, config)
         self.search_page = SearchPage(database)
         self.tasks_page = TasksPage(database)
         self.subjects_page = SubjectsPage(database, config)
