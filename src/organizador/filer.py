@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 
-from organizador.config import MANUAL_IMPORT_BATCH_LIMIT, AppConfig
+from organizador.config import (
+    DEFAULT_FILENAME_TEMPLATE,
+    MANUAL_IMPORT_BATCH_LIMIT,
+    AppConfig,
+)
 from organizador.db import METRIC_COLLISIONS_RENAMED, Database
 from organizador.models import (
     FILE_KINDS,
@@ -25,6 +30,65 @@ from organizador.paths import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _restore_original_extension(requested: str, original: str) -> str:
+    """Keep the requested stem but force the original file extension."""
+
+    original_suffix = Path(original).suffix
+    safe = sanitise_filename(requested or original)
+    if original_suffix and Path(safe).suffix.casefold() != original_suffix.casefold():
+        safe = f"{Path(safe).stem}{original_suffix}"
+    return safe
+
+
+def render_name_template(
+    template: str,
+    *,
+    subject_name: str,
+    subject_code: str,
+    kind: str,
+    original_name: str,
+    when: datetime,
+) -> str:
+    """Expand a user filename template; unknown text is kept, never blanked."""
+
+    replacements = {
+        "{disciplina}": subject_name.strip(),
+        "{codigo}": subject_code.strip(),
+        "{tipo}": kind,
+        "{nome_original}": original_name,
+        "{data}": f"{when.year:04d}-{when.month:02d}-{when.day:02d}",
+        "{ano}": f"{when.year:04d}",
+        "{mes}": f"{when.month:02d}",
+        "{dia}": f"{when.day:02d}",
+    }
+    result = template
+    for token, value in replacements.items():
+        result = result.replace(token, value)
+    return result
+
+
+def render_final_name(
+    template: str = DEFAULT_FILENAME_TEMPLATE,
+    *,
+    subject_name: str,
+    subject_code: str,
+    kind: str,
+    original_name: str,
+    when: datetime,
+) -> str:
+    """Render a template and restore the original extension, exactly as filing will."""
+
+    rendered = render_name_template(
+        template,
+        subject_name=subject_name,
+        subject_code=subject_code,
+        kind=kind,
+        original_name=original_name,
+        when=when,
+    )
+    return _restore_original_extension(rendered, original_name)
 
 
 class FilingError(RuntimeError):
@@ -313,11 +377,7 @@ class FilingService:
 
     @staticmethod
     def _name_with_original_extension(requested: str, original: str) -> str:
-        original_suffix = Path(original).suffix
-        safe = sanitise_filename(requested or original)
-        if original_suffix and Path(safe).suffix.casefold() != original_suffix.casefold():
-            safe = f"{Path(safe).stem}{original_suffix}"
-        return safe
+        return _restore_original_extension(requested, original)
 
     def _plan_destination(self, directory: Path, filename: str) -> tuple[Path, bool]:
         """Plan a collision-safe destination and report whether a rename was needed."""

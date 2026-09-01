@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateEdit,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -37,6 +38,7 @@ from organizador.models import (
     Subject,
 )
 from organizador.reconcile import DISMISSIBLE_FINDING_REASONS, visible_findings
+from organizador.ui.dialogs import TaskDialog
 from organizador.ui.theme import DANGER_SOFT, MUTED, WARNING_SOFT
 from organizador.ui.widgets import (
     EmptyState,
@@ -58,6 +60,8 @@ class SettingsPayload(TypedDict):
     extensions: str
     minimum_file_size: int
     prompt_timeout_seconds: int
+    reminder_lead_days: int
+    filename_template: str
     watch_enabled: bool
     launch_at_login: bool
 
@@ -281,6 +285,7 @@ class InboxPage(QWidget):
     drop_record_requested = Signal(object)
     dismiss_finding_requested = Signal(object)
     unregister_requested = Signal(int)
+    organise_selection_requested = Signal(object)
 
     def __init__(
         self,
@@ -292,14 +297,18 @@ class InboxPage(QWidget):
         self.database = database
         self.config = config
         self.reconciliation_report: ReconciliationReport | None = None
+        self._selected_ids: set[int] = set()
         layout = _page_layout(self)
         self.import_button = button("Importar de Downloads…")
         self.import_button.clicked.connect(self.import_existing_requested.emit)
+        self.bulk_button = button("Organizar seleção", variant="primary")
+        self.bulk_button.setEnabled(False)
+        self.bulk_button.clicked.connect(self._emit_selection)
         layout.addWidget(
             PageHeading(
                 "Caixa de Entrada",
                 "Nada é arquivado sem uma decisão. Organiza agora ou deixa para mais tarde.",
-                [self.import_button],
+                [self.import_button, self.bulk_button],
             )
         )
         self.summary_label = label("", "PageSubtitle")
@@ -316,6 +325,22 @@ class InboxPage(QWidget):
 
         self.import_button.setEnabled(not running)
         self.import_button.setText("A importar…" if running else "Importar de Downloads…")
+
+    def _emit_selection(self) -> None:
+        if self._selected_ids:
+            self.organise_selection_requested.emit(tuple(sorted(self._selected_ids)))
+
+    def _set_selected(self, item_id: int, selected: bool) -> None:
+        if selected:
+            self._selected_ids.add(item_id)
+        else:
+            self._selected_ids.discard(item_id)
+        self._update_bulk_button()
+
+    def _update_bulk_button(self) -> None:
+        count = len(self._selected_ids)
+        self.bulk_button.setText(f"Organizar seleção ({count})" if count else "Organizar seleção")
+        self.bulk_button.setEnabled(count > 0 and self.database.count_subjects() > 0)
 
     def set_import_status(self, message: str) -> None:
         """Show non-modal progress or aggregate batch feedback."""
@@ -362,6 +387,8 @@ class InboxPage(QWidget):
             summary_parts.append("verificação incompleta")
         summary = " · ".join(summary_parts) if summary_parts else "A caixa está vazia"
         self.summary_label.setText(summary)
+        self._selected_ids &= {item.id for item in items}
+        self._update_bulk_button()
         clear_layout(self.items_layout)
         if not items and not manual_findings:
             empty = EmptyState(
@@ -388,6 +415,15 @@ class InboxPage(QWidget):
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(17, 13, 13, 13)
         row_layout.setSpacing(14)
+
+        if item.status != "recovery":
+            selected = QCheckBox()
+            selected.setAccessibleName(f"Selecionar {item.original_name}")
+            selected.setChecked(item.id in self._selected_ids)
+            selected.toggled.connect(
+                lambda checked, item_id=item.id: self._set_selected(item_id, checked)
+            )
+            row_layout.addWidget(selected)
 
         copy = QVBoxLayout()
         copy.setSpacing(3)
@@ -770,6 +806,9 @@ class TasksPage(QWidget):
         due = self._due_copy(task)
         copy.addWidget(label(f"{subject}  ·  {due}", "Muted"))
         row_layout.addLayout(copy, 1)
+        edit = button("Editar")
+        edit.clicked.connect(lambda: self._edit_task(task.id))
+        row_layout.addWidget(edit)
         delete = button("Eliminar", variant="danger")
         delete.clicked.connect(lambda: self._delete_task(task.id))
         row_layout.addWidget(delete)
@@ -810,6 +849,22 @@ class TasksPage(QWidget):
         self.refresh()
         self.changed.emit()
 
+    def _edit_task(self, task_id: int) -> None:
+        task = self.database.get_task(task_id)
+        if task is None:
+            return
+        dialog = TaskDialog(task, self.database.list_subjects(active_only=False), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        title, subject_id, due_date, reminder_lead_days = dialog.values
+        try:
+            self.database.update_task(task_id, title, subject_id, due_date, reminder_lead_days)
+        except (LookupError, ValueError) as exc:
+            self.error_label.setText(str(exc))
+            return
+        self.refresh()
+        self.changed.emit()
+
     def _delete_task(self, task_id: int) -> None:
         self.database.delete_task(task_id)
         self.refresh()
@@ -822,6 +877,7 @@ class SubjectsPage(QWidget):
     add_requested = Signal()
     edit_requested = Signal(int)
     archive_requested = Signal(int)
+    restore_requested = Signal(int)
     open_folder = Signal(object)
 
     def __init__(
@@ -830,6 +886,7 @@ class SubjectsPage(QWidget):
         super().__init__(parent)
         self.database = database
         self.config = config
+        self.show_archived = False
         layout = _page_layout(self)
         add = button("Adicionar disciplina", variant="primary")
         add.clicked.connect(self.add_requested)
@@ -840,20 +897,32 @@ class SubjectsPage(QWidget):
                 [add],
             )
         )
+        header_row = QHBoxLayout()
         self.summary_label = label("", "PageSubtitle")
-        layout.addWidget(self.summary_label)
+        header_row.addWidget(self.summary_label, 1)
+        self.archived_check = QCheckBox("Mostrar arquivadas")
+        self.archived_check.toggled.connect(self._set_show_archived)
+        header_row.addWidget(self.archived_check)
+        layout.addLayout(header_row)
         area, _, self.subjects_layout = _scroll_list()
         layout.addWidget(area, 1)
         self.refresh()
 
-    def refresh(self) -> None:
-        """Render all active subjects."""
+    def _set_show_archived(self, show: bool) -> None:
+        self.show_archived = show
+        self.refresh()
 
-        subjects = self.database.list_subjects()
-        plural = len(subjects) != 1
-        self.summary_label.setText(
-            f"{len(subjects)} disciplina{'s' if plural else ''} ativa{'s' if plural else ''}"
-        )
+    def refresh(self) -> None:
+        """Render active subjects, and archived ones when the toggle is on."""
+
+        subjects = self.database.list_subjects(active_only=not self.show_archived)
+        active_count = self.database.count_subjects()
+        archived_count = len(self.database.list_subjects(active_only=False)) - active_count
+        plural = active_count != 1
+        summary = f"{active_count} disciplina{'s' if plural else ''} ativa{'s' if plural else ''}"
+        if self.show_archived and archived_count:
+            summary += f" · {archived_count} arquivada{'s' if archived_count != 1 else ''}"
+        self.summary_label.setText(summary)
         clear_layout(self.subjects_layout)
         if not subjects:
             empty = EmptyState(
@@ -892,6 +961,8 @@ class SubjectsPage(QWidget):
         folder_copy.setToolTip(str(subject_path))
         folder_copy.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         copy.addWidget(folder_copy)
+        if not subject.active:
+            copy.addWidget(label("Arquivada", "Muted"))
         row_layout.addLayout(copy, 1)
         open_button = button("Abrir pasta", variant="quiet")
         open_button.clicked.connect(
@@ -899,12 +970,18 @@ class SubjectsPage(QWidget):
         )
         edit = button("Editar")
         edit.clicked.connect(lambda: self.edit_requested.emit(subject.id))
-        archive = button("Arquivar", variant="danger")
-        archive.setToolTip("Oculta a disciplina sem apagar os respetivos ficheiros")
-        archive.clicked.connect(lambda: self.archive_requested.emit(subject.id))
         row_layout.addWidget(open_button)
         row_layout.addWidget(edit)
-        row_layout.addWidget(archive)
+        if subject.active:
+            archive = button("Arquivar", variant="danger")
+            archive.setToolTip("Oculta a disciplina sem apagar os respetivos ficheiros")
+            archive.clicked.connect(lambda: self.archive_requested.emit(subject.id))
+            row_layout.addWidget(archive)
+        else:
+            restore = button("Restaurar", variant="primary")
+            restore.setToolTip("Volta a mostrar a disciplina nas escolhas de arquivo")
+            restore.clicked.connect(lambda: self.restore_requested.emit(subject.id))
+            row_layout.addWidget(restore)
         return row
 
 
@@ -953,6 +1030,13 @@ class SettingsPage(QWidget):
         self.extensions_edit = QLineEdit()
         self.extensions_edit.setPlaceholderText(".pdf, .docx, .pptx, .ipynb")
         form.addRow("Extensões aceites", self.extensions_edit)
+        self.template_edit = QLineEdit()
+        self.template_edit.setPlaceholderText("{nome_original}")
+        self.template_edit.setToolTip(
+            "Tokens: {disciplina} {codigo} {tipo} {nome_original} {data} {ano} {mes} {dia}. "
+            "A extensão original é sempre preservada."
+        )
+        form.addRow("Modelo do nome", self.template_edit)
         self.minimum_size = QSpinBox()
         self.minimum_size.setRange(0, 100 * 1024 * 1024)
         self.minimum_size.setSuffix(" bytes")
@@ -961,6 +1045,11 @@ class SettingsPage(QWidget):
         self.timeout_spin.setRange(10, 300)
         self.timeout_spin.setSuffix(" s")
         form.addRow("Tempo do popup", self.timeout_spin)
+        self.reminder_spin = QSpinBox()
+        self.reminder_spin.setRange(0, 30)
+        self.reminder_spin.setSuffix(" dias")
+        self.reminder_spin.setToolTip("Com quantos dias de antecedência avisar prazos")
+        form.addRow("Avisar prazos antes", self.reminder_spin)
         panel_layout.addLayout(form)
 
         self.watch_check = QCheckBox("Vigiar novos ficheiros em Downloads")
@@ -1003,8 +1092,11 @@ class SettingsPage(QWidget):
         self.downloads_edit.setText(str(config.downloads_dir))
         self.downloads_edit.setCursorPosition(0)
         self.extensions_edit.setText(", ".join(config.allowed_extensions))
+        self.template_edit.setText(config.filename_template)
+        self.template_edit.setCursorPosition(0)
         self.minimum_size.setValue(max(0, config.minimum_file_size))
         self.timeout_spin.setValue(config.prompt_timeout_seconds)
+        self.reminder_spin.setValue(config.reminder_lead_days)
         self.watch_check.setChecked(config.watch_enabled)
         self.startup_check.setChecked(config.launch_at_login)
 
@@ -1026,8 +1118,10 @@ class SettingsPage(QWidget):
             "university_root": Path(self.root_edit.text().strip()).expanduser(),
             "downloads_dir": Path(self.downloads_edit.text().strip()).expanduser(),
             "extensions": self.extensions_edit.text(),
+            "filename_template": self.template_edit.text().strip(),
             "minimum_file_size": self.minimum_size.value(),
             "prompt_timeout_seconds": self.timeout_spin.value(),
+            "reminder_lead_days": self.reminder_spin.value(),
             "watch_enabled": self.watch_check.isChecked(),
             "launch_at_login": self.startup_check.isChecked(),
         }

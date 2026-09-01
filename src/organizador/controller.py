@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 from organizador.classifier import guess_filing
 from organizador.config import AppConfig, parse_extensions
 from organizador.db import Database
-from organizador.filer import FilingError, FilingService
+from organizador.filer import FilingError, FilingService, render_final_name
 from organizador.indexer import DocumentIndexer
 from organizador.logging_setup import configure_logging
 from organizador.models import (
@@ -39,7 +39,7 @@ from organizador.reconcile import (
 from organizador.reconcile import apply as apply_reconciliation
 from organizador.reconcile import scan as scan_reconciliation
 from organizador.startup import set_launch_at_login
-from organizador.ui.dialogs import OnboardingDialog, SubjectDialog
+from organizador.ui.dialogs import BulkFilingDialog, OnboardingDialog, SubjectDialog
 from organizador.ui.main_window import MainWindow
 from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
@@ -47,6 +47,16 @@ from organizador.ui.tray import TrayIcon
 from organizador.watcher import DownloadWatcher
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _deadline_copy(delta_days: int) -> str:
+    if delta_days < 0:
+        return "está atrasada"
+    if delta_days == 0:
+        return "vence hoje"
+    if delta_days == 1:
+        return "vence amanhã"
+    return f"vence em {delta_days} dias"
 
 
 class AppController(QObject):
@@ -70,7 +80,6 @@ class AppController(QObject):
         )
         self.watcher: DownloadWatcher | None = None
         self.prompt_queue: deque[int] = deque()
-        self.notified_tasks: set[int] = set()
         self.hide_notice_shown = False
         self._manual_import_active = False
         self._manual_imported = 0
@@ -230,6 +239,7 @@ class AppController(QObject):
         )
         self.main_window.home_page.show_inbox.connect(lambda: self.show_main("inbox"))
         self.main_window.inbox_page.organise_requested.connect(self._organise_item)
+        self.main_window.inbox_page.organise_selection_requested.connect(self._organise_selection)
         self.main_window.inbox_page.return_requested.connect(self._return_item)
         self.main_window.inbox_page.open_path.connect(self._open_path)
         self.main_window.inbox_page.import_existing_requested.connect(
@@ -247,6 +257,7 @@ class AppController(QObject):
         self.main_window.subjects_page.add_requested.connect(self._add_subject)
         self.main_window.subjects_page.edit_requested.connect(self._edit_subject)
         self.main_window.subjects_page.archive_requested.connect(self._archive_subject)
+        self.main_window.subjects_page.restore_requested.connect(self._restore_subject)
         self.main_window.subjects_page.open_folder.connect(self._open_path)
         self.main_window.settings_page.save_requested.connect(self._save_settings)
 
@@ -563,7 +574,9 @@ class AppController(QObject):
             guess = self._filing_guess(item.original_name, subjects)
             self.database.update_inbox_suggestion(item.id, guess.subject_id, guess.kind)
             refreshed = self.database.get_inbox_item(item.id)
-            self.prompt.show_item(refreshed or item, subjects, guess)
+            self.prompt.show_item(
+                refreshed or item, subjects, guess, name_template=self.config.filename_template
+            )
             return
 
     def _file_item(
@@ -735,6 +748,103 @@ class AppController(QObject):
             self.database.archive_subject(subject_id)
             self._refresh()
 
+    def _restore_subject(self, subject_id: int) -> None:
+        subject = self.database.get_subject(subject_id)
+        if subject is None or subject.active:
+            return
+        conflicts = self.database.find_active_subject_conflicts(subject_id)
+        if conflicts:
+            QMessageBox.warning(
+                self.main_window,
+                "Não foi possível restaurar",
+                "Já existe uma disciplina ativa com o mesmo nome ou pasta: "
+                + ", ".join(conflicts)
+                + ". Edita-a primeiro para libertar o nome.",
+            )
+            return
+        answer = QMessageBox.question(
+            self.main_window,
+            "Reativar disciplina?",
+            f"{subject.name} volta a aparecer nas escolhas de arquivo. "
+            "Os ficheiros e tarefas não foram alterados.",
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            restored = self.database.set_subject_active(subject_id, True)
+            self.filer.ensure_subject_structure(restored)
+        except (sqlite3.Error, OSError) as exc:
+            QMessageBox.warning(self.main_window, "Não foi possível restaurar", str(exc))
+            return
+        self._refresh()
+
+    def _organise_selection(self, inbox_ids: object) -> None:
+        if not isinstance(inbox_ids, (tuple, list)):
+            return
+        items: list[InboxItem] = []
+        failures: list[str] = []
+        for inbox_id in inbox_ids:
+            item = self.database.get_inbox_item(int(inbox_id))
+            if item is None or item.status == "recovery":
+                continue
+            if not item.path.is_file():
+                failures.append(f"{item.original_name}: o ficheiro já não está disponível")
+                continue
+            items.append(item)
+        if not items and not failures:
+            return
+        subjects = self.database.list_subjects()
+        if not subjects:
+            self.show_main("disciplinas")
+            return
+        dialog = BulkFilingDialog(items, subjects, self.config.filename_template, self.main_window)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        subject_id, kind, create_task, due_date = dialog.values
+        subject = next(entry for entry in subjects if entry.id == subject_id)
+        filed = 0
+        handled: list[int] = []
+        for item in items:
+            final_name = render_final_name(
+                self.config.filename_template,
+                subject_name=subject.name,
+                subject_code=subject.code,
+                kind=kind,
+                original_name=item.original_name,
+                when=item.detected_at,
+            )
+            try:
+                document = self.filer.file_document(item.id, subject_id, kind, final_name)
+            except FilingError as exc:
+                failures.append(f"{item.original_name}: {exc}")
+                continue
+            handled.append(item.id)
+            filed += 1
+            if create_task:
+                self.database.add_task(
+                    f"Rever {Path(item.original_name).stem}", subject_id, due_date, document.id
+                )
+            self.indexer.submit(document)
+        self.prompt_queue = deque(item for item in self.prompt_queue if item not in handled)
+        if self.prompt.current_item_id in handled:
+            self.prompt.close()
+        if failures:
+            shown = "; ".join(failures[:3])
+            if len(failures) > 3:
+                shown += f"; e mais {len(failures) - 3}"
+            message = (
+                f"{filed} organizado{'s' if filed != 1 else ''}, "
+                f"{len(failures)} com erro. Revê: {shown}."
+            )
+        else:
+            message = f"{filed} organizado{'s' if filed != 1 else ''}."
+        message += " Nenhum ficheiro foi substituído ou apagado. "
+        message += "Só a organização mais recente pode ser desfeita."
+        self.main_window.inbox_page.set_import_status(message)
+        self._refresh()
+
     def _save_settings(self, values: SettingsPayload) -> None:
         if self._manual_import_active or (
             self.watcher is not None and self.watcher.manual_import_running
@@ -754,6 +864,8 @@ class AppController(QObject):
                 raise ValueError("Adiciona pelo menos uma extensão aceite.")
             self.config.minimum_file_size = int(values["minimum_file_size"])
             self.config.prompt_timeout_seconds = int(values["prompt_timeout_seconds"])
+            self.config.reminder_lead_days = int(values["reminder_lead_days"])
+            self.config.filename_template = str(values["filename_template"])
             self.config.watch_enabled = bool(values["watch_enabled"])
             desired_startup = bool(values["launch_at_login"])
             self.config.launch_at_login = desired_startup
@@ -794,6 +906,8 @@ class AppController(QObject):
         self.config.watch_enabled = previous.watch_enabled
         self.config.launch_at_login = previous.launch_at_login
         self.config.prompt_timeout_seconds = previous.prompt_timeout_seconds
+        self.config.reminder_lead_days = previous.reminder_lead_days
+        self.config.filename_template = previous.filename_template
         self.config.initialized = previous.initialized
 
     def _set_paused(self, paused: bool) -> None:
@@ -812,14 +926,21 @@ class AppController(QObject):
         self.tray.set_paused(paused)
 
     def _check_deadlines(self) -> None:
+        today = date.today()
         for task in self.database.list_tasks(include_completed=False):
-            if task.id in self.notified_tasks or task.due_date is None:
+            if task.due_date is None or task.last_notified_on == today:
                 continue
-            if task.due_date <= date.today():
-                subject = task.subject_name or "Tarefa geral"
-                when = "vence hoje" if task.due_date == date.today() else "está atrasada"
-                self.tray.notify(subject, f"{task.title} {when}.")
-                self.notified_tasks.add(task.id)
+            lead = (
+                task.reminder_lead_days
+                if task.reminder_lead_days is not None
+                else self.config.reminder_lead_days
+            )
+            delta = (task.due_date - today).days
+            if delta > lead:
+                continue
+            subject = task.subject_name or "Tarefa geral"
+            self.tray.notify(subject, f"{task.title} {_deadline_copy(delta)}.")
+            self.database.mark_task_notified(task.id, today)
 
     def _index_finished(self, file_id: int, error: str) -> None:
         if error:

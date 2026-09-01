@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from organizador.classifier import extract_due_date
+from organizador.filer import render_final_name
 from organizador.models import FILE_KINDS, FilingGuess, InboxItem, Subject
 from organizador.ui.widgets import button, clear_layout, format_size, label
 
@@ -155,13 +156,26 @@ class FilingPrompt(QWidget):
         item: InboxItem,
         subjects: list[Subject],
         guess: FilingGuess,
+        name_template: str = "{nome_original}",
     ) -> None:
         """Populate and reveal the prompt for an inbox item."""
 
         self.current_item_id = item.id
         self.selected_subject_id = guess.subject_id
         self.error_label.clear()
-        self.name_edit.setText(item.path.name)
+        template_subject = next(
+            (subject for subject in subjects if subject.id == self.selected_subject_id), None
+        )
+        self.name_edit.setText(
+            render_final_name(
+                name_template,
+                subject_name=template_subject.name if template_subject else "",
+                subject_code=template_subject.code if template_subject else "",
+                kind=guess.kind,
+                original_name=item.original_name,
+                when=item.detected_at,
+            )
+        )
         self.name_edit.selectAll()
         self.meta_label.setText(f"{format_size(item.size)}  ·  recebido da pasta Downloads")
         self.guess_label.setText(

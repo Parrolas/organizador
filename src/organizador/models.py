@@ -119,6 +119,8 @@ class StudyTask:
     due_date: date | None
     completed: bool
     created_at: datetime
+    reminder_lead_days: int | None = None
+    last_notified_on: date | None = None
 
 
 @dataclass(frozen=True, slots=True)

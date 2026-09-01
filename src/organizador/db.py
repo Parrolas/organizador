@@ -101,7 +101,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
     due_date TEXT,
     completed INTEGER NOT NULL DEFAULT 0 CHECK (completed IN (0, 1)),
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    reminder_lead_days INTEGER,
+    last_notified_on TEXT
 );
 
 CREATE TABLE IF NOT EXISTS reviewed_findings (
@@ -182,6 +184,10 @@ class Database:
                 self._prepare_operation_journal(connection)
             if previous_version < 4:
                 self._prepare_reconciliation_actions(connection)
+            # Additive-only column reconciliation runs unconditionally: older
+            # binaries ignore unknown columns, so no SCHEMA_VERSION bump and
+            # no downgrade lockout (the lesson from the v5 incident).
+            self._prepare_task_reminders(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             connection.commit()
 
@@ -253,6 +259,18 @@ class Database:
             "UPDATE files SET record_token = ? WHERE id = ? AND record_token = ''",
             ((uuid4().hex, int(row["id"])) for row in rows),
         )
+
+    @staticmethod
+    def _prepare_task_reminders(connection: sqlite3.Connection) -> None:
+        """Ensure the additive reminder columns exist on the tasks table."""
+
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        if "reminder_lead_days" not in columns:
+            connection.execute("ALTER TABLE tasks ADD COLUMN reminder_lead_days INTEGER")
+        if "last_notified_on" not in columns:
+            connection.execute("ALTER TABLE tasks ADD COLUMN last_notified_on TEXT")
 
     def add_subject(
         self,
@@ -329,6 +347,36 @@ class Database:
         with self.connect() as connection:
             connection.execute("UPDATE subjects SET active = 0 WHERE id = ?", (subject_id,))
             connection.commit()
+
+    def set_subject_active(self, subject_id: int, active: bool) -> Subject:
+        """Show or hide a subject without touching its documents."""
+
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE subjects SET active = ? WHERE id = ?", (int(active), subject_id)
+            )
+            connection.commit()
+        subject = self.get_subject(subject_id)
+        if subject is None:
+            raise LookupError(f"Disciplina inexistente: {subject_id}")
+        return subject
+
+    def find_active_subject_conflicts(self, subject_id: int) -> tuple[str, ...]:
+        """Return active subjects claiming the same name or folder as this one."""
+
+        subject = self.get_subject(subject_id)
+        if subject is None:
+            raise LookupError(f"Disciplina inexistente: {subject_id}")
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT name FROM subjects
+                WHERE id != ? AND active = 1
+                  AND (name = ? COLLATE NOCASE OR folder_name = ?)
+                """,
+                (subject_id, subject.name, subject.folder_name),
+            ).fetchall()
+        return tuple(str(row["name"]) for row in rows)
 
     def delete_subject(self, subject_id: int) -> None:
         """Delete an unused subject while rolling back failed first-run setup."""
@@ -1636,20 +1684,23 @@ class Database:
         subject_id: int | None,
         due_date: date | None,
         file_id: int | None = None,
+        reminder_lead_days: int | None = None,
     ) -> StudyTask:
         """Create a study task."""
 
         with self.connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO tasks(title, subject_id, file_id, due_date, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO tasks(
+                    title, subject_id, file_id, due_date, reminder_lead_days, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     title.strip(),
                     subject_id,
                     file_id,
                     due_date.isoformat() if due_date else None,
+                    reminder_lead_days,
                     _now(),
                 ),
             )
@@ -1699,6 +1750,58 @@ class Database:
         with self.connect() as connection:
             connection.execute(
                 "UPDATE tasks SET completed = ? WHERE id = ?", (int(completed), task_id)
+            )
+            connection.commit()
+
+    def update_task(
+        self,
+        task_id: int,
+        title: str,
+        subject_id: int | None,
+        due_date: date | None,
+        reminder_lead_days: int | None = None,
+    ) -> StudyTask:
+        """Update a task's editable fields without touching its document link."""
+
+        cleaned_title = title.strip()
+        if not cleaned_title:
+            raise ValueError("O título da tarefa não pode estar vazio.")
+        new_due = due_date.isoformat() if due_date else None
+        with self.connect() as connection:
+            current = connection.execute(
+                "SELECT due_date FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if current is None:
+                raise LookupError(f"Tarefa inexistente: {task_id}")
+            previous_due = str(current["due_date"]) if current["due_date"] is not None else None
+            connection.execute(
+                """
+                UPDATE tasks
+                SET title = ?, subject_id = ?, due_date = ?, reminder_lead_days = ?,
+                    last_notified_on = CASE WHEN ? = 1 THEN NULL ELSE last_notified_on END
+                WHERE id = ?
+                """,
+                (
+                    cleaned_title,
+                    subject_id,
+                    new_due,
+                    reminder_lead_days,
+                    int(previous_due != new_due),
+                    task_id,
+                ),
+            )
+            connection.commit()
+        task = self.get_task(task_id)
+        if task is None:  # pragma: no cover - defensive database invariant
+            raise LookupError(f"Tarefa inexistente: {task_id}")
+        return task
+
+    def mark_task_notified(self, task_id: int, on: date) -> None:
+        """Record that a reminder was shown for a task on this calendar day."""
+
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE tasks SET last_notified_on = ? WHERE id = ?", (on.isoformat(), task_id)
             )
             connection.commit()
 
@@ -1784,6 +1887,7 @@ class Database:
     @staticmethod
     def _task(row: sqlite3.Row) -> StudyTask:
         due = str(row["due_date"]) if row["due_date"] is not None else None
+        notified = str(row["last_notified_on"]) if row["last_notified_on"] is not None else None
         return StudyTask(
             id=int(row["id"]),
             title=str(row["title"]),
@@ -1793,4 +1897,8 @@ class Database:
             due_date=date.fromisoformat(due) if due else None,
             completed=bool(row["completed"]),
             created_at=datetime.fromisoformat(str(row["created_at"])),
+            reminder_lead_days=(
+                int(row["reminder_lead_days"]) if row["reminder_lead_days"] is not None else None
+            ),
+            last_notified_on=date.fromisoformat(notified) if notified else None,
         )

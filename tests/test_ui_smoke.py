@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import time
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 from PySide6.QtGui import QCursor, QGuiApplication, QPalette
-from PySide6.QtWidgets import QApplication, QButtonGroup, QLabel, QMessageBox, QPushButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QCheckBox,
+    QDialog,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+)
 
 from organizador import __version__
 from organizador.classifier import guess_filing
@@ -19,7 +28,7 @@ from organizador.models import FindingReason, Subject
 from organizador.paths import IncompleteMoveError
 from organizador.reconcile import findings, visible_findings
 from organizador.reconcile import scan as scan_reconciliation
-from organizador.ui.dialogs import OnboardingDialog, SubjectDialog
+from organizador.ui.dialogs import OnboardingDialog, SubjectDialog, TaskDialog
 from organizador.ui.main_window import MainWindow
 from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
@@ -380,8 +389,10 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
         "university_root": app_config.university_root,
         "downloads_dir": app_config.downloads_dir,
         "extensions": ".pdf",
+        "filename_template": "{nome_original}",
         "minimum_file_size": 1024,
         "prompt_timeout_seconds": 45,
+        "reminder_lead_days": 2,
         "watch_enabled": True,
         "launch_at_login": True,
     }
@@ -537,3 +548,223 @@ def test_confirmed_existing_download_import_is_capped_and_uses_normal_inbox_flow
     controller.tray.hide()
     controller.main_window.allow_close = True
     controller.main_window.close()
+
+
+def test_advance_reminders_fire_once_per_day_and_survive_restart(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database
+    controller = AppController(app_config)
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(controller.tray, "notify", lambda title, body: sent.append((title, body)))
+    soon_id = controller.database.add_task(
+        "Entrega breve", subject.id, date.today() + timedelta(days=2)
+    ).id
+    controller.database.add_task("Longínqua", subject.id, date.today() + timedelta(days=30))
+
+    controller._check_deadlines()
+    controller._check_deadlines()
+
+    assert len(sent) == 1
+    assert "Entrega breve" in sent[0][1]
+
+    restarted = AppController(app_config)
+    restarted_sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        restarted.tray, "notify", lambda title, body: restarted_sent.append((title, body))
+    )
+    restarted._check_deadlines()
+    assert restarted_sent == []
+
+    controller.database.update_task(soon_id, "Entrega breve", subject.id, date.today())
+    controller._check_deadlines()
+
+    assert len(sent) == 2
+    assert "vence hoje" in sent[1][1]
+
+    controller.reminder_timer.stop()
+    restarted.reminder_timer.stop()
+    for active in (controller, restarted):
+        active.indexer.shutdown()
+        active.tray.hide()
+        active.main_window.allow_close = True
+        active.main_window.close()
+
+
+def test_per_task_reminder_lead_overrides_the_global_default(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database
+    controller = AppController(app_config)
+    sent: list[str] = []
+    monkeypatch.setattr(controller.tray, "notify", lambda title, body: sent.append(body))
+    controller.database.add_task(
+        "Projeto final", subject.id, date.today() + timedelta(days=5), reminder_lead_days=7
+    )
+    controller.database.add_task("Normal", subject.id, date.today() + timedelta(days=5))
+
+    controller._check_deadlines()
+
+    assert len(sent) == 1
+    assert "Projeto final" in sent[0]
+
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
+
+
+class _StubBulkDialog:
+    values: tuple[int, str, bool, date | None] = (0, "Slides", False, None)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    def exec(self) -> QDialog.DialogCode:
+        return QDialog.DialogCode.Accepted
+
+
+def test_bulk_filing_files_selection_and_keeps_failures_pending(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database
+    app_config.watch_enabled = False
+    controller = AppController(app_config)
+    ids: list[int] = []
+    for name in ("lote_um.pdf", "lote_dois.pdf", "lote_tres.pdf"):
+        path = app_config.inbox_dir / name
+        path.write_bytes(b"bulk content" * 10)
+        item = controller.database.add_inbox_item(
+            path, app_config.downloads_dir / name, name, path.stat().st_size
+        )
+        ids.append(item.id)
+    (app_config.inbox_dir / "lote_tres.pdf").unlink()
+    _StubBulkDialog.values = (subject.id, "Slides", True, date(2026, 12, 1))
+    monkeypatch.setattr("organizador.controller.BulkFilingDialog", _StubBulkDialog)
+    controller.prompt_queue.append(ids[1])
+
+    controller._organise_selection(tuple(ids))
+
+    with controller.database.connect() as connection:
+        filed_count = int(
+            connection.execute("SELECT COUNT(*) FROM events WHERE action = 'file'").fetchone()[0]
+        )
+    assert filed_count == 2
+    assert controller.database.count_inbox_items() == 1
+    pending = controller.database.get_inbox_item(ids[2])
+    assert pending is not None
+    assert pending.status == "pending"
+    assert ids[1] not in controller.prompt_queue
+    assert len(controller.database.list_tasks()) == 2
+    status = controller.main_window.inbox_page.import_status_label.text()
+    assert "2 organizados" in status
+    assert "1 com erro" in status
+
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
+
+
+def test_subjects_page_lists_archived_subjects_and_offers_restore(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    database.archive_subject(subject.id)
+    window = MainWindow(database, app_config)
+    page = window.subjects_page
+
+    page.archived_check.setChecked(True)
+
+    buttons = page.findChildren(QPushButton)
+    labels = [item.text() for item in page.findChildren(QLabel)]
+    restore = next(control for control in buttons if control.text() == "Restaurar")
+    requests: list[int] = []
+    page.restore_requested.connect(requests.append)
+    restore.click()
+
+    assert requests == [subject.id]
+    assert "Arquivada" in labels
+    assert "Arquivar" not in {control.text() for control in buttons}
+    window.allow_close = True
+    window.close()
+
+
+def test_task_dialog_prefills_and_returns_values(
+    qt_app: QApplication, database: Database, subject: Subject
+) -> None:
+    task = database.add_task(
+        "Estudar integrais", subject.id, date(2026, 12, 10), reminder_lead_days=3
+    )
+
+    dialog = TaskDialog(task, [subject])
+
+    assert dialog.title_edit.text() == "Estudar integrais"
+    assert dialog.subject_combo.currentData() == subject.id
+    assert dialog.values == (
+        "Estudar integrais",
+        subject.id,
+        date(2026, 12, 10),
+        3,
+    )
+
+
+def test_inbox_rows_without_recovery_are_selectable_and_pruned(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    path = app_config.inbox_dir / "selecionavel.pdf"
+    path.write_bytes(b"select me")
+    database.add_inbox_item(path, app_config.downloads_dir / path.name, path.name, 100)
+    missing = app_config.inbox_dir / "fantasma.pdf"
+    database.add_inbox_item(missing, app_config.downloads_dir / missing.name, missing.name, 100)
+    window = MainWindow(database, app_config)
+
+    window.inbox_page._selected_ids.add(99999)
+    window.inbox_page.refresh()
+    checkboxes = window.inbox_page.findChildren(QCheckBox)
+
+    assert 99999 not in window.inbox_page._selected_ids
+    assert len(checkboxes) == 2
+    window.allow_close = True
+    window.close()
+
+
+def test_filing_prompt_prefills_from_the_name_template(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    path = app_config.inbox_dir / "MAT101_aula5.pdf"
+    path.write_bytes(b"x")
+    item = database.add_inbox_item(
+        path, app_config.downloads_dir / path.name, path.name, path.stat().st_size
+    )
+    guess = guess_filing(item.original_name, [subject])
+    prompt = FilingPrompt(timeout_seconds=30)
+
+    prompt.show_item(item, [subject], guess)
+    assert prompt.name_edit.text() == "MAT101_aula5.pdf"
+
+    prompt.show_item(item, [subject], guess, name_template="{codigo} - {nome_original}")
+    assert prompt.name_edit.text() == "MAT101 - MAT101_aula5.pdf"
+
+    prompt.timer.stop()
+    prompt.hide()

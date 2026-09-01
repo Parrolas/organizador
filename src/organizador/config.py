@@ -41,6 +41,17 @@ TEMPORARY_SUFFIXES = (
     ".download",
     ".opdownload",
 )
+NAME_TEMPLATE_TOKENS: tuple[str, ...] = (
+    "{disciplina}",
+    "{codigo}",
+    "{tipo}",
+    "{nome_original}",
+    "{data}",
+    "{ano}",
+    "{mes}",
+    "{dia}",
+)
+DEFAULT_FILENAME_TEMPLATE = "{nome_original}"
 
 
 def _known_folder(value_name: str, fallback: Path) -> Path:
@@ -88,6 +99,8 @@ class AppConfig:
     watch_enabled: bool = True
     launch_at_login: bool = False
     prompt_timeout_seconds: int = 45
+    reminder_lead_days: int = 2
+    filename_template: str = DEFAULT_FILENAME_TEMPLATE
     initialized: bool = False
 
     @property
@@ -145,6 +158,9 @@ class AppConfig:
             raise ValueError("O tamanho mínimo não pode ser negativo.")
         if self.prompt_timeout_seconds < 10:
             raise ValueError("O tempo do popup deve ser de pelo menos 10 segundos.")
+        if not 0 <= self.reminder_lead_days <= 30:
+            raise ValueError("O aviso de prazos deve estar entre 0 e 30 dias.")
+        _validate_name_template(self.filename_template)
 
     def accepts(self, path: Path) -> bool:
         """Return whether a file has an eligible, non-temporary suffix."""
@@ -209,6 +225,8 @@ class AppConfig:
                 watch_enabled=_bool_setting(raw, "watch_enabled", True),
                 launch_at_login=_bool_setting(raw, "launch_at_login", False),
                 prompt_timeout_seconds=_int_setting(raw, "prompt_timeout_seconds", 45),
+                reminder_lead_days=_int_setting(raw, "reminder_lead_days", 2),
+                filename_template=_str_setting(raw, "filename_template", DEFAULT_FILENAME_TEMPLATE),
                 initialized=_bool_setting(raw, "initialized", False),
             )
             config.validate()
@@ -260,6 +278,28 @@ def _int_setting(raw: dict[str, Any], key: str, default: int) -> int:
     if type(value) is not int:
         raise TypeError(f"{key} deve ser um número inteiro")
     return value
+
+
+def _str_setting(raw: dict[str, Any], key: str, default: str) -> str:
+    if key not in raw:
+        return default
+    value = raw[key]
+    if not isinstance(value, str):
+        raise TypeError(f"{key} deve ser texto")
+    return value
+
+
+def _validate_name_template(template: str) -> None:
+    cleaned = template.strip()
+    if not cleaned:
+        raise ValueError("O modelo do nome não pode estar vazio.")
+    if len(cleaned) > 120:
+        raise ValueError("O modelo do nome é demasiado longo (máximo 120 caracteres).")
+    if cleaned.count("{") != cleaned.count("}"):
+        raise ValueError("O modelo do nome tem chaves por fechar.")
+    for token in re.findall(r"\{[^{}]*\}", cleaned):
+        if token not in NAME_TEMPLATE_TOKENS:
+            raise ValueError(f"Token desconhecido no modelo do nome: {token}")
 
 
 def _bool_setting(raw: dict[str, Any], key: str, default: bool) -> bool:

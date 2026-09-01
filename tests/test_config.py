@@ -141,3 +141,35 @@ def test_load_ignores_persisted_data_dir(app_config: AppConfig, tmp_path: Path) 
     loaded = AppConfig.load(app_config.data_dir)
 
     assert loaded.data_dir == app_config.data_dir
+
+
+def test_filename_template_validation_rules(tmp_path: Path) -> None:
+    AppConfig(data_dir=tmp_path, filename_template="{disciplina} - {nome_original}").validate()
+
+    for bad in ("{disciplina", "{desconhecido}", "x" * 121, "   "):
+        with pytest.raises(ValueError):
+            AppConfig(data_dir=tmp_path, filename_template=bad).validate()
+
+
+def test_settings_round_trip_for_reminder_and_template(tmp_path: Path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path,
+        reminder_lead_days=5,
+        filename_template="{codigo}_{tipo}_{nome_original}",
+    )
+    config.save()
+
+    loaded = AppConfig.load(tmp_path)
+
+    assert loaded.reminder_lead_days == 5
+    assert loaded.filename_template == "{codigo}_{tipo}_{nome_original}"
+
+
+def test_load_rejects_wrong_types_for_new_settings(tmp_path: Path) -> None:
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"reminder_lead_days": "2", "filename_template": 5}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        AppConfig.load(tmp_path)

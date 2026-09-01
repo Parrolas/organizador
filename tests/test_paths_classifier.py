@@ -200,3 +200,18 @@ def test_due_date_supports_iso_and_portuguese_numeric_forms() -> None:
 def test_due_date_rejects_invalid_calendar_values() -> None:
     assert extract_due_date("entrega_2026-13-45.pdf") is None
     assert extract_due_date("sem_data.pdf") is None
+
+
+def test_due_date_ignores_section_numbering_without_deadline_context() -> None:
+    assert extract_due_date("Aula 5-3.pdf") is None
+    assert extract_due_date("Capitulo 12-4.pdf") is None
+    assert extract_due_date("aula_7-8.pdf") is None
+    assert extract_due_date("Seccao 2-10.pdf") is None
+    assert extract_due_date("Ficha3-4.pdf") is None
+
+
+def test_due_date_accepts_unambiguous_or_contextual_pairs() -> None:
+    assert extract_due_date("resumo_30-09.pdf") == date(date.today().year, 9, 30)
+    assert extract_due_date("Teste 5-3.pdf", today=date(2026, 8, 1)) == date(2027, 3, 5)
+    assert extract_due_date("entrega aula 5-3.pdf", today=date(2026, 8, 1)) is None
+    assert extract_due_date("ficha_2026-05-10.pdf") == date(2026, 5, 10)

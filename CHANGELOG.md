@@ -2,6 +2,27 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.4.0 - 2026-09-01
+
+### Added
+
+- Bulk filing: select several inbox files and organise them with one decision,
+  previewing every final name before confirming. Each file keeps its own journal;
+  failed files stay pending and only the latest filing can be undone.
+- Filename templates with tokens such as `{codigo}` and `{nome_original}`,
+  configurable in Definições and previewed live in the filing prompt.
+- Advance deadline reminders with a configurable lead time, shown at most once
+  per day per task, surviving restarts.
+- Tasks can now be edited: title, subject, deadline and per-task reminder.
+- Archived subjects can be shown and restored from the Disciplinas page.
+
+### Fixed
+
+- Filename date detection no longer mistakes section numbering like "Aula 5-3"
+  for a deadline; a date is only suggested with unambiguous order or deadline
+  vocabulary, and the task checkbox only auto-ticks for real dates.
+- Task notifications no longer repeat after every application restart.
+
 ## 0.3.0 - 2026-09-01
 
 ### Added

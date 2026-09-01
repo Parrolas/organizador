@@ -1,16 +1,22 @@
-"""Focused setup and subject-editing dialogs."""
+"""Focused setup, task-editing, subject-editing and bulk-filing dialogs."""
 
 from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Sequence
 from contextlib import suppress
+from datetime import date, timedelta
 from pathlib import Path
+from typing import cast
 
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
+    QComboBox,
+    QDateEdit,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -26,8 +32,8 @@ from PySide6.QtWidgets import (
 
 from organizador.config import AppConfig
 from organizador.db import Database
-from organizador.filer import FilingService
-from organizador.models import Subject
+from organizador.filer import FilingService, render_final_name
+from organizador.models import FILE_KINDS, InboxItem, StudyTask, Subject
 from organizador.ui.theme import TEAL
 from organizador.ui.widgets import button, label
 
@@ -124,6 +130,111 @@ class SubjectDialog(QDialog):
         if not self.name_edit.text().strip():
             self.error_label.setText("Escreve o nome da disciplina para continuar.")
             self.name_edit.setFocus()
+            return
+        self.accept()
+
+
+class TaskDialog(QDialog):
+    """Edit an existing study task's title, subject, deadline and reminder."""
+
+    def __init__(
+        self,
+        task: StudyTask,
+        subjects: Sequence[Subject],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Editar tarefa")
+        self.setModal(True)
+        self.setMinimumWidth(500)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 26, 28, 24)
+        root.setSpacing(18)
+        root.addWidget(label("Editar tarefa", "PageTitle"))
+
+        form = QFormLayout()
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(14)
+
+        self.title_edit = QLineEdit(task.title)
+        self.title_edit.setAccessibleName("Título da tarefa")
+        form.addRow("Tarefa", self.title_edit)
+
+        self.subject_combo = QComboBox()
+        for subject in subjects:
+            name = subject.name if subject.active else f"{subject.name} (arquivada)"
+            self.subject_combo.addItem(name, subject.id)
+        current = self.subject_combo.findData(task.subject_id)
+        if current >= 0:
+            self.subject_combo.setCurrentIndex(current)
+        form.addRow("Disciplina", self.subject_combo)
+
+        self.due_check = QCheckBox("Prazo")
+        self.due_edit = QDateEdit()
+        self.due_edit.setCalendarPopup(True)
+        self.due_edit.setDisplayFormat("dd/MM/yyyy")
+        self.due_edit.setEnabled(task.due_date is not None)
+        if task.due_date is not None:
+            self.due_edit.setDate(QDate(task.due_date.year, task.due_date.month, task.due_date.day))
+        else:
+            fallback = date.today() + timedelta(days=7)
+            self.due_edit.setDate(QDate(fallback.year, fallback.month, fallback.day))
+        self.due_check.setChecked(task.due_date is not None)
+        self.due_check.toggled.connect(self.due_edit.setEnabled)
+        due_row = QHBoxLayout()
+        due_row.addWidget(self.due_check)
+        due_row.addWidget(self.due_edit)
+        due_row.addStretch(1)
+        form.addRow("Prazo", due_row)
+
+        self.reminder_combo = QComboBox()
+        self._reminder_choices: tuple[tuple[int | None, str], ...] = (
+            (None, "Padrão das Definições"),
+            (0, "No dia"),
+            (1, "1 dia antes"),
+            (2, "2 dias antes"),
+            (3, "3 dias antes"),
+            (7, "1 semana antes"),
+        )
+        for value, text in self._reminder_choices:
+            self.reminder_combo.addItem(text, value)
+        lead_index = self.reminder_combo.findData(task.reminder_lead_days)
+        self.reminder_combo.setCurrentIndex(lead_index if lead_index >= 0 else 0)
+        form.addRow("Aviso", self.reminder_combo)
+        root.addLayout(form)
+
+        self.error_label = label("", "ErrorText")
+        self.error_label.setWordWrap(True)
+        root.addWidget(self.error_label)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel = button("Cancelar")
+        cancel.clicked.connect(self.reject)
+        save = button("Guardar tarefa", variant="primary")
+        save.clicked.connect(self._validate)
+        actions.addWidget(cancel)
+        actions.addWidget(save)
+        root.addLayout(actions)
+        self.title_edit.setFocus()
+
+    @property
+    def values(self) -> tuple[str, int | None, date | None, int | None]:
+        """Return title, subject id, due date and per-task reminder lead."""
+
+        due = (
+            cast(date | None, self.due_edit.date().toPython())
+            if self.due_check.isChecked()
+            else None
+        )
+        lead = self.reminder_combo.currentData()
+        return self.title_edit.text().strip(), self.subject_combo.currentData(), due, lead
+
+    def _validate(self) -> None:
+        if not self.title_edit.text().strip():
+            self.error_label.setText("Escreve o título da tarefa para continuar.")
+            self.title_edit.setFocus()
             return
         self.accept()
 
@@ -291,3 +402,122 @@ class OnboardingDialog(QDialog):
             self.error_label.setText(f"Não foi possível concluir: {exc}")
             return
         self.accept()
+
+
+class BulkFilingDialog(QDialog):
+    """One explicit decision for filing several inbox files together."""
+
+    def __init__(
+        self,
+        items: Sequence[InboxItem],
+        subjects: Sequence[Subject],
+        name_template: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.items = tuple(items)
+        self.subjects = tuple(subjects)
+        self.name_template = name_template
+        count = len(self.items)
+        self.setWindowTitle("Organizar seleção")
+        self.setModal(True)
+        self.setMinimumWidth(600)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 26, 28, 24)
+        root.setSpacing(14)
+        root.addWidget(label(f"Organizar {count} ficheiro{'s' if count != 1 else ''}", "PageTitle"))
+        subtitle = label(
+            "Todos vão para a mesma disciplina e tipo. Cada ficheiro mantém o seu "
+            "próprio histórico; só a última organização pode ser desfeita.",
+            "PageSubtitle",
+        )
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        form = QFormLayout()
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(12)
+
+        self.subject_combo = QComboBox()
+        for subject in self.subjects:
+            self.subject_combo.addItem(subject.name, subject.id)
+        self.subject_combo.currentIndexChanged.connect(self._update_preview)
+        form.addRow("Disciplina", self.subject_combo)
+
+        self.type_combo = QComboBox()
+        for kind in FILE_KINDS:
+            self.type_combo.addItem(kind, kind)
+        self.type_combo.setCurrentIndex(self.type_combo.findData("Slides"))
+        self.type_combo.currentIndexChanged.connect(self._update_preview)
+        form.addRow("Tipo", self.type_combo)
+
+        self.task_check = QCheckBox("Criar tarefa para cada ficheiro")
+        self.due_edit = QDateEdit()
+        self.due_edit.setCalendarPopup(True)
+        self.due_edit.setDisplayFormat("dd/MM/yyyy")
+        self.due_edit.setEnabled(False)
+        self.task_check.toggled.connect(self.due_edit.setEnabled)
+        fallback = date.today() + timedelta(days=7)
+        self.due_edit.setDate(QDate(fallback.year, fallback.month, fallback.day))
+        form.addRow(self.task_check)
+        form.addRow("Prazo das tarefas", self.due_edit)
+        root.addLayout(form)
+
+        root.addWidget(label("Nomes finais", "RowTitle"))
+        self.preview_label = label("", "Muted")
+        self.preview_label.setWordWrap(True)
+        self.preview_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        root.addWidget(self.preview_label)
+
+        self.error_label = label("", "ErrorText")
+        self.error_label.setWordWrap(True)
+        root.addWidget(self.error_label)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel = button("Cancelar")
+        cancel.clicked.connect(self.reject)
+        accept = button(f"Organizar {count} ficheiro{'s' if count != 1 else ''}", variant="primary")
+        accept.clicked.connect(self.accept)
+        actions.addWidget(cancel)
+        actions.addWidget(accept)
+        root.addLayout(actions)
+        self._update_preview()
+
+    def _current_subject(self) -> Subject | None:
+        subject_id = self.subject_combo.currentData()
+        for subject in self.subjects:
+            if subject.id == subject_id:
+                return subject
+        return None
+
+    def _update_preview(self) -> None:
+        subject = self._current_subject()
+        lines: list[str] = []
+        for item in self.items:
+            final = render_final_name(
+                self.name_template,
+                subject_name=subject.name if subject else "",
+                subject_code=subject.code if subject else "",
+                kind=self.type_combo.currentData() or "Outros",
+                original_name=item.original_name,
+                when=item.detected_at,
+            )
+            lines.append(f"{item.original_name}  →  {final}")
+        self.preview_label.setText("\n".join(lines))
+
+    @property
+    def values(self) -> tuple[int, str, bool, date | None]:
+        """Return subject id, kind, whether to create tasks, and the task due date."""
+
+        due = (
+            cast(date | None, self.due_edit.date().toPython())
+            if self.task_check.isChecked()
+            else None
+        )
+        kind = self.type_combo.currentData()
+        subject_id = self.subject_combo.currentData()
+        if subject_id is None or kind is None:  # pragma: no cover - combo is always populated
+            raise RuntimeError("A seleção de disciplina e tipo é obrigatória.")
+        return int(subject_id), str(kind), self.task_check.isChecked(), due

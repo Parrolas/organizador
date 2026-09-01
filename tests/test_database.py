@@ -51,6 +51,12 @@ def test_subject_update_and_archive(database: Database, subject: Subject) -> Non
     assert database.count_subjects() == 0
     assert database.get_subject(subject.id) is not None
 
+    restored = database.set_subject_active(subject.id, True)
+
+    assert restored.active
+    assert database.count_subjects() == 1
+    assert database.find_active_subject_conflicts(subject.id) == ()
+
 
 def test_unused_subject_can_be_deleted_during_setup_rollback(
     database: Database, subject: Subject
@@ -497,3 +503,66 @@ def test_activity_summary_tracks_lifetime_history(
     assert summary.returned == 1
     assert summary.collisions_renamed == 2
     assert summary.operations_recovered == 0
+
+
+def test_task_reminder_columns_are_added_additively(database: Database) -> None:
+    with database.connect() as connection:
+        connection.execute("ALTER TABLE tasks DROP COLUMN reminder_lead_days")
+        connection.execute("ALTER TABLE tasks DROP COLUMN last_notified_on")
+        connection.commit()
+
+    database.initialize()
+
+    with database.connect() as connection:
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    assert {"reminder_lead_days", "last_notified_on"} <= columns
+    assert version == 5
+    task = database.add_task("Ainda funciona", None, None)
+    assert task.last_notified_on is None
+    assert task.reminder_lead_days is None
+
+
+def test_task_update_changes_fields_and_keeps_the_document_link(
+    database: Database, subject: Subject
+) -> None:
+    earlier = database.add_task("Primeira", subject.id, date(2026, 9, 20), file_id=None)
+    later = database.add_task("Segunda", subject.id, date(2026, 10, 20))
+    database.mark_task_notified(later.id, date(2026, 9, 1))
+
+    updated = database.update_task(
+        later.id, "Segunda revista", subject.id, date(2026, 9, 5), reminder_lead_days=7
+    )
+
+    assert updated.title == "Segunda revista"
+    assert updated.due_date == date(2026, 9, 5)
+    assert updated.reminder_lead_days == 7
+    assert updated.last_notified_on is None
+    assert [task.id for task in database.list_tasks()] == [updated.id, earlier.id]
+
+    renamed = database.update_task(earlier.id, "Primeira editada", None, None)
+
+    assert renamed.subject_id is None
+    assert renamed.due_date is None
+    assert database.get_task(earlier.id) is not None
+
+    with pytest.raises(LookupError):
+        database.update_task(9999, "Fantasma", None, None)
+    with pytest.raises(ValueError):
+        database.update_task(earlier.id, "   ", None, None)
+
+
+def test_archived_subject_has_no_active_conflicts_and_restores_cleanly(
+    database: Database, subject: Subject
+) -> None:
+    database.archive_subject(subject.id)
+    database.add_subject("Cálculo I bis", "MAT102", "#123456", (), "MAT102 - Cálculo I")
+
+    conflicts = database.find_active_subject_conflicts(subject.id)
+
+    assert conflicts == ()
+    restored = database.set_subject_active(subject.id, True)
+    assert restored.active
+    assert database.count_subjects() == 2

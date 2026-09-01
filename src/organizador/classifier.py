@@ -14,6 +14,46 @@ from organizador.models import FILE_KINDS, FilingGuess, FilingHint, Subject
 
 LEARNED_CONFIDENCE = 70
 MIN_LEARNED_OBSERVATIONS = 2
+DEADLINE_CONTEXT_TERMS = frozenset(
+    {
+        "entrega",
+        "entregar",
+        "prazo",
+        "deadline",
+        "due",
+        "ate",
+        "limite",
+        "teste",
+        "exame",
+        "frequencia",
+        "avaliacao",
+        "trabalho",
+        "projeto",
+        "relatorio",
+        "homework",
+        "ficha",
+        "lista",
+        "exercicio",
+    }
+)
+SECTION_NUMBERING_TERMS = frozenset(
+    {
+        "aula",
+        "aulas",
+        "capitulo",
+        "cap",
+        "ch",
+        "slide",
+        "slides",
+        "semana",
+        "parte",
+        "vol",
+        "volume",
+        "modulo",
+        "seccao",
+        "secao",
+    }
+)
 Choice = TypeVar("Choice", int, str)
 
 KIND_TERMS: dict[str, tuple[str, ...]] = {
@@ -143,7 +183,12 @@ def _guess_kind(tokens: set[str], normalised_name: str) -> str:
 
 
 def extract_due_date(filename: str, *, today: date | None = None) -> date | None:
-    """Extract common numeric deadline formats from a filename."""
+    """Extract common numeric deadline formats from a filename.
+
+    Ambiguous day-month pairs are only accepted when the year is present, the
+    order is unambiguous, or the filename contains deadline vocabulary - a
+    bare "Aula 5-3" is section numbering, not a date.
+    """
 
     reference = today or date.today()
     stem = filename.rsplit(".", 1)[0]
@@ -157,12 +202,22 @@ def extract_due_date(filename: str, *, today: date | None = None) -> date | None
     local_match = re.search(r"(?<!\d)(\d{1,2})[-_.](\d{1,2})(?:[-_.](20\d{2}))?(?!\d)", stem)
     if not local_match:
         return None
-    day, month, year = local_match.groups()
+    day_text, month_text, year_text = local_match.groups()
+    day, month = int(day_text), int(month_text)
+    if year_text is None:
+        context_tokens = set(normalise(stem).split())
+        before = stem[: local_match.start()]
+        preceding = re.findall(r"[^\W\d_]+|\d+", before, re.UNICODE)
+        section_precedes = bool(preceding) and normalise(preceding[-1]) in SECTION_NUMBERING_TERMS
+        unambiguous = day > 12 or month > 12
+        contextual = bool(context_tokens & DEADLINE_CONTEXT_TERMS)
+        if section_precedes or not (unambiguous or contextual):
+            return None
     try:
-        candidate = date(int(year) if year else reference.year, int(month), int(day))
+        candidate = date(int(year_text) if year_text else reference.year, month, day)
     except ValueError:
         return None
-    if year is None and candidate < reference:
+    if year_text is None and candidate < reference:
         try:
             candidate = candidate.replace(year=reference.year + 1)
         except ValueError:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -9,7 +10,7 @@ import pytest
 
 from organizador.config import AppConfig
 from organizador.db import Database
-from organizador.filer import FilingError, FilingService
+from organizador.filer import FilingError, FilingService, render_final_name
 from organizador.models import FilingHint, Subject
 from organizador.paths import IncompleteMoveError
 
@@ -255,3 +256,37 @@ def test_database_failure_rolls_subject_move_back(
     refreshed = database.get_inbox_item(item.id)
     assert refreshed is not None
     assert refreshed.status == "pending"
+
+
+def test_render_final_name_keeps_the_original_extension() -> None:
+    name = render_final_name(
+        "{codigo}_{tipo}_{nome_original}",
+        subject_name="Cálculo I",
+        subject_code="MAT101",
+        kind="Slides",
+        original_name="Aula 5.pdf",
+        when=datetime(2026, 9, 1, 10, 0, 0),
+    )
+
+    assert name == "MAT101_Slides_Aula 5.pdf"
+
+
+def test_template_without_extension_still_gets_one_through_filing(
+    app_config: AppConfig, database: Database, filer: FilingService, subject: Subject
+) -> None:
+    item = filer.ingest(_download(app_config, "notas.pdf"))
+    assert item is not None
+    final_name = render_final_name(
+        "{codigo}_resumo",
+        subject_name=subject.name,
+        subject_code=subject.code,
+        kind="Slides",
+        original_name=item.original_name,
+        when=item.detected_at,
+    )
+
+    document = filer.file_document(item.id, subject.id, "Slides", final_name)
+
+    assert final_name == "MAT101_resumo.pdf"
+    assert document.current_path.name == "MAT101_resumo.pdf"
+    assert database.activity_summary().collisions_renamed == 0
