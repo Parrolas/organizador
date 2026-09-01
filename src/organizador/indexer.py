@@ -19,6 +19,8 @@ LOGGER = logging.getLogger(__name__)
 IndexCallback = Callable[[int, str], None]
 MAX_INDEX_BYTES = 50 * 1024 * 1024
 INDEXABLE_SUFFIXES = OFFICE_SUFFIXES | {".pdf", ".txt", ".md", ".csv", ".ipynb"}
+MAX_PENDING_INDEX_JOBS = 50
+DocumentKey = tuple[int, str]
 
 
 class DocumentIndexer:
@@ -28,22 +30,35 @@ class DocumentIndexer:
         self.database = database
         self.on_finished = on_finished
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pdf-indexer")
-        self._active: set[int] = set()
+        self._active: set[DocumentKey] = set()
+        self._attempted: set[DocumentKey] = set()
         self._stop = Event()
 
     def submit(self, document: FiledDocument) -> None:
         """Queue a document unless it is already being processed."""
 
-        if self._stop.is_set() or document.id in self._active:
+        key = (document.id, document.record_token)
+        if (
+            self._stop.is_set()
+            or key in self._attempted
+            or len(self._active) >= MAX_PENDING_INDEX_JOBS
+        ):
             return
-        self._active.add(document.id)
+        self._active.add(key)
+        self._attempted.add(key)
         future = self._executor.submit(self.index_document, document)
-        future.add_done_callback(partial(self._done, document.id))
+        future.add_done_callback(partial(self._done, key))
 
     def submit_pending(self) -> None:
         """Queue documents left unindexed by an earlier app session."""
 
-        for document in self.database.list_unindexed_documents():
+        available = MAX_PENDING_INDEX_JOBS - len(self._active)
+        if available <= 0:
+            return
+        for document in self.database.list_unindexed_documents(
+            limit=available,
+            excluded_keys=self._attempted,
+        ):
             if self._stop.is_set():
                 return
             self.submit(document)
@@ -62,7 +77,11 @@ class DocumentIndexer:
         suffix = path.suffix.casefold()
         if suffix in INDEXABLE_SUFFIXES and document.size > MAX_INDEX_BYTES:
             LOGGER.warning("Skipping oversized document index: %s", path)
-            self.database.mark_document_indexed(document.id, expected_path=document.current_path)
+            self.database.mark_document_indexed(
+                document.id,
+                expected_path=document.current_path,
+                expected_record_token=document.record_token,
+            )
             return
         pages: list[str] = []
         if suffix == ".pdf":
@@ -72,7 +91,9 @@ class DocumentIndexer:
                     reader.decrypt("")
                 except Exception:
                     self.database.mark_document_indexed(
-                        document.id, expected_path=document.current_path
+                        document.id,
+                        expected_path=document.current_path,
+                        expected_record_token=document.record_token,
                     )
                     return
             for page in reader.pages:
@@ -104,7 +125,9 @@ class DocumentIndexer:
             except Exception:
                 LOGGER.exception("Failed to extract Office document %s", path)
                 self.database.mark_document_indexed(
-                    document.id, expected_path=document.current_path
+                    document.id,
+                    expected_path=document.current_path,
+                    expected_record_token=document.record_token,
                 )
                 return
         if not self._stop.is_set():
@@ -114,6 +137,7 @@ class DocumentIndexer:
                 document.original_name,
                 pages,
                 expected_path=document.current_path,
+                expected_record_token=document.record_token,
             )
 
     def shutdown(self) -> None:
@@ -122,15 +146,15 @@ class DocumentIndexer:
         self._stop.set()
         self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def _done(self, file_id: int, future: Future[None]) -> None:
-        self._active.discard(file_id)
+    def _done(self, key: DocumentKey, future: Future[None]) -> None:
+        self._active.discard(key)
         error = ""
         try:
             future.result()
         except CancelledError:
             return
         except Exception as exc:
-            LOGGER.exception("Failed to index file id %s", file_id)
+            LOGGER.exception("Failed to index file id %s", key[0])
             error = str(exc)
         if self.on_finished is not None:
-            self.on_finished(file_id, error)
+            self.on_finished(key[0], error)

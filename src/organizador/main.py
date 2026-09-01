@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import logging
 import sys
 from pathlib import Path
 
@@ -13,8 +14,11 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from organizador.config import APP_NAME, AppConfig, default_data_dir
 from organizador.controller import AppController
+from organizador.logging_setup import configure_logging, log_uncaught_exception
 from organizador.ui.icons import app_icon
 from organizador.ui.theme import apply_theme
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SingleInstance(QObject):
@@ -65,10 +69,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def load_config_safely(data_dir: Path) -> tuple[AppConfig, Exception | None]:
+    """Return safe defaults when any settings-loading failure reaches startup."""
+
+    try:
+        return AppConfig.load(data_dir), None
+    except Exception as exc:
+        LOGGER.exception("Could not load application settings")
+        return AppConfig(data_dir=data_dir), exc
+
+
 def main(argv: list[str] | None = None) -> int:
     """Create Qt, enforce one instance and run the application."""
 
     arguments = build_parser().parse_args(argv)
+    target_data_dir = arguments.data_dir or default_data_dir()
+    sys.excepthook = log_uncaught_exception
+    try:
+        configure_logging(target_data_dir)
+    except Exception as exc:
+        logging_error: Exception | None = exc
+    else:
+        logging_error = None
     application = QApplication(sys.argv[:1])
     application.setApplicationName(APP_NAME)
     application.setOrganizationName(APP_NAME)
@@ -76,21 +98,38 @@ def main(argv: list[str] | None = None) -> int:
     application.setWindowIcon(app_icon())
     apply_theme(application)
 
-    try:
-        config = AppConfig.load(arguments.data_dir)
-    except ValueError as exc:
-        config = AppConfig(data_dir=arguments.data_dir or default_data_dir())
+    if logging_error is not None:
+        QMessageBox.critical(
+            None,
+            "Não foi possível iniciar o registo",
+            "A pasta de dados da aplicação não está disponível. "
+            f"Nenhum ficheiro foi alterado.\n\n{logging_error}",
+        )
+        return 1
+
+    config, config_error = load_config_safely(target_data_dir)
+    if config_error is not None:
         QMessageBox.warning(
             None,
             "Definições danificadas",
             "Não foi possível ler as definições guardadas. "
-            f"A app abriu com valores seguros para poderes corrigi-las.\n\n{exc}",
+            f"A app abriu com valores seguros para poderes corrigi-las.\n\n{config_error}",
         )
     instance = SingleInstance(config.data_dir)
     if not arguments.smoke_test and not instance.acquire():
         return 0
 
-    controller = AppController(config)
+    try:
+        controller = AppController(config)
+    except Exception as exc:
+        LOGGER.exception("Could not initialize application data")
+        QMessageBox.critical(
+            None,
+            "Não foi possível abrir os dados",
+            "A aplicação não conseguiu abrir o catálogo local. "
+            f"Consulta organizador.log antes de tentar novamente.\n\n{exc}",
+        )
+        return 1
     instance.show_requested.connect(controller.show_main)
     controller.start(background=arguments.background, smoke_test=arguments.smoke_test)
     if arguments.smoke_test:

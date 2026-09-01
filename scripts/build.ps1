@@ -40,6 +40,7 @@ if ($LASTEXITCODE -ne 0) { throw "Não foi possível gerar os metadados de vers�
     --clean `
     --windowed `
     --onedir `
+    --noupx `
     --name "Organizador" `
     --paths (Join-Path $Root "src") `
     --hidden-import "watchdog.observers.winapi" `

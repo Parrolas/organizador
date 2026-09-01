@@ -15,8 +15,9 @@ from organizador.config import AppConfig
 from organizador.controller import AppController
 from organizador.db import Database
 from organizador.filer import FilingService
-from organizador.models import Subject
+from organizador.models import FindingReason, Subject
 from organizador.paths import IncompleteMoveError
+from organizador.reconcile import findings, visible_findings
 from organizador.reconcile import scan as scan_reconciliation
 from organizador.ui.dialogs import OnboardingDialog, SubjectDialog
 from organizador.ui.main_window import MainWindow
@@ -50,6 +51,29 @@ def test_main_window_builds_and_refreshes_all_pages(
     window.inbox_page.import_existing_requested.connect(lambda: import_requests.append(True))
     window.inbox_page.import_button.click()
     assert import_requests == [True]
+    window.allow_close = True
+    window.close()
+
+
+def test_settings_preserve_an_exact_minimum_file_size(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+) -> None:
+    del qt_app
+    app_config.minimum_file_size = 1537
+    window = MainWindow(database, app_config)
+    payloads: list[SettingsPayload] = []
+    window.settings_page.save_requested.connect(payloads.append)
+
+    save = next(
+        control
+        for control in window.settings_page.findChildren(QPushButton)
+        if control.text() == "Guardar definições"
+    )
+    save.click()
+
+    assert payloads[0]["minimum_file_size"] == 1537
     window.allow_close = True
     window.close()
 
@@ -96,17 +120,119 @@ def test_unresolved_history_path_is_visible_in_the_inbox(
     untracked = app_config.university_root / subject.folder_name / "Slides" / "sem-registo.pdf"
     untracked.write_bytes(b"untracked but untouched")
     window = MainWindow(database, app_config)
+    adopted: list[object] = []
+    reviewed: list[object] = []
+    window.inbox_page.adopt_requested.connect(adopted.append)
+    window.inbox_page.dismiss_finding_requested.connect(reviewed.append)
     window.inbox_page.set_reconciliation_report(scan_reconciliation(app_config, database))
 
     window.inbox_page.refresh()
     visible_copy = [item.text() for item in window.inbox_page.findChildren(QLabel)]
+    buttons = window.inbox_page.findChildren(QPushButton)
 
-    assert "1 caminho do histórico precisa de revisão" in window.inbox_page.summary_label.text()
+    assert "1 ocorrência do histórico precisa de revisão" in window.inbox_page.summary_label.text()
     assert any("Encontrado numa disciplina sem registo" in text for text in visible_copy)
     assert any(str(untracked) == text for text in visible_copy)
+    next(control for control in buttons if control.text() == "Adotar").click()
+    next(control for control in buttons if control.text() == "Marcar revisto").click()
+    assert len(adopted) == 1
+    assert len(reviewed) == 1
     assert untracked.read_bytes() == b"untracked but untouched"
     window.allow_close = True
     window.close()
+
+
+def test_two_reconciliation_reasons_at_one_path_render_as_two_findings(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+) -> None:
+    source = app_config.downloads_dir / "same-path.txt"
+    source.write_bytes(b"one path with two reasons")
+    item = filer.ingest(source)
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Outros", source.name)
+    document.current_path.unlink()
+    window = MainWindow(database, app_config)
+    window.inbox_page.set_reconciliation_report(scan_reconciliation(app_config, database))
+
+    window.inbox_page.refresh()
+    visible_copy = [item.text() for item in window.inbox_page.findChildren(QLabel)]
+    button_copy = [item.text() for item in window.inbox_page.findChildren(QPushButton)]
+
+    assert (
+        "2 ocorrências do histórico precisam de revisão" in window.inbox_page.summary_label.text()
+    )
+    assert any("Documento registado" in text for text in visible_copy)
+    assert any("não pode ser desfeita" in text for text in visible_copy)
+    assert visible_copy.count(str(document.current_path)) == 2
+    assert "Remover registo" in button_copy
+    assert button_copy.count("Marcar revisto") == 2
+    window.allow_close = True
+    window.close()
+
+
+def test_controller_adopts_and_unregisters_without_moving_the_file(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database
+    path = app_config.university_root / subject.folder_name / "Outros" / "legacy.txt"
+    contents = b"catalog this file in place"
+    path.write_bytes(contents)
+    controller = AppController(app_config)
+    report = scan_reconciliation(app_config, controller.database)
+    finding = next(
+        item for item in findings(report) if item.reason is FindingReason.UNTRACKED_SUBJECT_FILE
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    controller._adopt_untracked_file(finding)
+    adopted = controller.database.list_adopted_files()
+
+    assert len(adopted) == 1
+    assert path.read_bytes() == contents
+    controller._unregister_adopted_file(adopted[0].id)
+    report = scan_reconciliation(app_config, controller.database)
+    assert controller.database.list_adopted_files() == []
+    assert visible_findings(controller.database, report) == ()
+    assert path.read_bytes() == contents
+    qt_app.processEvents()
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
+
+
+def test_stale_watcher_generation_cannot_ingest_after_restart(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+) -> None:
+    del qt_app, database
+    controller = AppController(app_config)
+    controller._watcher_generation = 2
+    candidate = app_config.downloads_dir / "stale-callback.pdf"
+    contents = b"stale watcher callback must be ignored"
+    candidate.write_bytes(contents)
+
+    controller._ingest_download(1, candidate)
+
+    assert controller.database.count_inbox_items() == 0
+    assert candidate.read_bytes() == contents
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
 
 
 def test_filing_prompt_selects_classifier_suggestion(

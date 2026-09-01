@@ -44,6 +44,9 @@ No Qt or PySide source files were modified for this distribution.
 | watchdog | 6.0.0 | Apache-2.0 | https://github.com/gorakhargosh/watchdog |
 | typing_extensions | 4.16.0 | PSF-2.0 | https://github.com/python/typing_extensions |
 
+`defusedxml` is an intentional runtime dependency. `openpyxl` detects it at
+runtime and uses its hardened XML parser when reading untrusted workbooks.
+
 The build copies the exact license, copying, notice, and author files supplied
 by these installed distributions into the `packages` subdirectory. Copyright
 notices in those files are retained verbatim.

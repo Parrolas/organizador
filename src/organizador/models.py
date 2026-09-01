@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import StrEnum
 from pathlib import Path
 from stat import S_ISREG
 
@@ -58,6 +59,36 @@ class FiledDocument:
     size: int
     filed_at: datetime
     indexed_at: datetime | None
+    origin: str = "filed"
+    record_token: str = ""
+    catalog_state: str = "active"
+
+
+class FindingReason(StrEnum):
+    """Stable persistence keys for findings that require a human decision."""
+
+    UNTRACKED_SUBJECT_FILE = "untracked_subject_file"
+    MISSING_DOCUMENT = "missing_document"
+    BROKEN_UNDO_EVENT = "broken_undo_event"
+    PENDING_FILING_SOURCE = "pending_filing_source"
+    PENDING_FILING_DESTINATION = "pending_filing_destination"
+    PENDING_RETURN_SOURCE = "pending_return_source"
+    PENDING_RETURN_DESTINATION = "pending_return_destination"
+    PENDING_UNDO_SOURCE = "pending_undo_source"
+    PENDING_UNDO_DESTINATION = "pending_undo_destination"
+    LEGACY_INTERRUPTED_UNDO = "legacy_interrupted_undo"
+    UNSAFE_PATH = "unsafe_path"
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationFinding:
+    """One independently reviewable path/reason pair from a consistency scan."""
+
+    path: Path
+    reason: FindingReason
+    reference_id: int | None = None
+    candidate: ExistingDownload | None = None
+    document: FiledDocument | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +218,7 @@ class ReconciliationReport:
     pending_undo_events: tuple[HistoryEvent, ...]
     legacy_interrupted_undos: tuple[InterruptedUndo, ...]
     unsafe_paths: tuple[Path, ...]
+    untracked_subject_candidates: tuple[ExistingDownload, ...] = ()
     truncated: bool = False
     incomplete: bool = False
 

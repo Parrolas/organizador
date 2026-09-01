@@ -1,4 +1,5 @@
-# Runtime packages used for the v0.1.0 Windows build.
+# Runtime packages used for reproducible Windows release builds.
+# defusedxml is intentionally installed so openpyxl uses its hardened XML parser.
 defusedxml==0.7.1
 et_xmlfile==2.0.0
 lxml==6.1.2

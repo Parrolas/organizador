@@ -10,7 +10,6 @@ import subprocess
 from collections import deque
 from contextlib import suppress
 from datetime import date
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -21,7 +20,22 @@ from organizador.config import AppConfig, parse_extensions
 from organizador.db import Database
 from organizador.filer import FilingError, FilingService
 from organizador.indexer import DocumentIndexer
-from organizador.models import ExistingDownload, FilingGuess, InboxItem, Subject
+from organizador.logging_setup import configure_logging
+from organizador.models import (
+    ExistingDownload,
+    FilingGuess,
+    FindingReason,
+    InboxItem,
+    ReconciliationFinding,
+    Subject,
+)
+from organizador.reconcile import (
+    adopt_untracked_subject_file,
+    dismiss_finding,
+    drop_missing_document,
+    unregister_adopted_document,
+    visible_findings,
+)
 from organizador.reconcile import apply as apply_reconciliation
 from organizador.reconcile import scan as scan_reconciliation
 from organizador.startup import set_launch_at_login
@@ -38,7 +52,7 @@ LOGGER = logging.getLogger(__name__)
 class AppController(QObject):
     """Own the long-running services and marshal worker events onto Qt's thread."""
 
-    download_ready = Signal(object)
+    download_ready = Signal(int, object)
     index_completed = Signal(int, str)
     import_completed = Signal(int)
 
@@ -46,7 +60,7 @@ class AppController(QObject):
         super().__init__()
         self.config = config
         self.config.data_dir.mkdir(parents=True, exist_ok=True)
-        self._configure_logging()
+        configure_logging(self.config.data_dir)
         self.database = Database(config.database_path)
         self.database.initialize()
         self.filer = FilingService(config, self.database)
@@ -64,6 +78,7 @@ class AppController(QObject):
         self._manual_import_failed = 0
         self._manual_import_deferred = 0
         self._manual_import_errors: list[str] = []
+        self._watcher_generation = 0
 
         self.main_window = MainWindow(self.database, config)
         self.prompt = FilingPrompt(config.prompt_timeout_seconds)
@@ -123,6 +138,7 @@ class AppController(QObject):
                 guess = self._filing_guess(item.original_name, subjects)
                 self.database.update_inbox_suggestion(item.id, guess.subject_id, guess.kind)
             remaining = scan_reconciliation(self.config, self.database)
+            manual_paths = {finding.path for finding in visible_findings(self.database, remaining)}
         except sqlite3.Error as exc:
             LOGGER.exception("Startup reconciliation failed")
             self.tray.notify(
@@ -131,19 +147,6 @@ class AppController(QObject):
             )
             return
 
-        manual_paths = {
-            *remaining.untracked_subject_files,
-            *(document.current_path for document in remaining.missing_documents),
-            *(event.destination_path for event in remaining.broken_undo_events),
-            *(event.source_path for event in remaining.pending_filing_events),
-            *(event.destination_path for event in remaining.pending_filing_events),
-            *(event.source_path for event in remaining.pending_return_events),
-            *(event.destination_path for event in remaining.pending_return_events),
-            *(event.source_path for event in remaining.pending_undo_events),
-            *(event.destination_path for event in remaining.pending_undo_events),
-            *(item.restored_file.path for item in remaining.legacy_interrupted_undos),
-            *remaining.unsafe_paths,
-        }
         self.main_window.inbox_page.set_reconciliation_report(remaining)
         if report.finding_count:
             LOGGER.info(
@@ -191,9 +194,11 @@ class AppController(QObject):
         """Stop worker threads before terminating Qt."""
 
         self.reminder_timer.stop()
+        self._watcher_generation += 1
         if self.watcher is not None:
             self.watcher.stop()
             self.watcher = None
+        self._reset_manual_import_state()
         self.indexer.shutdown()
         self.prompt.hide()
         self.tray.hide()
@@ -230,6 +235,12 @@ class AppController(QObject):
         self.main_window.inbox_page.import_existing_requested.connect(
             self._import_existing_downloads
         )
+        self.main_window.inbox_page.adopt_requested.connect(self._adopt_untracked_file)
+        self.main_window.inbox_page.drop_record_requested.connect(self._drop_missing_record)
+        self.main_window.inbox_page.dismiss_finding_requested.connect(
+            self._dismiss_reconciliation_finding
+        )
+        self.main_window.inbox_page.unregister_requested.connect(self._unregister_adopted_file)
         self.main_window.search_page.open_path.connect(self._open_path)
         self.main_window.search_page.reveal_path.connect(self._reveal_path)
         self.main_window.tasks_page.changed.connect(self._refresh)
@@ -244,14 +255,23 @@ class AppController(QObject):
         self.prompt.return_requested.connect(self._return_item)
 
     def _restart_watcher(self) -> None:
+        self._watcher_generation += 1
+        generation = self._watcher_generation
+        interrupted_import = self._manual_import_active
         if self.watcher is not None:
             self.watcher.stop()
             self.watcher = None
+        if interrupted_import:
+            self._reset_manual_import_state()
+            self.main_window.inbox_page.set_import_status(
+                "A importação foi interrompida. Os ficheiros ainda não importados "
+                "ficaram em Downloads."
+            )
         if not (self.config.initialized and self.database.count_subjects() > 0):
             return
         candidate = DownloadWatcher(
             self.config,
-            lambda download: self.download_ready.emit(download),
+            lambda download: self.download_ready.emit(generation, download),
             lambda skipped: self.import_completed.emit(skipped),
         )
         try:
@@ -268,7 +288,13 @@ class AppController(QObject):
             return
         self.watcher = candidate
 
-    def _ingest_download(self, candidate: Path | ExistingDownload) -> None:
+    def _ingest_download(
+        self,
+        generation: int,
+        candidate: Path | ExistingDownload,
+    ) -> None:
+        if generation != self._watcher_generation:
+            return
         if isinstance(candidate, ExistingDownload):
             manual_candidate = candidate
             path = candidate.path
@@ -367,8 +393,7 @@ class AppController(QObject):
         )
         queued = watcher.enqueue_existing(plan.selected)
         if queued == 0:
-            self._manual_import_active = False
-            self.main_window.inbox_page.set_import_running(False)
+            self._reset_manual_import_state()
             self.main_window.inbox_page.set_import_status(
                 "Os ficheiros mudaram ou já estavam a ser processados e ficaram em Downloads."
             )
@@ -395,11 +420,121 @@ class AppController(QObject):
                 shown_errors += f"; e mais {len(self._manual_import_errors) - 3}"
             message += f" Revê: {shown_errors}."
         message += " Nenhum ficheiro foi substituído ou apagado."
-        self._manual_import_active = False
-        self.main_window.inbox_page.set_import_running(False)
+        self._reset_manual_import_state()
         self.main_window.inbox_page.set_import_status(message)
         self._refresh()
         self.tray.notify("Importação de Downloads concluída", message)
+
+    def _adopt_untracked_file(self, finding: ReconciliationFinding) -> None:
+        if finding.reason is not FindingReason.UNTRACKED_SUBJECT_FILE:
+            return
+        answer = QMessageBox.question(
+            self.main_window,
+            "Adotar ficheiro existente?",
+            f"{finding.path.name} será adicionado ao catálogo e à pesquisa local. "
+            "O ficheiro não será movido, renomeado nem alterado.",
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            document = adopt_untracked_subject_file(self.config, self.database, finding)
+        except (LookupError, ValueError, OSError, sqlite3.Error) as exc:
+            QMessageBox.warning(self.main_window, "Não foi possível adotar", str(exc))
+            self._refresh_reconciliation_report()
+            return
+        self.indexer.submit(document)
+        self.main_window.inbox_page.set_import_status(
+            f"{document.current_path.name} foi adotado sem mover o ficheiro."
+        )
+        self._refresh_reconciliation_report()
+
+    def _drop_missing_record(self, finding: ReconciliationFinding) -> None:
+        if finding.reason is not FindingReason.MISSING_DOCUMENT or finding.document is None:
+            return
+        answer = QMessageBox.question(
+            self.main_window,
+            "Remover registo em falta?",
+            "Será removido apenas o registo local e o índice de pesquisa. "
+            "Nenhum ficheiro será apagado. Se o ficheiro reaparecer durante a operação, "
+            "ficará visível para poder ser adotado novamente.",
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            removed = drop_missing_document(self.database, finding.document)
+        except sqlite3.Error as exc:
+            LOGGER.exception("Could not drop missing catalog record")
+            QMessageBox.warning(self.main_window, "Não foi possível remover", str(exc))
+            self._refresh_reconciliation_report()
+            return
+        if not removed:
+            QMessageBox.information(
+                self.main_window,
+                "Registo mantido",
+                "O ficheiro ou o registo mudou desde a verificação. Nada foi removido.",
+            )
+        self._refresh_reconciliation_report()
+
+    def _dismiss_reconciliation_finding(self, finding: ReconciliationFinding) -> None:
+        try:
+            dismissed = dismiss_finding(self.database, finding)
+        except sqlite3.Error as exc:
+            QMessageBox.warning(self.main_window, "Não foi possível guardar", str(exc))
+            return
+        if dismissed:
+            self.main_window.inbox_page.set_import_status(
+                "A ocorrência foi marcada como revista. O ficheiro não foi alterado."
+            )
+            self._refresh_reconciliation_report()
+
+    def _unregister_adopted_file(self, file_id: int) -> None:
+        document = self.database.get_file(file_id)
+        if document is None or document.origin != "adopted":
+            self._refresh_reconciliation_report()
+            return
+        answer = QMessageBox.question(
+            self.main_window,
+            "Remover do catálogo?",
+            f"{document.current_path.name} deixará de aparecer na pesquisa e nos recentes. "
+            "O ficheiro permanecerá exatamente onde está.",
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            removed = unregister_adopted_document(self.database, document)
+        except sqlite3.Error as exc:
+            LOGGER.exception("Could not unregister adopted file")
+            QMessageBox.warning(self.main_window, "Não foi possível remover", str(exc))
+            self._refresh_reconciliation_report()
+            return
+        if not removed:
+            QMessageBox.information(
+                self.main_window,
+                "Registo mantido",
+                "O registo mudou desde que a página foi aberta. Nada foi removido.",
+            )
+        else:
+            self.main_window.inbox_page.set_import_status(
+                f"{document.current_path.name} saiu do catálogo; o ficheiro ficou no lugar."
+            )
+        self._refresh_reconciliation_report()
+
+    def _refresh_reconciliation_report(self) -> None:
+        try:
+            report = scan_reconciliation(self.config, self.database)
+            visible_findings(self.database, report)
+        except sqlite3.Error as exc:
+            LOGGER.exception("Could not refresh reconciliation findings")
+            QMessageBox.warning(self.main_window, "Verificação incompleta", str(exc))
+            return
+        self.main_window.inbox_page.set_reconciliation_report(report)
+        self._refresh()
 
     def _organise_item(self, inbox_id: int) -> None:
         if self.prompt.current_item_id == inbox_id:
@@ -601,7 +736,9 @@ class AppController(QObject):
             self._refresh()
 
     def _save_settings(self, values: SettingsPayload) -> None:
-        if self._manual_import_active:
+        if self._manual_import_active or (
+            self.watcher is not None and self.watcher.manual_import_running
+        ):
             self.main_window.settings_page.set_status(
                 "Espera que a importação de Downloads termine antes de guardar.",
                 error=True,
@@ -639,6 +776,15 @@ class AppController(QObject):
         self.main_window.settings_page.load_config(self.config)
         self.main_window.settings_page.set_status("Definições guardadas.")
         self._refresh()
+
+    def _reset_manual_import_state(self) -> None:
+        self._manual_import_active = False
+        self._manual_imported = 0
+        self._manual_import_skipped = 0
+        self._manual_import_failed = 0
+        self._manual_import_deferred = 0
+        self._manual_import_errors.clear()
+        self.main_window.inbox_page.set_import_running(False)
 
     def _restore_config(self, previous: AppConfig) -> None:
         self.config.university_root = previous.university_root
@@ -678,6 +824,7 @@ class AppController(QObject):
     def _index_finished(self, file_id: int, error: str) -> None:
         if error:
             LOGGER.warning("Indexing failed for file %s: %s", file_id, error)
+        self.indexer.submit_pending()
         if self.main_window.search_page.search_edit.text().strip():
             self.main_window.search_page.search()
 
@@ -713,16 +860,3 @@ class AppController(QObject):
             subprocess.Popen(["explorer.exe", "/select,", str(path)])
         except OSError as exc:
             QMessageBox.warning(self.main_window, "Não foi possível mostrar", str(exc))
-
-    def _configure_logging(self) -> None:
-        handler = RotatingFileHandler(
-            self.config.log_path,
-            maxBytes=1_500_000,
-            backupCount=2,
-            encoding="utf-8",
-        )
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-        root = logging.getLogger()
-        root.setLevel(logging.INFO)
-        if not any(isinstance(existing, RotatingFileHandler) for existing in root.handlers):
-            root.addHandler(handler)

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from organizador.models import (
     FILE_KINDS,
@@ -20,8 +22,10 @@ from organizador.models import (
     StudyTask,
     Subject,
 )
+from organizador.paths import normalise_path_key
 
-SCHEMA_VERSION = 3
+LOGGER = logging.getLogger(__name__)
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS subjects (
@@ -61,7 +65,11 @@ CREATE TABLE IF NOT EXISTS files (
     original_path TEXT NOT NULL,
     size INTEGER NOT NULL,
     filed_at TEXT NOT NULL,
-    indexed_at TEXT
+    indexed_at TEXT,
+    origin TEXT NOT NULL DEFAULT 'filed' CHECK (origin IN ('filed', 'adopted')),
+    record_token TEXT NOT NULL DEFAULT '',
+    catalog_state TEXT NOT NULL DEFAULT 'active'
+        CHECK (catalog_state IN ('active', 'dropped'))
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -87,6 +95,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS reviewed_findings (
+    normalized_path TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL,
+    PRIMARY KEY (normalized_path, reason)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS document_pages USING fts5(
     file_id UNINDEXED,
     page UNINDEXED,
@@ -104,7 +119,7 @@ CREATE INDEX IF NOT EXISTS idx_events_undo ON events(undone_at, created_at DESC)
 
 
 def _now() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+    return datetime.now().astimezone().isoformat(timespec="microseconds")
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -142,11 +157,17 @@ class Database:
             connection.execute("PRAGMA journal_mode = WAL")
             version_row = connection.execute("PRAGMA user_version").fetchone()
             previous_version = int(version_row[0]) if version_row is not None else 0
+            if previous_version > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"A base de dados pertence a uma versão mais recente ({previous_version})."
+                )
             connection.executescript(SCHEMA)
             if previous_version < 2:
                 self._prepare_office_reindex(connection)
             if previous_version < 3:
                 self._prepare_operation_journal(connection)
+            if previous_version < 4:
+                self._prepare_reconciliation_actions(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             connection.commit()
 
@@ -188,6 +209,35 @@ class Database:
             CREATE UNIQUE INDEX idx_inbox_active_path
             ON inbox(path) WHERE status IN ('pending', 'error', 'filing', 'returning')
             """
+        )
+
+    @staticmethod
+    def _prepare_reconciliation_actions(connection: sqlite3.Connection) -> None:
+        """Add file provenance and persisted finding-review state."""
+
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(files)").fetchall()
+        }
+        if "origin" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE files ADD COLUMN origin TEXT NOT NULL DEFAULT 'filed'
+                CHECK (origin IN ('filed', 'adopted'))
+                """
+            )
+        if "record_token" not in columns:
+            connection.execute("ALTER TABLE files ADD COLUMN record_token TEXT NOT NULL DEFAULT ''")
+        if "catalog_state" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE files ADD COLUMN catalog_state TEXT NOT NULL DEFAULT 'active'
+                CHECK (catalog_state IN ('active', 'dropped'))
+                """
+            )
+        rows = connection.execute("SELECT id FROM files WHERE record_token = ''").fetchall()
+        connection.executemany(
+            "UPDATE files SET record_token = ? WHERE id = ? AND record_token = ''",
+            ((uuid4().hex, int(row["id"])) for row in rows),
         )
 
     def add_subject(
@@ -652,8 +702,8 @@ class Database:
 
         now = _now()
         with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             if pending_event_id is not None:
-                connection.execute("BEGIN IMMEDIATE")
                 marker = connection.execute(
                     """
                     SELECT id FROM events
@@ -681,27 +731,67 @@ class Database:
             if item_row is None:
                 raise LookupError(f"Ficheiro da caixa inexistente: {inbox_id}")
             item = self._inbox(item_row)
-            cursor = connection.execute(
-                """
-                INSERT INTO files(
-                    subject_id, inbox_id, kind, original_name, current_path,
-                    original_path, size, filed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    subject_id,
-                    inbox_id,
-                    kind,
-                    item.original_name,
-                    str(destination_path),
-                    str(item.original_path),
-                    item.size,
-                    now,
-                ),
-            )
-            if cursor.lastrowid is None:
-                raise RuntimeError("A base de dados não devolveu o id do documento.")
-            file_id = cursor.lastrowid
+            destination_key = normalise_path_key(destination_path)
+            catalog_rows = connection.execute(
+                "SELECT id, current_path, catalog_state FROM files"
+            ).fetchall()
+            matching = [
+                row
+                for row in catalog_rows
+                if normalise_path_key(Path(str(row["current_path"]))) == destination_key
+            ]
+            if any(str(row["catalog_state"]) == "active" for row in matching):
+                raise LookupError("O destino já pertence a outro registo do catálogo.")
+            token = uuid4().hex
+            if matching:
+                if len(matching) != 1:
+                    raise LookupError("Existem vários registos antigos para o mesmo destino.")
+                file_id = int(matching[0]["id"])
+                connection.execute(
+                    """
+                    UPDATE files
+                    SET subject_id = ?, inbox_id = ?, kind = ?, original_name = ?,
+                        current_path = ?, original_path = ?, size = ?, filed_at = ?,
+                        indexed_at = NULL, origin = 'filed', record_token = ?,
+                        catalog_state = 'active'
+                    WHERE id = ? AND catalog_state = 'dropped'
+                    """,
+                    (
+                        subject_id,
+                        inbox_id,
+                        kind,
+                        item.original_name,
+                        str(destination_path),
+                        str(item.original_path),
+                        item.size,
+                        now,
+                        token,
+                        file_id,
+                    ),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO files(
+                        subject_id, inbox_id, kind, original_name, current_path,
+                        original_path, size, filed_at, record_token
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        subject_id,
+                        inbox_id,
+                        kind,
+                        item.original_name,
+                        str(destination_path),
+                        str(item.original_path),
+                        item.size,
+                        now,
+                        token,
+                    ),
+                )
+                if cursor.lastrowid is None:
+                    raise RuntimeError("A base de dados não devolveu o id do documento.")
+                file_id = cursor.lastrowid
             connection.execute(
                 "UPDATE inbox SET status = 'filed', path = ?, last_error = '' WHERE id = ?",
                 (str(destination_path), inbox_id),
@@ -729,6 +819,238 @@ class Database:
         if document is None:  # pragma: no cover - defensive database invariant
             raise RuntimeError("O ficheiro foi organizado mas não pôde ser lido.")
         return document
+
+    def adopt_subject_file(
+        self,
+        candidate: ExistingDownload,
+        subject_id: int,
+        kind: str,
+    ) -> FiledDocument:
+        """Catalog an unchanged file in place without creating move history."""
+
+        if kind not in FILE_KINDS:
+            raise ValueError(f"Tipo de documento inválido: {kind}")
+        if not candidate.still_matches():
+            raise LookupError("O ficheiro mudou antes de poder ser adotado.")
+        now = _now()
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            subject = connection.execute(
+                "SELECT id FROM subjects WHERE id = ?", (subject_id,)
+            ).fetchone()
+            if subject is None:
+                raise LookupError("A disciplina já não existe.")
+            if not candidate.still_matches():
+                raise LookupError("O ficheiro mudou antes de poder ser adotado.")
+            candidate_key = normalise_path_key(candidate.path)
+            catalog_rows = connection.execute(
+                "SELECT id, current_path, catalog_state FROM files"
+            ).fetchall()
+            matching = [
+                row
+                for row in catalog_rows
+                if normalise_path_key(Path(str(row["current_path"]))) == candidate_key
+            ]
+            if any(str(row["catalog_state"]) == "active" for row in matching):
+                raise LookupError("O ficheiro já existe no catálogo através de outro caminho.")
+            token = uuid4().hex
+            if matching:
+                if len(matching) != 1:
+                    raise LookupError("Existem vários registos antigos para o mesmo ficheiro.")
+                file_id = int(matching[0]["id"])
+                cursor = connection.execute(
+                    """
+                    UPDATE files
+                    SET subject_id = ?, inbox_id = NULL, kind = ?, original_name = ?,
+                        current_path = ?, original_path = ?, size = ?, filed_at = ?,
+                        indexed_at = NULL, origin = 'adopted', record_token = ?,
+                        catalog_state = 'active'
+                    WHERE id = ? AND catalog_state = 'dropped'
+                    """,
+                    (
+                        subject_id,
+                        kind,
+                        candidate.path.name,
+                        str(candidate.path),
+                        str(candidate.path),
+                        candidate.size,
+                        now,
+                        token,
+                        file_id,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise LookupError("O registo antigo mudou antes de poder ser adotado.")
+            else:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO files(
+                        subject_id, inbox_id, kind, original_name, current_path,
+                        original_path, size, filed_at, origin, record_token
+                    ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'adopted', ?)
+                    """,
+                    (
+                        subject_id,
+                        kind,
+                        candidate.path.name,
+                        str(candidate.path),
+                        str(candidate.path),
+                        candidate.size,
+                        now,
+                        token,
+                    ),
+                )
+                if cursor.lastrowid is None:
+                    raise RuntimeError("A base de dados não devolveu o id do documento adotado.")
+                file_id = cursor.lastrowid
+            connection.commit()
+        document = self.get_file(file_id)
+        if document is None:  # pragma: no cover - defensive database invariant
+            raise RuntimeError("O documento foi adotado mas não pôde ser lido.")
+        return document
+
+    def unregister_adopted_file(
+        self,
+        file_id: int,
+        *,
+        expected_path: Path,
+        expected_record_token: str,
+        reviewed_reason: str,
+    ) -> bool:
+        """Remove only an adopted catalog row while leaving its file untouched."""
+
+        normalized_path = normalise_path_key(expected_path)
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            pending = connection.execute(
+                "SELECT 1 FROM events WHERE action = 'undo_pending' AND file_id = ?",
+                (file_id,),
+            ).fetchone()
+            if pending is not None:
+                return False
+            cursor = connection.execute(
+                """
+                DELETE FROM files
+                WHERE id = ? AND current_path = ? AND record_token = ?
+                  AND origin = 'adopted' AND catalog_state = 'active'
+                """,
+                (file_id, str(expected_path), expected_record_token),
+            )
+            if cursor.rowcount != 1:
+                return False
+            connection.execute("DELETE FROM document_pages WHERE file_id = ?", (str(file_id),))
+            connection.execute(
+                """
+                INSERT INTO reviewed_findings(normalized_path, reason, reviewed_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(normalized_path, reason)
+                DO UPDATE SET reviewed_at = excluded.reviewed_at
+                """,
+                (normalized_path, reviewed_reason, _now()),
+            )
+            connection.commit()
+        return True
+
+    def drop_file_record(
+        self,
+        file_id: int,
+        *,
+        expected_path: Path,
+        expected_origin: str,
+        expected_record_token: str,
+        verify_missing: Callable[[], bool],
+    ) -> bool:
+        """Drop a stale catalog row after its caller proves the file is missing."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            pending = connection.execute(
+                "SELECT 1 FROM events WHERE action = 'undo_pending' AND file_id = ?",
+                (file_id,),
+            ).fetchone()
+            if pending is not None:
+                return False
+            current = connection.execute(
+                """
+                SELECT id FROM files
+                WHERE id = ? AND current_path = ? AND origin = ? AND record_token = ?
+                  AND catalog_state = 'active'
+                """,
+                (
+                    file_id,
+                    str(expected_path),
+                    expected_origin,
+                    expected_record_token,
+                ),
+            ).fetchone()
+            if current is None or not verify_missing():
+                return False
+            cursor = connection.execute(
+                """
+                UPDATE files
+                SET catalog_state = 'dropped', indexed_at = NULL, record_token = ?
+                WHERE id = ? AND current_path = ? AND origin = ? AND record_token = ?
+                  AND catalog_state = 'active'
+                """,
+                (
+                    uuid4().hex,
+                    file_id,
+                    str(expected_path),
+                    expected_origin,
+                    expected_record_token,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return False
+            connection.execute(
+                """
+                UPDATE events SET undone_at = COALESCE(undone_at, ?)
+                WHERE action = 'file' AND file_id = ?
+                """,
+                (_now(), file_id),
+            )
+            connection.execute("DELETE FROM document_pages WHERE file_id = ?", (str(file_id),))
+            connection.execute("UPDATE tasks SET file_id = NULL WHERE file_id = ?", (file_id,))
+            connection.commit()
+        return cursor.rowcount == 1
+
+    def mark_finding_reviewed(self, path: Path, reason: str) -> None:
+        """Persist an idempotent human review decision for one path/reason pair."""
+
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO reviewed_findings(normalized_path, reason, reviewed_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(normalized_path, reason)
+                DO UPDATE SET reviewed_at = excluded.reviewed_at
+                """,
+                (normalise_path_key(path), reason, _now()),
+            )
+            connection.commit()
+
+    def list_reviewed_finding_keys(self) -> set[tuple[str, str]]:
+        """Return all persisted review keys in one query."""
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT normalized_path, reason FROM reviewed_findings"
+            ).fetchall()
+        return {(str(row["normalized_path"]), str(row["reason"])) for row in rows}
+
+    def prune_reviewed_findings(self, live_keys: set[tuple[str, str]]) -> int:
+        """Forget reviews whose underlying finding disappeared after a complete scan."""
+
+        stale = self.list_reviewed_finding_keys() - live_keys
+        if not stale:
+            return 0
+        with self.connect() as connection:
+            connection.executemany(
+                "DELETE FROM reviewed_findings WHERE normalized_path = ? AND reason = ?",
+                sorted(stale),
+            )
+            connection.commit()
+        return len(stale)
 
     def record_return(
         self,
@@ -791,7 +1113,10 @@ class Database:
         """Return a filed document by id."""
 
         with self.connect() as connection:
-            row = connection.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
+            row = connection.execute(
+                "SELECT * FROM files WHERE id = ? AND catalog_state = 'active'",
+                (file_id,),
+            ).fetchone()
         return self._file(row) if row else None
 
     def list_recent_files(self, limit: int = 8) -> list[FiledDocument]:
@@ -799,7 +1124,12 @@ class Database:
 
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM files ORDER BY filed_at DESC LIMIT ?", (limit,)
+                """
+                SELECT * FROM files
+                WHERE catalog_state = 'active'
+                ORDER BY filed_at DESC LIMIT ?
+                """,
+                (limit,),
             ).fetchall()
         return [self._file(row) for row in rows]
 
@@ -807,7 +1137,22 @@ class Database:
         """List every filed document for consistency checks."""
 
         with self.connect() as connection:
-            rows = connection.execute("SELECT * FROM files ORDER BY id ASC").fetchall()
+            rows = connection.execute(
+                "SELECT * FROM files WHERE catalog_state = 'active' ORDER BY id ASC"
+            ).fetchall()
+        return [self._file(row) for row in rows]
+
+    def list_adopted_files(self) -> list[FiledDocument]:
+        """List files cataloged in place so the user can unregister them."""
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM files
+                WHERE origin = 'adopted' AND catalog_state = 'active'
+                ORDER BY filed_at DESC
+                """
+            ).fetchall()
         return [self._file(row) for row in rows]
 
     def filing_hints(self) -> list[FilingHint]:
@@ -821,6 +1166,8 @@ class Database:
                 JOIN inbox AS i ON i.id = f.inbox_id
                 JOIN subjects AS s ON s.id = f.subject_id
                 WHERE i.status = 'filed'
+                  AND f.origin = 'filed'
+                  AND f.catalog_state = 'active'
                   AND s.active = 1
                   AND EXISTS (
                       SELECT 1 FROM events AS e
@@ -846,20 +1193,28 @@ class Database:
             hints.append(FilingHint(str(row["original_name"]), int(row["subject_id"]), kind))
         return hints
 
-    def list_unindexed_documents(self, limit: int = 50) -> list[FiledDocument]:
+    def list_unindexed_documents(
+        self,
+        limit: int = 50,
+        *,
+        excluded_keys: Collection[tuple[int, str]] = (),
+    ) -> list[FiledDocument]:
         """List supported files waiting for text extraction."""
 
         with self.connect() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM files
-                WHERE indexed_at IS NULL
+                WHERE indexed_at IS NULL AND catalog_state = 'active'
                 ORDER BY filed_at ASC
                 """
             ).fetchall()
         result: list[FiledDocument] = []
+        excluded = set(excluded_keys)
         for row in rows:
             document = self._file(row)
+            if (document.id, document.record_token) in excluded:
+                continue
             if ExistingDownload.capture(document.current_path) is None:
                 continue
             result.append(document)
@@ -1042,6 +1397,7 @@ class Database:
             """
             SELECT id FROM files
             WHERE id = ? AND inbox_id = ? AND current_path = ?
+              AND origin = 'filed' AND catalog_state = 'active'
             """,
             (event.file_id, event.inbox_id, str(event.destination_path)),
         ).fetchone()
@@ -1086,23 +1442,33 @@ class Database:
         pages: Sequence[str],
         *,
         expected_path: Path | None = None,
+        expected_record_token: str | None = None,
     ) -> None:
         """Replace all indexed pages for a document."""
 
         with self.connect() as connection:
             if expected_path is not None:
+                token_clause = " AND record_token = ?" if expected_record_token is not None else ""
+                parameters: tuple[object, ...] = (_now(), file_id, str(expected_path))
+                if expected_record_token is not None:
+                    parameters += (expected_record_token,)
                 updated = connection.execute(
-                    """
+                    f"""
                     UPDATE files SET indexed_at = ?
-                    WHERE id = ? AND current_path = ?
+                    WHERE id = ? AND current_path = ?{token_clause}
+                      AND catalog_state = 'active'
                     """,
-                    (_now(), file_id, str(expected_path)),
+                    parameters,
                 )
                 if updated.rowcount != 1:
                     return
             else:
                 connection.execute(
-                    "UPDATE files SET indexed_at = ? WHERE id = ?", (_now(), file_id)
+                    """
+                    UPDATE files SET indexed_at = ?
+                    WHERE id = ? AND catalog_state = 'active'
+                    """,
+                    (_now(), file_id),
                 )
             connection.execute("DELETE FROM document_pages WHERE file_id = ?", (str(file_id),))
             connection.executemany(
@@ -1118,21 +1484,36 @@ class Database:
             )
             connection.commit()
 
-    def mark_document_indexed(self, file_id: int, *, expected_path: Path | None = None) -> None:
+    def mark_document_indexed(
+        self,
+        file_id: int,
+        *,
+        expected_path: Path | None = None,
+        expected_record_token: str | None = None,
+    ) -> None:
         """Mark a document handled even when it contains no extractable text."""
 
         with self.connect() as connection:
             if expected_path is not None:
+                token_clause = " AND record_token = ?" if expected_record_token is not None else ""
+                parameters: tuple[object, ...] = (_now(), file_id, str(expected_path))
+                if expected_record_token is not None:
+                    parameters += (expected_record_token,)
                 connection.execute(
-                    """
+                    f"""
                     UPDATE files SET indexed_at = ?
-                    WHERE id = ? AND current_path = ?
+                    WHERE id = ? AND current_path = ?{token_clause}
+                      AND catalog_state = 'active'
                     """,
-                    (_now(), file_id, str(expected_path)),
+                    parameters,
                 )
             else:
                 connection.execute(
-                    "UPDATE files SET indexed_at = ? WHERE id = ?", (_now(), file_id)
+                    """
+                    UPDATE files SET indexed_at = ?
+                    WHERE id = ? AND catalog_state = 'active'
+                    """,
+                    (_now(), file_id),
                 )
             connection.commit()
 
@@ -1158,12 +1539,14 @@ class Database:
                     JOIN files AS f ON f.id = CAST(dp.file_id AS INTEGER)
                     JOIN subjects AS s ON s.id = f.subject_id
                     WHERE document_pages MATCH ?
+                      AND f.catalog_state = 'active'
                     ORDER BY bm25(document_pages), f.filed_at DESC
                     LIMIT ?
                     """,
                     (query, limit),
                 ).fetchall()
         except sqlite3.OperationalError:
+            LOGGER.exception("FTS search failed for query %r", text)
             return []
         return [
             SearchResult(
@@ -1307,6 +1690,9 @@ class Database:
             indexed_at=_parse_datetime(
                 str(row["indexed_at"]) if row["indexed_at"] is not None else None
             ),
+            origin=str(row["origin"]),
+            record_token=str(row["record_token"]),
+            catalog_state=str(row["catalog_state"]),
         )
 
     @staticmethod

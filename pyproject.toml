@@ -12,6 +12,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "José Parrolas" }]
 dependencies = [
+    # openpyxl uses defusedxml dynamically to harden parsing of untrusted workbooks.
     "defusedxml>=0.7,<1",
     "openpyxl>=3.1,<4",
     "PySide6-Essentials>=6.8,<7",

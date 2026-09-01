@@ -10,8 +10,17 @@ from organizador import reconcile
 from organizador.config import AppConfig
 from organizador.db import Database
 from organizador.filer import FilingService
-from organizador.models import Subject
-from organizador.reconcile import apply, scan
+from organizador.models import FindingReason, ReconciliationFinding, Subject
+from organizador.reconcile import (
+    adopt_untracked_subject_file,
+    apply,
+    dismiss_finding,
+    drop_missing_document,
+    findings,
+    scan,
+    unregister_adopted_document,
+    visible_findings,
+)
 
 
 def _snapshot(root: Path) -> dict[Path, bytes]:
@@ -417,3 +426,267 @@ def test_scan_limit_bounds_directory_work(
     assert len(report.inbox_orphans) == 1
     assert first.exists()
     assert second.exists()
+
+
+def test_untracked_subject_file_can_be_adopted_and_unregistered_without_disk_changes(
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    path = app_config.university_root / subject.folder_name / "Slides" / "legacy.pdf"
+    path.write_bytes(b"existing study document")
+    before = _snapshot(app_config.university_root)
+    report = scan(app_config, database)
+    finding = next(
+        item for item in findings(report) if item.reason is FindingReason.UNTRACKED_SUBJECT_FILE
+    )
+
+    document = adopt_untracked_subject_file(app_config, database, finding)
+
+    assert document.origin == "adopted"
+    assert document.current_path == path
+    assert _snapshot(app_config.university_root) == before
+    assert scan(app_config, database).untracked_subject_files == ()
+
+    assert unregister_adopted_document(database, document)
+    assert _snapshot(app_config.university_root) == before
+    untracked_again = scan(app_config, database)
+    assert untracked_again.untracked_subject_files == (path,)
+    assert visible_findings(database, untracked_again) == ()
+
+
+def test_adoption_rejects_a_file_changed_since_the_scan(
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    path = app_config.university_root / subject.folder_name / "Slides" / "changed.pdf"
+    path.write_bytes(b"original contents")
+    finding = next(
+        item
+        for item in findings(scan(app_config, database))
+        if item.reason is FindingReason.UNTRACKED_SUBJECT_FILE
+    )
+    path.write_bytes(b"replacement contents with a different size")
+
+    with pytest.raises(LookupError, match="mudou"):
+        adopt_untracked_subject_file(app_config, database, finding)
+
+    assert database.list_files() == []
+    assert path.read_bytes() == b"replacement contents with a different size"
+
+
+def test_missing_record_is_dropped_only_while_the_file_remains_absent(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+) -> None:
+    source = app_config.downloads_dir / "missing.pdf"
+    contents = b"missing catalog document" * 20
+    source.write_bytes(contents)
+    item = filer.ingest(source)
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Slides", source.name)
+    document.current_path.unlink()
+    missing_finding = next(
+        item
+        for item in findings(scan(app_config, database))
+        if item.reason is FindingReason.MISSING_DOCUMENT
+    )
+    assert missing_finding.document is not None
+
+    document.current_path.write_bytes(contents)
+    assert not drop_missing_document(database, missing_finding.document)
+    assert database.get_file(document.id) is not None
+
+    document.current_path.unlink()
+    current_finding = next(
+        item
+        for item in findings(scan(app_config, database))
+        if item.reason is FindingReason.MISSING_DOCUMENT
+    )
+    assert current_finding.document is not None
+    assert drop_missing_document(database, current_finding.document)
+    assert database.get_file(document.id) is None
+    assert database.latest_undoable_filing() is None
+    assert not document.current_path.exists()
+    with database.connect() as connection:
+        tombstone = connection.execute(
+            "SELECT catalog_state FROM files WHERE id = ?", (document.id,)
+        ).fetchone()
+    assert tombstone is not None
+    assert tombstone["catalog_state"] == "dropped"
+
+    document.current_path.write_bytes(contents)
+    returned_finding = next(
+        item
+        for item in findings(scan(app_config, database))
+        if item.reason is FindingReason.UNTRACKED_SUBJECT_FILE
+    )
+    readopted = adopt_untracked_subject_file(app_config, database, returned_finding)
+    assert readopted.id == document.id
+    assert readopted.catalog_state == "active"
+    assert document.current_path.read_bytes() == contents
+
+
+def test_reviewing_one_reason_does_not_hide_another_at_the_same_path(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+) -> None:
+    source = app_config.downloads_dir / "two-reasons.pdf"
+    source.write_bytes(b"two reconciliation reasons" * 20)
+    item = filer.ingest(source)
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Slides", source.name)
+    document.current_path.unlink()
+    report = scan(app_config, database)
+    initial = visible_findings(database, report)
+    reasons = {finding.reason for finding in initial if finding.path == document.current_path}
+    assert reasons == {
+        FindingReason.MISSING_DOCUMENT,
+        FindingReason.BROKEN_UNDO_EVENT,
+    }
+    missing = next(
+        finding for finding in initial if finding.reason is FindingReason.MISSING_DOCUMENT
+    )
+
+    assert dismiss_finding(database, missing)
+
+    reopened = Database(database.path)
+    remaining = visible_findings(reopened, report)
+    assert [finding.reason for finding in remaining] == [FindingReason.BROKEN_UNDO_EVENT]
+
+    document.current_path.write_bytes(b"restored")
+    assert visible_findings(database, scan(app_config, database)) == ()
+    assert database.list_reviewed_finding_keys() == set()
+
+
+def test_pending_operation_finding_cannot_be_dismissed(database: Database, tmp_path: Path) -> None:
+    finding = ReconciliationFinding(
+        tmp_path / "pending.pdf",
+        FindingReason.PENDING_FILING_DESTINATION,
+    )
+
+    assert not dismiss_finding(database, finding)
+    assert database.list_reviewed_finding_keys() == set()
+
+
+def test_missing_record_rechecks_absence_inside_the_database_operation(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = app_config.downloads_dir / "restored-during-drop.txt"
+    contents = b"restored while catalog removal is starting"
+    source.write_bytes(contents)
+    item = filer.ingest(source)
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Outros", source.name)
+    document.current_path.unlink()
+    original_probe = reconcile._probe
+    probes = 0
+
+    def restore_on_second_probe(path: Path, state: object = None) -> object:
+        nonlocal probes
+        if path == document.current_path:
+            probes += 1
+            if probes == 2:
+                path.write_bytes(contents)
+        return original_probe(path, state)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reconcile, "_probe", restore_on_second_probe)
+
+    assert not drop_missing_document(database, document)
+    assert database.get_file(document.id) == document
+    assert document.current_path.read_bytes() == contents
+
+
+def test_drop_tombstone_recovers_a_file_appearing_after_the_last_probe(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = app_config.downloads_dir / "late-restored.txt"
+    contents = b"restored immediately after the final absence result"
+    source.write_bytes(contents)
+    item = filer.ingest(source)
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Outros", source.name)
+    document.current_path.unlink()
+    original_probe = reconcile._probe
+    probes = 0
+
+    def recreate_after_result(path: Path, state: object = None) -> object:
+        nonlocal probes
+        if path == document.current_path:
+            probes += 1
+            if probes == 2:
+                path.write_bytes(contents)
+                return reconcile._ProbeState.MISSING
+        return original_probe(path, state)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reconcile, "_probe", recreate_after_result)
+
+    assert drop_missing_document(database, document)
+    assert document.current_path.read_bytes() == contents
+    assert database.get_file(document.id) is None
+    with database.connect() as connection:
+        tombstone = connection.execute(
+            "SELECT catalog_state FROM files WHERE id = ?", (document.id,)
+        ).fetchone()
+    assert tombstone is not None
+    assert tombstone["catalog_state"] == "dropped"
+
+    monkeypatch.setattr(reconcile, "_probe", original_probe)
+    finding = next(
+        item
+        for item in findings(scan(app_config, database))
+        if item.reason is FindingReason.UNTRACKED_SUBJECT_FILE
+    )
+    recovered = adopt_untracked_subject_file(app_config, database, finding)
+    assert recovered.id == document.id
+    assert recovered.record_token != document.record_token
+    assert recovered.current_path.read_bytes() == contents
+
+
+def test_reconciliation_and_adoption_compare_canonical_paths(
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual = app_config.university_root / subject.folder_name / "Slides" / "aliased.pdf"
+    actual.write_bytes(b"one physical document")
+    inbox_path = app_config.inbox_dir / "catalog-row.pdf"
+    inbox_path.write_bytes(b"catalog metadata source")
+    item = database.add_inbox_item(
+        inbox_path,
+        app_config.downloads_dir / inbox_path.name,
+        inbox_path.name,
+        inbox_path.stat().st_size,
+    )
+    alias = app_config.university_root / "directory-alias" / actual.name
+    database.record_filing(item.id, subject.id, "Slides", alias)
+    original_key = reconcile.normalise_path_key
+
+    def alias_key(path: Path) -> str:
+        if path.name == actual.name and path.parent.name in {"Slides", "directory-alias"}:
+            return "same-physical-file"
+        return original_key(path)
+
+    monkeypatch.setattr(reconcile, "normalise_path_key", alias_key)
+    monkeypatch.setattr("organizador.db.normalise_path_key", alias_key)
+
+    report = scan(app_config, database)
+    candidate = reconcile.ExistingDownload.capture(actual)
+    assert candidate is not None
+    assert report.untracked_subject_files == ()
+    with pytest.raises(LookupError, match="outro caminho"):
+        database.adopt_subject_file(candidate, subject.id, "Slides")

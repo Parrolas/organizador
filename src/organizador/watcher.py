@@ -29,6 +29,21 @@ DownloadCandidate = Path | ExistingDownload
 PathCandidateCallback = Callable[[Path], None]
 CandidateCallback = Callable[[DownloadCandidate], None]
 ImportCompleteCallback = Callable[[int], None]
+PathKey = tuple[str, str]
+DEFAULT_STABILIZATION_RETRY_DELAYS = (30.0, 120.0, 300.0)
+
+
+def _directory_key(path: Path) -> str:
+    try:
+        resolved = path.resolve(strict=False)
+    except (OSError, RuntimeError):
+        resolved = path.absolute()
+    return os.path.normcase(os.fspath(resolved))
+
+
+def _path_key(path: Path) -> PathKey:
+    absolute = path.absolute()
+    return (_directory_key(absolute.parent), os.path.normcase(absolute.name))
 
 
 class DownloadEventHandler(FileSystemEventHandler):
@@ -55,22 +70,31 @@ class DownloadWatcher:
         config: AppConfig,
         on_ready: CandidateCallback,
         on_import_complete: ImportCompleteCallback | None = None,
+        *,
+        retry_delays: Sequence[float] = DEFAULT_STABILIZATION_RETRY_DELAYS,
     ) -> None:
         self.config = config
         self.on_ready = on_ready
         self.on_import_complete = on_import_complete
-        self._queue: Queue[DownloadCandidate | None] = Queue()
-        self._pending: set[Path] = set()
-        self._known: set[Path] = set()
-        self._manual_pending: set[Path] = set()
+        if any(delay < 0 for delay in retry_delays):
+            raise ValueError("Retry delays must not be negative")
+        self._retry_delays = tuple(float(delay) for delay in retry_delays)
+        self._queue: Queue[tuple[PathKey, DownloadCandidate] | None] = Queue()
+        self._pending: set[PathKey] = set()
+        self._known: set[PathKey] = set()
+        self._manual_pending: set[PathKey] = set()
         self._manual_skipped = 0
-        self._ignored_until: dict[Path, float] = {}
+        self._ignored_until: dict[PathKey, float] = {}
+        self._retry_after: dict[PathKey, float] = {}
+        self._retry_attempts: dict[PathKey, int] = {}
+        self._retry_exhausted: dict[PathKey, ExistingDownload | None] = {}
         self._lock = Lock()
         self._stop = Event()
         self._paused = Event()
         self._observer: BaseObserver | None = None
         self._worker: Thread | None = None
         self._sweeper: Thread | None = None
+        self._downloads_key = _directory_key(config.downloads_dir)
 
     @property
     def running(self) -> bool:
@@ -103,8 +127,12 @@ class DownloadWatcher:
         if self.active:
             return
         self.config.downloads_dir.mkdir(parents=True, exist_ok=True)
+        self._downloads_key = _directory_key(self.config.downloads_dir)
         self._stop.clear()
-        self._known = self._snapshot() if observe else set()
+        snapshot = self._snapshot() if observe else {}
+        if snapshot is None:
+            raise OSError("Não foi possível estabelecer uma base segura de Downloads.")
+        self._known = set(snapshot)
         self._worker = Thread(target=self._work, name="download-stabilizer", daemon=True)
         self._worker.start()
         if observe:
@@ -134,10 +162,18 @@ class DownloadWatcher:
         self._observer = None
         self._worker = None
         self._sweeper = None
+        completed_skips: int | None = None
         with self._lock:
+            if self._manual_pending:
+                completed_skips = self._manual_skipped + len(self._manual_pending)
             self._pending.clear()
             self._manual_pending.clear()
             self._manual_skipped = 0
+            self._retry_after.clear()
+            self._retry_attempts.clear()
+            self._retry_exhausted.clear()
+        if completed_skips is not None and self.on_import_complete is not None:
+            self.on_import_complete(completed_skips)
 
     def set_paused(self, paused: bool) -> None:
         """Pause or resume candidate intake."""
@@ -150,39 +186,50 @@ class DownloadWatcher:
     def ignore_self_move(self, path: Path, *, seconds: float = 30.0) -> None:
         """Prevent a file returned by this app from being ingested again."""
 
-        try:
-            candidate = path.resolve()
-        except OSError:
+        normalised = self._normalise_candidate(path)
+        if normalised is None:
             return
+        _, key = normalised
         with self._lock:
-            self._known.add(candidate)
-            self._ignored_until[candidate] = monotonic() + seconds
+            self._known.add(key)
+            self._ignored_until[key] = monotonic() + seconds
 
     def enqueue(self, path: Path) -> None:
         """Queue one eligible final filename for stabilization."""
 
         if self._stop.is_set() or not self.config.accepts(path):
             return
-        try:
-            candidate = path.absolute()
-            if candidate.parent.resolve() != self.config.downloads_dir.resolve():
-                return
-        except OSError:
+        normalised = self._normalise_candidate(path)
+        if normalised is None:
             return
+        candidate, key = normalised
         with self._lock:
             if self._paused.is_set():
-                self._known.add(candidate)
+                self._known.add(key)
                 return
-            ignored_until = self._ignored_until.get(candidate)
-            if ignored_until is not None and ignored_until >= monotonic():
-                self._known.add(candidate)
+            now = monotonic()
+            ignored_until = self._ignored_until.get(key)
+            if ignored_until is not None and ignored_until >= now:
+                self._known.add(key)
                 return
-            self._ignored_until.pop(candidate, None)
-            self._known.add(candidate)
-            if candidate in self._pending:
+            self._ignored_until.pop(key, None)
+            if key in self._retry_exhausted:
+                current = ExistingDownload.capture(candidate)
+                if current == self._retry_exhausted[key]:
+                    self._known.add(key)
+                    return
+                self._retry_exhausted.pop(key, None)
+                self._retry_attempts.pop(key, None)
+            retry_after = self._retry_after.get(key)
+            if retry_after is not None and retry_after > now:
+                self._known.add(key)
                 return
-            self._pending.add(candidate)
-        self._queue.put(candidate)
+            self._retry_after.pop(key, None)
+            self._known.add(key)
+            if key in self._pending:
+                return
+            self._pending.add(key)
+        self._queue.put((key, candidate))
 
     def enqueue_existing(self, candidates: Sequence[ExistingDownload]) -> int:
         """Queue one explicitly confirmed batch while enforcing the fixed safety cap."""
@@ -190,32 +237,38 @@ class DownloadWatcher:
         if self._stop.is_set() or not self.active:
             return 0
         selected = candidates[:MANUAL_IMPORT_BATCH_LIMIT]
-        queued: list[ExistingDownload] = []
+        queued: list[tuple[PathKey, ExistingDownload]] = []
         skipped = 0
         with self._lock:
             if self._manual_pending:
                 return 0
             for candidate in selected:
                 path = candidate.path
+                normalised = self._normalise_candidate(path)
                 try:
                     eligible = (
-                        self.config.accepts(path)
-                        and path.parent.resolve() == self.config.downloads_dir.resolve()
+                        normalised is not None
+                        and self.config.accepts(path)
                         and candidate.still_matches()
                     )
                 except OSError:
                     eligible = False
-                if not eligible or path in self._pending:
+                if normalised is None:
+                    eligible = False
+                    key = _path_key(path)
+                else:
+                    _, key = normalised
+                if not eligible or key in self._pending:
                     skipped += 1
                     continue
-                self._pending.add(path)
-                self._manual_pending.add(path)
-                queued.append(candidate)
+                self._pending.add(key)
+                self._manual_pending.add(key)
+                queued.append((key, candidate))
             self._manual_skipped = skipped
             if not queued:
                 self._manual_skipped = 0
-        for candidate in queued:
-            self._queue.put(candidate)
+        for key, candidate in queued:
+            self._queue.put((key, candidate))
         return len(queued)
 
     def _work(self) -> None:
@@ -225,14 +278,17 @@ class DownloadWatcher:
             except Empty:
                 continue
             if queued is None:
+                self._queue.task_done()
                 return
-            if isinstance(queued, ExistingDownload):
-                manual_candidate = queued
-                path = queued.path
+            key, candidate = queued
+            if isinstance(candidate, ExistingDownload):
+                manual_candidate = candidate
+                path = candidate.path
             else:
                 manual_candidate = None
-                path = queued
+                path = candidate
             delivered = False
+            retry = False
             try:
                 unchanged_before = manual_candidate is None or manual_candidate.still_matches()
                 stable = unchanged_before and wait_until_stable(
@@ -242,48 +298,110 @@ class DownloadWatcher:
                 if (
                     stable
                     and unchanged_after
+                    and not self._stop.is_set()
                     and (manual_candidate is not None or not self._paused.is_set())
                 ):
-                    self.on_ready(queued)
+                    self.on_ready(candidate)
                     delivered = True
+                elif (
+                    manual_candidate is None
+                    and not self._stop.is_set()
+                    and not self._paused.is_set()
+                ):
+                    retry = True
             except Exception:
                 LOGGER.exception("Failed while handling download candidate %s", path)
             finally:
                 completed_skips: int | None = None
+                retries_exhausted = False
                 with self._lock:
-                    self._pending.discard(path)
+                    self._pending.discard(key)
+                    if delivered:
+                        self._retry_after.pop(key, None)
+                        self._retry_attempts.pop(key, None)
+                        self._retry_exhausted.pop(key, None)
+                    elif retry:
+                        attempt = self._retry_attempts.get(key, 0)
+                        if attempt < len(self._retry_delays):
+                            self._retry_attempts[key] = attempt + 1
+                            self._retry_after[key] = monotonic() + self._retry_delays[attempt]
+                        else:
+                            self._retry_after.pop(key, None)
+                            self._retry_attempts.pop(key, None)
+                            self._retry_exhausted[key] = ExistingDownload.capture(path)
+                            retries_exhausted = True
                     if manual_candidate is not None:
-                        if not delivered:
-                            self._manual_skipped += 1
-                        self._manual_pending.discard(path)
-                        if not self._manual_pending:
-                            completed_skips = self._manual_skipped
-                            self._manual_skipped = 0
+                        was_pending = key in self._manual_pending
+                        if was_pending:
+                            if not delivered:
+                                self._manual_skipped += 1
+                            self._manual_pending.discard(key)
+                            if not self._manual_pending:
+                                completed_skips = self._manual_skipped
+                                self._manual_skipped = 0
                 self._queue.task_done()
+                if retries_exhausted:
+                    LOGGER.warning("Download did not stabilize after bounded retries: %s", path)
                 if completed_skips is not None and self.on_import_complete is not None:
                     self.on_import_complete(completed_skips)
 
     def _sweep(self) -> None:
         while not self._stop.wait(20.0):
-            current = self._snapshot()
-            with self._lock:
-                now = monotonic()
-                self._ignored_until = {
-                    path: deadline
-                    for path, deadline in self._ignored_until.items()
-                    if deadline >= now
-                }
-                new_paths = current - self._known
-                self._known = current | self._pending
-            for path in new_paths:
-                self.enqueue(path)
+            self._sweep_once()
 
-    def _snapshot(self) -> set[Path]:
+    def _sweep_once(self) -> None:
+        current = self._snapshot()
+        if current is None:
+            return
+        current_keys = set(current)
+        with self._lock:
+            now = monotonic()
+            self._ignored_until = {
+                key: deadline for key, deadline in self._ignored_until.items() if deadline >= now
+            }
+            expired_retries = {
+                key
+                for key, deadline in self._retry_after.items()
+                if deadline <= now and key in current_keys and key not in self._pending
+            }
+            for key in expired_retries:
+                self._retry_after.pop(key, None)
+            changed_exhausted = {
+                key
+                for key, snapshot in self._retry_exhausted.items()
+                if key in current and current[key] != snapshot and key not in self._pending
+            }
+            for key in changed_exhausted:
+                self._retry_exhausted.pop(key, None)
+                self._retry_attempts.pop(key, None)
+            absent = (set(self._retry_attempts) | set(self._retry_exhausted)) - current_keys
+            for key in absent:
+                self._retry_after.pop(key, None)
+                self._retry_attempts.pop(key, None)
+                self._retry_exhausted.pop(key, None)
+            new_keys = (current_keys - self._known) | expired_retries | changed_exhausted
+            self._known = current_keys | self._pending
+        for key in new_keys:
+            self.enqueue(current[key].path)
+
+    def _snapshot(self) -> dict[PathKey, ExistingDownload] | None:
         try:
-            candidates = (
-                ExistingDownload.capture(path) for path in self.config.downloads_dir.iterdir()
-            )
-            return {candidate.path for candidate in candidates if candidate is not None}
+            result: dict[PathKey, ExistingDownload] = {}
+            for path in self.config.downloads_dir.iterdir():
+                candidate = ExistingDownload.capture_strict(path)
+                if candidate is not None:
+                    result[_path_key(candidate.path)] = candidate
+            return result
         except OSError:
             LOGGER.exception("Could not scan Downloads")
-            return set()
+            return None
+
+    def _normalise_candidate(self, path: Path) -> tuple[Path, PathKey] | None:
+        try:
+            candidate = path.absolute()
+            key = _path_key(candidate)
+        except (OSError, RuntimeError):
+            return None
+        if key[0] != self._downloads_key:
+            return None
+        return candidate, key

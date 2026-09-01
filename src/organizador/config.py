@@ -125,16 +125,21 @@ class AppConfig:
     def validate(self) -> None:
         """Reject settings that could cause the watcher to reprocess its own files."""
 
-        downloads = self.downloads_dir.resolve()
-        university = self.university_root.resolve()
-        if (
-            university == downloads
-            or downloads in university.parents
-            or university in downloads.parents
-        ):
+        downloads = _resolve_managed_folder(self.downloads_dir, "Downloads")
+        university = _resolve_managed_folder(self.university_root, "Universidade")
+        try:
+            data_dir = self.data_dir.resolve()
+        except (OSError, RuntimeError) as exc:
+            raise ValueError("A pasta de dados da aplicação não pôde ser validada.") from exc
+        if _paths_overlap(university, downloads):
             raise ValueError(
                 "As pastas Universidade e Downloads não podem coincidir nem "
                 "ficar uma dentro da outra."
+            )
+        if _paths_overlap(university, data_dir) or _paths_overlap(downloads, data_dir):
+            raise ValueError(
+                "As pastas Universidade e Downloads não podem coincidir nem "
+                "ficar dentro da pasta de dados da aplicação."
             )
         if self.minimum_file_size < 0:
             raise ValueError("O tamanho mínimo não pode ser negativo.")
@@ -179,27 +184,39 @@ class AppConfig:
         if not settings_path.exists():
             return cls(data_dir=target_dir)
         try:
-            raw: dict[str, Any] = json.loads(settings_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
+            decoded: Any = json.loads(settings_path.read_text(encoding="utf-8"))
+            if not isinstance(decoded, dict):
+                raise TypeError("o conteúdo deve ser um objeto JSON")
+            raw: dict[str, Any] = decoded
+            if "data_dir" in raw and not isinstance(raw["data_dir"], str):
+                raise TypeError("data_dir deve ser texto")
+            extensions_value = raw.get("allowed_extensions", [])
+            if not isinstance(extensions_value, list) or not all(
+                isinstance(value, str) for value in extensions_value
+            ):
+                raise TypeError("allowed_extensions deve ser uma lista de textos")
+            extensions = tuple(_normalise_extension(value) for value in extensions_value)
+            config = cls(
+                data_dir=target_dir,
+                university_root=_path_setting(
+                    raw,
+                    "university_root",
+                    default_documents_dir() / "Universidade",
+                ),
+                downloads_dir=_path_setting(raw, "downloads_dir", default_downloads_dir()),
+                allowed_extensions=extensions or DEFAULT_EXTENSIONS,
+                minimum_file_size=_int_setting(raw, "minimum_file_size", 512),
+                watch_enabled=_bool_setting(raw, "watch_enabled", True),
+                launch_at_login=_bool_setting(raw, "launch_at_login", False),
+                prompt_timeout_seconds=_int_setting(raw, "prompt_timeout_seconds", 45),
+                initialized=_bool_setting(raw, "initialized", False),
+            )
+            config.validate()
+            return config
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
             raise ValueError(
                 f"Não foi possível ler as definições em {settings_path}: {exc}"
             ) from exc
-        extensions = tuple(
-            _normalise_extension(str(value)) for value in raw.get("allowed_extensions", [])
-        )
-        return cls(
-            data_dir=target_dir,
-            university_root=Path(
-                raw.get("university_root", default_documents_dir() / "Universidade")
-            ),
-            downloads_dir=Path(raw.get("downloads_dir", default_downloads_dir())),
-            allowed_extensions=extensions or DEFAULT_EXTENSIONS,
-            minimum_file_size=int(raw.get("minimum_file_size", 512)),
-            watch_enabled=bool(raw.get("watch_enabled", True)),
-            launch_at_login=bool(raw.get("launch_at_login", False)),
-            prompt_timeout_seconds=int(raw.get("prompt_timeout_seconds", 45)),
-            initialized=bool(raw.get("initialized", False)),
-        )
 
 
 def _normalise_extension(value: str) -> str:
@@ -209,6 +226,49 @@ def _normalise_extension(value: str) -> str:
     if not cleaned:
         return ""
     return cleaned if cleaned.startswith(".") else f".{cleaned}"
+
+
+def _resolve_managed_folder(path: Path, label: str) -> Path:
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise ValueError(f"A pasta {label} tem de ser um caminho absoluto e não pode estar vazia.")
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"A pasta {label} não pôde ser validada.") from exc
+    if resolved.parent == resolved:
+        raise ValueError(f"A pasta {label} não pode ser a raiz do disco.")
+    return resolved
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return first == second or first in second.parents or second in first.parents
+
+
+def _path_setting(raw: dict[str, Any], key: str, default: Path) -> Path:
+    if key not in raw:
+        return default
+    value = raw[key]
+    if not isinstance(value, str):
+        raise TypeError(f"{key} deve ser texto")
+    return Path(value).expanduser()
+
+
+def _int_setting(raw: dict[str, Any], key: str, default: int) -> int:
+    if key not in raw:
+        return default
+    value = raw[key]
+    if type(value) is not int:
+        raise TypeError(f"{key} deve ser um número inteiro")
+    return value
+
+
+def _bool_setting(raw: dict[str, Any], key: str, default: bool) -> bool:
+    if key not in raw:
+        return default
+    value = raw[key]
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} deve ser verdadeiro ou falso")
+    return value
 
 
 def parse_extensions(value: str) -> tuple[str, ...]:

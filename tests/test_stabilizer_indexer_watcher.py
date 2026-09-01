@@ -7,13 +7,14 @@ import os
 from pathlib import Path
 from stat import S_IFLNK
 from threading import Event
+from time import monotonic, sleep
 
 import pytest
 from watchdog.events import FileCreatedEvent, FileMovedEvent
 
 from organizador.config import AppConfig
 from organizador.db import Database
-from organizador.indexer import DocumentIndexer
+from organizador.indexer import MAX_PENDING_INDEX_JOBS, DocumentIndexer
 from organizador.models import ExistingDownload, Subject
 from organizador.stabilizer import wait_until_stable
 from organizador.watcher import DownloadEventHandler, DownloadWatcher
@@ -80,6 +81,178 @@ def test_native_watcher_ignores_a_file_returned_by_the_app(app_config: AppConfig
         watcher.set_paused(False)
 
         assert not ready.wait(3.0), "the watcher re-ingested its own returned file"
+    finally:
+        watcher.stop()
+
+
+def test_watcher_uses_one_key_for_directory_aliases(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ready = Event()
+    candidate = app_config.downloads_dir / "returned.pdf"
+    candidate.write_bytes(b"returned by Organizador")
+    alias_dir = tmp_path / "downloads-alias"
+    alias_path = alias_dir / candidate.name
+    original_resolve = Path.resolve
+
+    def resolve_alias(path: Path, strict: bool = False) -> Path:
+        if path == alias_dir:
+            return app_config.downloads_dir.resolve(strict=strict)
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve_alias)
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", lambda *_args, **_kwargs: True)
+    watcher = DownloadWatcher(app_config, lambda _path: ready.set())
+    watcher.start(observe=False)
+    try:
+        watcher.ignore_self_move(alias_path)
+        watcher.enqueue(candidate)
+
+        assert not ready.wait(0.2)
+    finally:
+        watcher.stop()
+
+
+def test_watcher_retries_a_download_after_stabilization_timeout(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = 0
+    ready = Event()
+
+    def stabilize(*_args: object, **_kwargs: object) -> bool:
+        nonlocal attempts
+        attempts += 1
+        return attempts > 1
+
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", stabilize)
+    watcher = DownloadWatcher(app_config, lambda _path: ready.set(), retry_delays=(0.0,))
+    watcher.start(observe=False)
+    try:
+        candidate = app_config.downloads_dir / "slow-download.pdf"
+        candidate.write_bytes(b"eventually stable")
+        watcher.enqueue(candidate)
+
+        deadline = monotonic() + 2.0
+        while not ready.is_set() and monotonic() < deadline:
+            watcher._sweep_once()
+            sleep(0.01)
+
+        assert ready.is_set()
+        assert attempts == 2
+    finally:
+        watcher.stop()
+
+
+def test_stopping_manual_import_reports_unprocessed_candidates(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stabilization_started = Event()
+    completed: list[int] = []
+
+    def wait_for_stop(*_args: object, **kwargs: object) -> bool:
+        stabilization_started.set()
+        stop_event = kwargs["stop_event"]
+        assert isinstance(stop_event, Event)
+        stop_event.wait(2.0)
+        return False
+
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", wait_for_stop)
+    candidate_path = app_config.downloads_dir / "manual.pdf"
+    candidate_path.write_bytes(b"manual candidate")
+    candidate = ExistingDownload.capture(candidate_path)
+    assert candidate is not None
+    watcher = DownloadWatcher(app_config, lambda _path: None, completed.append)
+    watcher.start(observe=False)
+
+    assert watcher.enqueue_existing([candidate]) == 1
+    assert stabilization_started.wait(1.0)
+    watcher.stop()
+
+    assert completed == [1]
+    assert not watcher.manual_import_running
+
+
+def test_failed_sweep_preserves_the_existing_download_baseline(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing = app_config.downloads_dir / "already-present.pdf"
+    existing.write_bytes(b"existing download must stay put")
+    ready: list[Path | ExistingDownload] = []
+    watcher = DownloadWatcher(app_config, ready.append)
+    baseline = watcher._snapshot()
+    assert baseline is not None
+    snapshots = iter((None, baseline))
+    monkeypatch.setattr(watcher, "_snapshot", lambda: next(snapshots))
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", lambda *_args, **_kwargs: True)
+    watcher.start(observe=False)
+    try:
+        watcher._known = set(baseline)
+        watcher._sweep_once()
+        watcher._sweep_once()
+        sleep(0.1)
+
+        assert ready == []
+        assert existing.read_bytes() == b"existing download must stay put"
+    finally:
+        watcher.stop()
+
+
+def test_stopping_watcher_suppresses_a_late_successful_stabilization(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stabilization_started = Event()
+    ready = Event()
+
+    def finish_after_stop(*_args: object, **kwargs: object) -> bool:
+        stabilization_started.set()
+        stop_event = kwargs["stop_event"]
+        assert isinstance(stop_event, Event)
+        stop_event.wait(2.0)
+        return True
+
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", finish_after_stop)
+    candidate = app_config.downloads_dir / "late-success.pdf"
+    candidate.write_bytes(b"late stabilization result")
+    watcher = DownloadWatcher(app_config, lambda _path: ready.set())
+    watcher.start(observe=False)
+    watcher.enqueue(candidate)
+    assert stabilization_started.wait(1.0)
+
+    watcher.stop()
+
+    assert not ready.is_set()
+    assert candidate.exists()
+
+
+def test_exhausted_retry_budget_resets_only_after_file_identity_changes(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = 0
+    attempted = Event()
+
+    def never_stable(*_args: object, **_kwargs: object) -> bool:
+        nonlocal attempts
+        attempts += 1
+        attempted.set()
+        return False
+
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", never_stable)
+    candidate = app_config.downloads_dir / "never-stable.pdf"
+    candidate.write_bytes(b"unchanged exhausted candidate")
+    watcher = DownloadWatcher(app_config, lambda _path: None, retry_delays=())
+    watcher.start(observe=False)
+    try:
+        watcher.enqueue(candidate)
+        assert attempted.wait(1.0)
+        attempted.clear()
+        watcher.enqueue(candidate)
+        assert not attempted.wait(0.2)
+        assert attempts == 1
+
+        candidate.write_bytes(b"replacement candidate with a new identity and size")
+        watcher.enqueue(candidate)
+        assert attempted.wait(1.0)
+        assert attempts == 2
     finally:
         watcher.stop()
 
@@ -198,6 +371,66 @@ def test_missing_documents_do_not_starve_later_indexing_work(
     pending = database.list_unindexed_documents(limit=50)
 
     assert [document.id for document in pending] == [healthy_id]
+
+
+def test_failed_indexing_batch_does_not_starve_later_documents(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    for index in range(50):
+        malformed = tmp_path / f"malformed-{index:02}.ipynb"
+        malformed.write_text("not valid JSON", encoding="utf-8")
+        _file_record(database, subject, malformed)
+    healthy = tmp_path / "after-malformed.txt"
+    healthy.write_text("healthy document after malformed batch", encoding="utf-8")
+    healthy_id = _file_record(database, subject, healthy)
+    indexer: DocumentIndexer
+
+    def refill(_file_id: int, _error: str) -> None:
+        indexer.submit_pending()
+
+    indexer = DocumentIndexer(database, refill)
+    try:
+        indexer.submit_pending()
+        deadline = monotonic() + 5.0
+        while not database.search("healthy") and monotonic() < deadline:
+            sleep(0.01)
+
+        results = database.search("healthy")
+        assert results
+        assert results[0].file_id == healthy_id
+    finally:
+        indexer.shutdown()
+
+
+def test_index_refill_keeps_a_fixed_outstanding_work_cap(
+    database: Database,
+    subject: Subject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for index in range(MAX_PENDING_INDEX_JOBS + 10):
+        path = tmp_path / f"queued-{index:02}.txt"
+        path.write_text("queued document", encoding="utf-8")
+        _file_record(database, subject, path)
+    started = Event()
+    release = Event()
+    indexer = DocumentIndexer(database)
+
+    def block_indexing(_document: object) -> None:
+        started.set()
+        release.wait(2.0)
+
+    monkeypatch.setattr(indexer, "index_document", block_indexing)
+    try:
+        indexer.submit_pending()
+        assert started.wait(1.0)
+        for _ in range(5):
+            indexer.submit_pending()
+
+        assert len(indexer._active) == MAX_PENDING_INDEX_JOBS
+    finally:
+        release.set()
+        indexer.shutdown()
 
 
 def test_symlinked_document_is_never_selected_or_indexed(

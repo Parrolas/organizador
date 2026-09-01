@@ -60,6 +60,16 @@ RESERVED_WINDOWS_NAMES = {
 }
 
 
+def normalise_path_key(path: Path) -> str:
+    """Return one stable comparison key for a path and its directory aliases."""
+
+    try:
+        resolved = path.resolve(strict=False)
+    except (OSError, RuntimeError):
+        resolved = path.absolute()
+    return os.path.normcase(os.path.normpath(os.fspath(resolved)))
+
+
 def sanitise_component(value: str, *, fallback: str = "Sem nome", limit: int = 120) -> str:
     """Return a valid Windows folder or filename component."""
 

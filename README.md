@@ -8,12 +8,14 @@ tópico e tipo de conteúdo.
 
 - Vigia apenas os novos ficheiros elegíveis na pasta Downloads configurada.
 - Move cada ficheiro para uma caixa de entrada segura antes de pedir uma decisão.
-- Permite escolher disciplina, tópico, semana e tipo de conteúdo.
+- Permite escolher disciplina, tipo de conteúdo, nome final e uma tarefa opcional.
 - Organiza sem substituir silenciosamente ficheiros existentes.
-- Mantém pesquisa local por nome, caminho, disciplina e tópico.
+- Mantém pesquisa textual local no nome e conteúdo dos formatos suportados.
 - Permite importar ficheiros manualmente em lotes limitados.
 - Mantém histórico e permite desfazer a organização mais recente.
 - Recupera operações interrompidas sem adivinhar quando o estado é ambíguo.
+- Permite adotar no catálogo um ficheiro já existente numa disciplina sem o mover.
+- Permite marcar ocorrências de reconciliação como revistas sem alterar os ficheiros.
 - Vive na área de notificação e pode iniciar com a sessão do Windows.
 
 ## Proteção dos ficheiros
@@ -37,8 +39,8 @@ ficheiros de cada vez.
 3. Verifica o SHA-256 no PowerShell:
 
    ```powershell
-   Get-FileHash .\Organizador-0.1.0-windows-x64.zip -Algorithm SHA256
-   Get-Content .\Organizador-0.1.0-windows-x64.zip.sha256
+   Get-FileHash .\Organizador-0.2.0-windows-x64.zip -Algorithm SHA256
+   Get-Content .\Organizador-0.2.0-windows-x64.zip.sha256
    ```
 
 4. Confirma que os dois valores são iguais e extrai todo o ZIP para uma pasta
@@ -112,7 +114,7 @@ guardados.
 
 ## Desenvolvimento
 
-Requisitos: Windows 11 e Python 3.13.
+Requisitos: Windows 11 e Python 3.11 ou superior. Os builds oficiais usam Python 3.13.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
@@ -142,6 +144,9 @@ arranque de diagnóstico do pacote. Depois adiciona as licenças e produz:
 - `dist\releases\Organizador-<versão>-windows-x64.zip.sha256`
 
 As dependências exatas da versão são fixadas em `constraints-release.txt`.
+`pyproject.toml` é a fonte única das dependências diretas. `defusedxml` é mantido
+explicitamente porque o `openpyxl` o ativa para proteger a leitura de folhas de
+cálculo XML não confiáveis.
 
 ## Publicação
 

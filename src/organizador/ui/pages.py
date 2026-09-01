@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from datetime import date
 from pathlib import Path
 from typing import TypedDict, cast
@@ -28,7 +27,16 @@ from PySide6.QtWidgets import (
 from organizador import __version__
 from organizador.config import AppConfig
 from organizador.db import Database
-from organizador.models import InboxItem, ReconciliationReport, StudyTask, Subject
+from organizador.models import (
+    FiledDocument,
+    FindingReason,
+    InboxItem,
+    ReconciliationFinding,
+    ReconciliationReport,
+    StudyTask,
+    Subject,
+)
+from organizador.reconcile import DISMISSIBLE_FINDING_REASONS, visible_findings
 from organizador.ui.theme import DANGER_SOFT, MUTED, WARNING_SOFT
 from organizador.ui.widgets import (
     EmptyState,
@@ -213,6 +221,10 @@ class InboxPage(QWidget):
     return_requested = Signal(int)
     open_path = Signal(object)
     import_existing_requested = Signal()
+    adopt_requested = Signal(object)
+    drop_record_requested = Signal(object)
+    dismiss_finding_requested = Signal(object)
+    unregister_requested = Signal(int)
 
     def __init__(
         self,
@@ -264,6 +276,7 @@ class InboxPage(QWidget):
         """Rebuild the pending-file list."""
 
         items = self.database.list_inbox_items()
+        adopted_documents = self.database.list_adopted_files()
         recovery_count = sum(item.status == "recovery" for item in items)
         pending_count = len(items) - recovery_count
         manual_findings = self._manual_findings()
@@ -285,7 +298,7 @@ class InboxPage(QWidget):
         if manual_findings:
             count = len(manual_findings)
             summary_parts.append(
-                f"{count} caminho{'s' if count != 1 else ''} do histórico "
+                f"{count} ocorrência{'s' if count != 1 else ''} do histórico "
                 f"precisa{'m' if count != 1 else ''} de revisão"
             )
         report = self.reconciliation_report
@@ -300,15 +313,17 @@ class InboxPage(QWidget):
                 "Quando terminares um download elegível, ele aparece aqui e num pequeno popup.",
             )
             self.items_layout.addWidget(empty)
-            self.items_layout.addStretch(1)
-            return
         subjects = {subject.id: subject for subject in self.database.list_subjects()}
         for item in items:
             self.items_layout.addWidget(self._row(item, subjects))
         if manual_findings:
             self.items_layout.addWidget(label("Revisão manual do histórico", "SectionTitle"))
-            for path, detail in manual_findings:
-                self.items_layout.addWidget(self._finding_row(path, detail))
+            for finding in manual_findings:
+                self.items_layout.addWidget(self._finding_row(finding))
+        if adopted_documents:
+            self.items_layout.addWidget(label("Ficheiros adotados", "SectionTitle"))
+            for document in adopted_documents:
+                self.items_layout.addWidget(self._adopted_row(document, subjects))
         self.items_layout.addStretch(1)
 
     def _row(self, item: InboxItem, subjects: dict[int, Subject]) -> QFrame:
@@ -363,53 +378,49 @@ class InboxPage(QWidget):
         row_layout.addWidget(organise)
         return row
 
-    def _manual_findings(self) -> tuple[tuple[Path, str], ...]:
+    def _manual_findings(self) -> tuple[ReconciliationFinding, ...]:
         report = self.reconciliation_report
         if report is None:
             return ()
-        findings: dict[Path, str] = {}
-        for path in report.untracked_subject_files:
-            findings[path] = "Encontrado numa disciplina sem registo. Não foi movido nem alterado."
-        for document in report.missing_documents:
-            findings[document.current_path] = (
-                "Documento registado que já não está no destino esperado."
-            )
-        for event in report.broken_undo_events:
-            findings[event.destination_path] = (
-                "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta."
-            )
-        for event in report.pending_filing_events:
-            findings[event.source_path] = (
-                "Origem de uma organização interrompida; não foi alterada no arranque."
-            )
-            findings[event.destination_path] = (
-                "Destino de uma organização interrompida; compara antes de continuar."
-            )
-        for event in report.pending_return_events:
-            findings[event.source_path] = (
-                "Origem de uma devolução interrompida; não foi alterada no arranque."
-            )
-            findings[event.destination_path] = (
-                "Destino em Downloads de uma devolução interrompida; compara os ficheiros."
-            )
-        for event in report.pending_undo_events:
-            findings[event.source_path] = (
-                "Origem de uma operação de desfazer interrompida; não foi alterada no arranque."
-            )
-            findings[event.destination_path] = (
-                "Operação de desfazer interrompida; confirma as pastas antes de continuar."
-            )
-        for interrupted in report.legacy_interrupted_undos:
-            findings[interrupted.restored_file.path] = (
-                "Ficheiro restaurado por uma operação de desfazer interrompida."
-            )
-        for path in report.unsafe_paths:
-            findings[path] = (
-                "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado."
-            )
-        return tuple(findings.items())
+        return visible_findings(self.database, report)
 
-    def _finding_row(self, path: Path, detail: str) -> QFrame:
+    def _finding_row(self, finding: ReconciliationFinding) -> QFrame:
+        path = finding.path
+        details = {
+            FindingReason.UNTRACKED_SUBJECT_FILE: (
+                "Encontrado numa disciplina sem registo. Não foi movido nem alterado."
+            ),
+            FindingReason.MISSING_DOCUMENT: (
+                "Documento registado que já não está no destino esperado."
+            ),
+            FindingReason.BROKEN_UNDO_EVENT: (
+                "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta."
+            ),
+            FindingReason.PENDING_FILING_SOURCE: (
+                "Origem de uma organização interrompida; não foi alterada no arranque."
+            ),
+            FindingReason.PENDING_FILING_DESTINATION: (
+                "Destino de uma organização interrompida; compara antes de continuar."
+            ),
+            FindingReason.PENDING_RETURN_SOURCE: (
+                "Origem de uma devolução interrompida; não foi alterada no arranque."
+            ),
+            FindingReason.PENDING_RETURN_DESTINATION: (
+                "Destino em Downloads de uma devolução interrompida; compara os ficheiros."
+            ),
+            FindingReason.PENDING_UNDO_SOURCE: (
+                "Origem de uma operação de desfazer interrompida; não foi alterada no arranque."
+            ),
+            FindingReason.PENDING_UNDO_DESTINATION: (
+                "Operação de desfazer interrompida; confirma as pastas antes de continuar."
+            ),
+            FindingReason.LEGACY_INTERRUPTED_UNDO: (
+                "Ficheiro restaurado por uma operação de desfazer interrompida."
+            ),
+            FindingReason.UNSAFE_PATH: (
+                "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado."
+            ),
+        }
         row = QFrame()
         row.setObjectName("ListRow")
         row_layout = QHBoxLayout(row)
@@ -417,7 +428,7 @@ class InboxPage(QWidget):
         copy = QVBoxLayout()
         copy.setSpacing(3)
         copy.addWidget(label(path.name, "RowTitle"))
-        detail_label = label(detail, "ErrorText")
+        detail_label = label(details[finding.reason], "ErrorText")
         detail_label.setWordWrap(True)
         copy.addWidget(detail_label)
         path_label = label(str(path), "Muted")
@@ -429,6 +440,49 @@ class InboxPage(QWidget):
         open_button = button("Abrir pasta", variant="quiet")
         open_button.clicked.connect(lambda: self.open_path.emit(target))
         row_layout.addWidget(open_button)
+        if finding.reason is FindingReason.UNTRACKED_SUBJECT_FILE:
+            adopt_button = button("Adotar", variant="primary")
+            adopt_button.setToolTip("Adicionar à pesquisa sem mover o ficheiro")
+            adopt_button.clicked.connect(lambda: self.adopt_requested.emit(finding))
+            row_layout.addWidget(adopt_button)
+        elif finding.reason is FindingReason.MISSING_DOCUMENT:
+            drop_button = button("Remover registo")
+            drop_button.setToolTip("Remover apenas o registo local; nenhum ficheiro é apagado")
+            drop_button.clicked.connect(lambda: self.drop_record_requested.emit(finding))
+            row_layout.addWidget(drop_button)
+        if finding.reason in DISMISSIBLE_FINDING_REASONS:
+            dismiss_button = button("Marcar revisto", variant="quiet")
+            dismiss_button.clicked.connect(lambda: self.dismiss_finding_requested.emit(finding))
+            row_layout.addWidget(dismiss_button)
+        return row
+
+    def _adopted_row(
+        self,
+        document: FiledDocument,
+        subjects: dict[int, Subject],
+    ) -> QFrame:
+        row = QFrame()
+        row.setObjectName("ListRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(17, 13, 13, 13)
+        copy = QVBoxLayout()
+        copy.setSpacing(3)
+        copy.addWidget(label(document.current_path.name, "RowTitle"))
+        subject = subjects.get(document.subject_id)
+        copy.addWidget(
+            label(
+                f"{subject.name if subject else 'Disciplina'} · {document.kind} · "
+                "adotado sem mover",
+                "Muted",
+            )
+        )
+        row_layout.addLayout(copy, 1)
+        open_button = button("Abrir", variant="quiet")
+        open_button.clicked.connect(lambda: self.open_path.emit(document.current_path))
+        row_layout.addWidget(open_button)
+        unregister_button = button("Remover do catálogo")
+        unregister_button.clicked.connect(lambda: self.unregister_requested.emit(document.id))
+        row_layout.addWidget(unregister_button)
         return row
 
 
@@ -844,8 +898,8 @@ class SettingsPage(QWidget):
         self.extensions_edit.setPlaceholderText(".pdf, .docx, .pptx, .ipynb")
         form.addRow("Extensões aceites", self.extensions_edit)
         self.minimum_size = QSpinBox()
-        self.minimum_size.setRange(0, 102400)
-        self.minimum_size.setSuffix(" KB")
+        self.minimum_size.setRange(0, 100 * 1024 * 1024)
+        self.minimum_size.setSuffix(" bytes")
         form.addRow("Tamanho mínimo", self.minimum_size)
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(10, 300)
@@ -893,7 +947,7 @@ class SettingsPage(QWidget):
         self.downloads_edit.setText(str(config.downloads_dir))
         self.downloads_edit.setCursorPosition(0)
         self.extensions_edit.setText(", ".join(config.allowed_extensions))
-        self.minimum_size.setValue(max(0, math.ceil(config.minimum_file_size / 1024)))
+        self.minimum_size.setValue(max(0, config.minimum_file_size))
         self.timeout_spin.setValue(config.prompt_timeout_seconds)
         self.watch_check.setChecked(config.watch_enabled)
         self.startup_check.setChecked(config.launch_at_login)
@@ -916,7 +970,7 @@ class SettingsPage(QWidget):
             "university_root": Path(self.root_edit.text().strip()).expanduser(),
             "downloads_dir": Path(self.downloads_edit.text().strip()).expanduser(),
             "extensions": self.extensions_edit.text(),
-            "minimum_file_size": self.minimum_size.value() * 1024,
+            "minimum_file_size": self.minimum_size.value(),
             "prompt_timeout_seconds": self.timeout_spin.value(),
             "watch_enabled": self.watch_check.isChecked(),
             "launch_at_login": self.startup_check.isChecked(),

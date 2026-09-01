@@ -5,8 +5,11 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from organizador.db import Database
-from organizador.models import FilingHint, Subject
+from organizador.models import ExistingDownload, FilingHint, FindingReason, Subject
+from organizador.paths import normalise_path_key
 
 
 def _file_record(database: Database, subject: Subject, tmp_path: Path) -> int:
@@ -219,4 +222,231 @@ def test_schema_v3_adds_operation_journal_metadata(database: Database) -> None:
     assert {"subject_id", "kind"} <= columns
     assert index_row is not None
     assert "'returning'" in str(index_row["sql"])
-    assert version == 3
+    assert version == 4
+
+
+def test_schema_v4_adds_file_origin_and_persisted_reviews(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    file_id = _file_record(database, subject, tmp_path)
+    with database.connect() as connection:
+        connection.execute("DROP TABLE reviewed_findings")
+        connection.execute("ALTER TABLE files DROP COLUMN origin")
+        connection.execute("ALTER TABLE files DROP COLUMN record_token")
+        connection.execute("ALTER TABLE files DROP COLUMN catalog_state")
+        connection.execute("PRAGMA user_version = 3")
+        connection.commit()
+
+    database.initialize()
+
+    migrated = database.get_file(file_id)
+    assert migrated is not None
+    assert migrated.origin == "filed"
+    assert migrated.record_token
+    database.mark_finding_reviewed(
+        migrated.current_path,
+        FindingReason.MISSING_DOCUMENT.value,
+    )
+    database.initialize()
+    with database.connect() as connection:
+        columns = {
+            str(row["name"]): row
+            for row in connection.execute("PRAGMA table_info(files)").fetchall()
+        }
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    assert columns["origin"]["dflt_value"] == "'filed'"
+    assert columns["origin"]["notnull"] == 1
+    assert columns["record_token"]["dflt_value"] == "''"
+    assert columns["record_token"]["notnull"] == 1
+    assert columns["catalog_state"]["dflt_value"] == "'active'"
+    assert columns["catalog_state"]["notnull"] == 1
+    assert version == 4
+    assert database.list_reviewed_finding_keys() == {
+        (
+            normalise_path_key(migrated.current_path),
+            FindingReason.MISSING_DOCUMENT.value,
+        )
+    }
+
+
+def test_adopted_file_has_no_inbox_history_or_filing_hint(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "adopted.txt"
+    path.write_text("cataloged in place", encoding="utf-8")
+    candidate = ExistingDownload.capture(path)
+    assert candidate is not None
+
+    document = database.adopt_subject_file(candidate, subject.id, "Outros")
+
+    assert document.origin == "adopted"
+    assert document.current_path == path.absolute()
+    assert database.filing_hints() == []
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT inbox_id FROM files WHERE id = ?", (document.id,)
+        ).fetchone()
+        event_count = int(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+    assert row is not None
+    assert row["inbox_id"] is None
+    assert event_count == 0
+
+
+def test_unregister_adopted_file_preserves_disk_and_clears_catalog_data(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "adopted.txt"
+    contents = b"searchable adopted document"
+    path.write_bytes(contents)
+    candidate = ExistingDownload.capture(path)
+    assert candidate is not None
+    document = database.adopt_subject_file(candidate, subject.id, "Outros")
+    task = database.add_task("Review adopted", subject.id, None, document.id)
+    database.replace_document_pages(
+        document.id,
+        subject.name,
+        document.original_name,
+        ("searchable adopted document",),
+        expected_path=document.current_path,
+        expected_record_token=document.record_token,
+    )
+
+    removed = database.unregister_adopted_file(
+        document.id,
+        expected_path=document.current_path,
+        expected_record_token=document.record_token,
+        reviewed_reason=FindingReason.UNTRACKED_SUBJECT_FILE.value,
+    )
+
+    assert removed
+    assert path.read_bytes() == contents
+    assert database.get_file(document.id) is None
+    assert database.search("searchable") == []
+    detached_task = database.get_task(task.id)
+    assert detached_task is not None
+    assert detached_task.file_id is None
+    assert (
+        normalise_path_key(path),
+        FindingReason.UNTRACKED_SUBJECT_FILE.value,
+    ) in database.list_reviewed_finding_keys()
+
+
+def test_unregister_rejects_a_normally_filed_document(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    file_id = _file_record(database, subject, tmp_path)
+    document = database.get_file(file_id)
+    assert document is not None
+
+    assert not database.unregister_adopted_file(
+        document.id,
+        expected_path=document.current_path,
+        expected_record_token=document.record_token,
+        reviewed_reason=FindingReason.UNTRACKED_SUBJECT_FILE.value,
+    )
+    assert database.get_file(document.id) == document
+
+
+def test_reviewed_finding_keys_are_reason_specific_and_idempotent(
+    database: Database, tmp_path: Path
+) -> None:
+    path = tmp_path / "finding.pdf"
+    database.mark_finding_reviewed(path, FindingReason.MISSING_DOCUMENT.value)
+    database.mark_finding_reviewed(path, FindingReason.MISSING_DOCUMENT.value)
+    database.mark_finding_reviewed(path, FindingReason.BROKEN_UNDO_EVENT.value)
+
+    keys = database.list_reviewed_finding_keys()
+
+    assert len(keys) == 2
+    assert {reason for _, reason in keys} == {
+        FindingReason.MISSING_DOCUMENT.value,
+        FindingReason.BROKEN_UNDO_EVENT.value,
+    }
+
+
+def test_stale_index_job_cannot_write_after_same_path_is_readopted(
+    database: Database,
+    subject: Subject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("organizador.db._now", lambda: "2026-08-31T12:00:00+00:00")
+    path = tmp_path / "same-path.txt"
+    path.write_text("cataloged twice", encoding="utf-8")
+    candidate = ExistingDownload.capture(path)
+    assert candidate is not None
+    original = database.adopt_subject_file(candidate, subject.id, "Outros")
+    assert database.unregister_adopted_file(
+        original.id,
+        expected_path=original.current_path,
+        expected_record_token=original.record_token,
+        reviewed_reason=FindingReason.UNTRACKED_SUBJECT_FILE.value,
+    )
+    replacement = database.adopt_subject_file(candidate, subject.id, "Outros")
+    assert replacement.id == original.id
+    assert replacement.record_token != original.record_token
+
+    database.replace_document_pages(
+        original.id,
+        subject.name,
+        original.original_name,
+        ("stale same-path contents",),
+        expected_path=original.current_path,
+        expected_record_token=original.record_token,
+    )
+
+    refreshed = database.get_file(replacement.id)
+    assert refreshed is not None
+    assert refreshed.indexed_at is None
+    assert database.search("stale") == []
+
+
+def test_newer_database_version_is_refused_without_downgrade(database: Database) -> None:
+    with database.connect() as connection:
+        connection.execute("PRAGMA user_version = 5")
+        connection.commit()
+
+    with pytest.raises(RuntimeError, match="versão mais recente"):
+        database.initialize()
+
+    with database.connect() as connection:
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    assert version == 5
+
+
+def test_normal_filing_reuses_a_dropped_path_tombstone(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    file_id = _file_record(database, subject, tmp_path / "first")
+    original = database.get_file(file_id)
+    assert original is not None
+    original.current_path.unlink()
+    assert database.drop_file_record(
+        original.id,
+        expected_path=original.current_path,
+        expected_origin=original.origin,
+        expected_record_token=original.record_token,
+        verify_missing=lambda: True,
+    )
+    new_inbox_path = tmp_path / "second" / "inbox" / "aula.txt"
+    new_inbox_path.parent.mkdir(parents=True)
+    new_inbox_path.write_text("new document at the same path", encoding="utf-8")
+    new_item = database.add_inbox_item(
+        new_inbox_path,
+        tmp_path / "second" / "downloads" / "aula.txt",
+        new_inbox_path.name,
+        new_inbox_path.stat().st_size,
+    )
+    original.current_path.write_text("new document at the same path", encoding="utf-8")
+
+    replacement = database.record_filing(
+        new_item.id,
+        subject.id,
+        "Slides",
+        original.current_path,
+    )
+
+    assert replacement.id == original.id
+    assert replacement.catalog_state == "active"
+    assert replacement.record_token != original.record_token
+    assert database.latest_undoable_filing() is not None
