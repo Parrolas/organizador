@@ -31,6 +31,11 @@ SCHEMA_VERSION = 5
 METRIC_COLLISIONS_RENAMED = "collisions_renamed"
 METRIC_OPERATIONS_RECOVERED = "operations_recovered"
 
+
+class NewerDatabaseError(RuntimeError):
+    """The database was created or migrated by a newer application version."""
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS subjects (
     id INTEGER PRIMARY KEY,
@@ -167,7 +172,7 @@ class Database:
             version_row = connection.execute("PRAGMA user_version").fetchone()
             previous_version = int(version_row[0]) if version_row is not None else 0
             if previous_version > SCHEMA_VERSION:
-                raise RuntimeError(
+                raise NewerDatabaseError(
                     f"A base de dados pertence a uma versão mais recente ({previous_version})."
                 )
             connection.executescript(SCHEMA)

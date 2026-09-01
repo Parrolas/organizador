@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from organizador.config import APP_NAME, AppConfig, default_data_dir
 from organizador.controller import AppController
+from organizador.db import NewerDatabaseError
 from organizador.logging_setup import configure_logging, log_uncaught_exception
 from organizador.ui.icons import app_icon
 from organizador.ui.theme import apply_theme
@@ -121,6 +122,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         controller = AppController(config)
+    except NewerDatabaseError:
+        LOGGER.error("Refusing to open a database from a newer application version")
+        QMessageBox.critical(
+            None,
+            "Versão da base de dados mais recente",
+            "Esta base de dados foi criada por uma versão mais recente do Organizador. "
+            "Abre a versão mais recente da app. Nenhum ficheiro foi alterado.",
+        )
+        return 1
     except Exception as exc:
         LOGGER.exception("Could not initialize application data")
         QMessageBox.critical(

@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from organizador.db import METRIC_COLLISIONS_RENAMED, Database
+from organizador.db import (
+    METRIC_COLLISIONS_RENAMED,
+    Database,
+    NewerDatabaseError,
+)
 from organizador.models import (
     ActivitySummary,
     ExistingDownload,
@@ -412,7 +416,7 @@ def test_newer_database_version_is_refused_without_downgrade(database: Database)
         connection.execute("PRAGMA user_version = 6")
         connection.commit()
 
-    with pytest.raises(RuntimeError, match="versão mais recente"):
+    with pytest.raises(NewerDatabaseError, match="versão mais recente"):
         database.initialize()
 
     with database.connect() as connection:
