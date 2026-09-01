@@ -139,6 +139,18 @@ class HomePage(QWidget):
         task_panel_layout.addLayout(self.deadline_layout)
         task_panel_layout.addStretch(1)
         columns.addWidget(task_panel, 0, 1)
+
+        activity_panel = QFrame()
+        activity_panel.setObjectName("Panel")
+        activity_layout = QVBoxLayout(activity_panel)
+        activity_layout.setContentsMargins(18, 14, 18, 16)
+        activity_layout.setSpacing(8)
+        activity_layout.addWidget(label("Tranquilidade", "SectionTitle"))
+        self.activity_label = label("", "Muted")
+        self.activity_label.setWordWrap(True)
+        activity_layout.addWidget(self.activity_label)
+        columns.addWidget(activity_panel, 1, 0, 1, 2)
+        columns.setRowStretch(0, 1)
         layout.addLayout(columns, 1)
 
     def refresh(self, *, watching: bool, paused: bool) -> None:
@@ -212,6 +224,50 @@ class HomePage(QWidget):
                     label(f"{task_subject}  ·  {format_day(task.due_date)}", "Muted")
                 )
                 self.deadline_layout.addWidget(row)
+        self._refresh_activity()
+
+    def _refresh_activity(self) -> None:
+        """Show the lifetime safety record as simple, honest counts."""
+
+        summary = self.database.activity_summary()
+        parts: list[str] = []
+        if summary.organized:
+            parts.append(
+                f"{summary.organized} ficheiro{'s' if summary.organized != 1 else ''} "
+                f"organizado{'s' if summary.organized != 1 else ''}"
+            )
+        if summary.collisions_renamed:
+            count = summary.collisions_renamed
+            parts.append(
+                f"{count} colisã{'o' if count == 1 else 'ões'} de nomes resolvida"
+                f"{'s' if count != 1 else ''} sem substituir nada"
+            )
+        if summary.operations_recovered:
+            count = summary.operations_recovered
+            parts.append(
+                f"{count} operaçã{'o' if count == 1 else 'ões'} interrompida"
+                f"{'s' if count != 1 else ''} recuperada{'s' if count != 1 else ''}"
+            )
+        if summary.adopted:
+            parts.append(
+                f"{summary.adopted} ficheiro{'s' if summary.adopted != 1 else ''} "
+                f"adotado{'s' if summary.adopted != 1 else ''} sem mover"
+            )
+        if summary.undone:
+            count = summary.undone
+            parts.append(
+                f"{count} organizaçã{'o' if count == 1 else 'ões'} "
+                f"desfeita{'s' if count != 1 else ''}"
+            )
+        if summary.returned:
+            count = summary.returned
+            parts.append(f"{count} devoluçã{'o' if count == 1 else 'ões'} a Downloads")
+        if parts:
+            self.activity_label.setText(" · ".join(parts) + ".")
+        else:
+            self.activity_label.setText(
+                "A app ainda não tem histórico. Organiza o primeiro ficheiro para começar."
+            )
 
 
 class InboxPage(QWidget):

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from organizador.config import MANUAL_IMPORT_BATCH_LIMIT, AppConfig
-from organizador.db import Database
+from organizador.db import METRIC_COLLISIONS_RENAMED, Database
 from organizador.models import (
     FILE_KINDS,
     ExistingDownload,
@@ -86,7 +86,7 @@ class FilingService:
 
         try:
             self.config.inbox_dir.mkdir(parents=True, exist_ok=True)
-            destination = unique_path(self.config.inbox_dir, source.name)
+            destination, collided = self._plan_destination(self.config.inbox_dir, source.name)
             if expected is not None and not expected.still_matches():
                 return None
             expected_identity = (
@@ -105,7 +105,7 @@ class FilingService:
                 f"{source.name} mudou ou ainda está a ser usado e ficou em Downloads."
             ) from exc
         try:
-            return self.database.add_inbox_item(destination, source, source.name, size)
+            item = self.database.add_inbox_item(destination, source, source.name, size)
         except Exception as exc:
             rollback = unique_path(source.parent, source.name)
             try:
@@ -119,6 +119,8 @@ class FilingService:
                 f"Não foi possível registar {source.name}; foi devolvido a Downloads "
                 f"como {rollback.name}."
             ) from exc
+        self._register_collision(collided)
+        return item
 
     def file_document(
         self,
@@ -143,7 +145,7 @@ class FilingService:
 
         filename = self._name_with_original_extension(requested_name, item.original_name)
         folder = self.config.university_root / subject.folder_name / kind
-        destination = unique_path(folder, filename)
+        destination, collided = self._plan_destination(folder, filename)
         try:
             pending = self.database.begin_document_filing(inbox_id, subject_id, kind, destination)
         except Exception as exc:
@@ -167,7 +169,7 @@ class FilingService:
             ) from exc
 
         try:
-            return self.database.record_filing(
+            document = self.database.record_filing(
                 inbox_id,
                 subject_id,
                 kind,
@@ -194,6 +196,8 @@ class FilingService:
                 "Revê a Caixa de Entrada antes de repetir."
             )
             raise FilingError(message) from exc
+        self._register_collision(collided)
+        return document
 
     def return_to_downloads(self, inbox_id: int) -> Path:
         """Return non-university material to Downloads without overwriting."""
@@ -201,7 +205,9 @@ class FilingService:
         item = self.database.get_inbox_item(inbox_id)
         if item is None or not item.path.is_file():
             raise FilingError("O ficheiro já não está disponível para devolver.")
-        destination = unique_path(self.config.downloads_dir, item.original_name)
+        destination, collided = self._plan_destination(
+            self.config.downloads_dir, item.original_name
+        )
         try:
             pending = self.database.begin_return(inbox_id, destination)
         except Exception as exc:
@@ -237,6 +243,7 @@ class FilingService:
                 except Exception:
                     LOGGER.exception("Failed to cancel the rolled-back return")
             raise FilingError("Não foi possível registar a devolução do ficheiro.") from exc
+        self._register_collision(collided)
         return destination
 
     def undo_latest_filing(self) -> InboxItem | None:
@@ -249,7 +256,9 @@ class FilingService:
             raise FilingError(
                 "O último ficheiro organizado já não está no destino. O histórico não foi alterado."
             )
-        restored_path = unique_path(self.config.inbox_dir, event.source_path.name)
+        restored_path, collided = self._plan_destination(
+            self.config.inbox_dir, event.source_path.name
+        )
         try:
             pending = self.database.begin_filing_undo(event, restored_path)
         except Exception as exc:
@@ -283,6 +292,7 @@ class FilingService:
                 except Exception:
                     LOGGER.exception("Failed to cancel the rolled-back undo")
             raise FilingError("Não foi possível atualizar o histórico ao desfazer.") from exc
+        self._register_collision(collided)
         if event.inbox_id is None:  # pragma: no cover - schema invariant
             return None
         return self.database.get_inbox_item(event.inbox_id)
@@ -308,3 +318,15 @@ class FilingService:
         if original_suffix and Path(safe).suffix.casefold() != original_suffix.casefold():
             safe = f"{Path(safe).stem}{original_suffix}"
         return safe
+
+    def _plan_destination(self, directory: Path, filename: str) -> tuple[Path, bool]:
+        """Plan a collision-safe destination and report whether a rename was needed."""
+
+        destination = unique_path(directory, filename)
+        return destination, destination.name != sanitise_filename(filename)
+
+    def _register_collision(self, collided: bool) -> None:
+        """Count one safely renamed collision for the activity summary."""
+
+        if collided:
+            self.database.increment_metric(METRIC_COLLISIONS_RENAMED)

@@ -258,6 +258,7 @@ def test_prepared_undo_is_completed_after_a_crash_between_move_and_commit(
     assert database.get_file(document.id) is None
     assert database.list_pending_undos() == []
     assert database.latest_undoable_filing() is None
+    assert database.activity_summary().operations_recovered == 1
 
 
 def test_prepared_undo_is_cancelled_when_the_move_never_started(
@@ -348,6 +349,7 @@ def test_prepared_filing_is_completed_after_a_post_move_crash(
     repeated = apply(database, report)
     assert repeated.change_count == 0
     assert len(database.list_files()) == 1
+    assert database.activity_summary().operations_recovered == 1
 
 
 def test_prepared_return_is_completed_after_a_post_move_crash(

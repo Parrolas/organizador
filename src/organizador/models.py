@@ -144,6 +144,18 @@ class FilingHint:
 
 
 @dataclass(frozen=True, slots=True)
+class ActivitySummary:
+    """Lifetime counts shown on the home page as reassurance."""
+
+    organized: int
+    adopted: int
+    returned: int
+    undone: int
+    collisions_renamed: int
+    operations_recovered: int
+
+
+@dataclass(frozen=True, slots=True)
 class ExistingDownload:
     """A top-level Downloads file captured before manual import confirmation."""
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from stat import S_ISREG
 
 from organizador.config import AppConfig
-from organizador.db import Database
+from organizador.db import METRIC_OPERATIONS_RECOVERED, Database
 from organizador.models import (
     FILE_KINDS,
     ExistingDownload,
@@ -320,6 +320,10 @@ def apply(database: Database, report: ReconciliationReport) -> ReconciliationOut
             continue
         if database.mark_inbox_recovery_required(item.id, RECOVERY_ERROR):
             recovery_required_ids.append(item.id)
+
+    recovered = len(recovered_items) + len(completed_operation_event_ids) + len(reset_filing_ids)
+    if recovered:
+        database.increment_metric(METRIC_OPERATIONS_RECOVERED, recovered)
 
     return ReconciliationOutcome(
         recovered_items=tuple(recovered_items),

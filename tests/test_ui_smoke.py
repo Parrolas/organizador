@@ -213,6 +213,49 @@ def test_controller_adopts_and_unregisters_without_moving_the_file(
     controller.main_window.close()
 
 
+def test_home_activity_panel_reports_safety_history(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    inbox_path = app_config.inbox_dir / "MAT101_historico.pdf"
+    inbox_path.write_bytes(b"activity history" * 20)
+    item = database.add_inbox_item(
+        inbox_path,
+        app_config.downloads_dir / inbox_path.name,
+        inbox_path.name,
+        inbox_path.stat().st_size,
+    )
+    existing = app_config.university_root / subject.folder_name / "Slides" / "MAT101_historico.pdf"
+    existing.write_bytes(b"already filed here")
+    filer = FilingService(app_config, database)
+    filer.file_document(item.id, subject.id, "Slides", "MAT101_historico.pdf")
+    window = MainWindow(database, app_config)
+
+    window.refresh_all(watching=True, paused=False)
+
+    text = window.home_page.activity_label.text()
+    assert "1 ficheiro organizado" in text
+    assert "1 colisão de nomes resolvida" in text
+    window.allow_close = True
+    window.close()
+
+
+def test_home_activity_panel_starts_with_a_calm_empty_state(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+) -> None:
+    window = MainWindow(database, app_config)
+
+    window.refresh_all(watching=True, paused=False)
+
+    assert "ainda não tem histórico" in window.home_page.activity_label.text()
+    window.allow_close = True
+    window.close()
+
+
 def test_stale_watcher_generation_cannot_ingest_after_restart(
     qt_app: QApplication,
     app_config: AppConfig,

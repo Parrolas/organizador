@@ -2,6 +2,14 @@
 
 All notable changes to Organizador are recorded here.
 
+## Unreleased
+
+### Added
+
+- A "Tranquilidade" panel on the home page summarising lifetime safety activity:
+  files organized, collisions renamed without overwriting, interrupted operations
+  recovered, documents adopted, returns, and undos.
+
 ## 0.2.0 - 2026-09-01
 
 ### Added

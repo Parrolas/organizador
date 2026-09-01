@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from organizador.models import (
     FILE_KINDS,
+    ActivitySummary,
     ExistingDownload,
     FiledDocument,
     FilingHint,
@@ -25,7 +26,10 @@ from organizador.models import (
 from organizador.paths import normalise_path_key
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+
+METRIC_COLLISIONS_RENAMED = "collisions_renamed"
+METRIC_OPERATIONS_RECOVERED = "operations_recovered"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS subjects (
@@ -100,6 +104,11 @@ CREATE TABLE IF NOT EXISTS reviewed_findings (
     reason TEXT NOT NULL,
     reviewed_at TEXT NOT NULL,
     PRIMARY KEY (normalized_path, reason)
+);
+
+CREATE TABLE IF NOT EXISTS activity_counters (
+    kind TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS document_pages USING fts5(
@@ -1154,6 +1163,61 @@ class Database:
                 """
             ).fetchall()
         return [self._file(row) for row in rows]
+
+    def increment_metric(self, kind: str, amount: int = 1) -> None:
+        """Add to a lifetime safety counter used by the activity summary."""
+
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO activity_counters(kind, value) VALUES (?, ?)
+                ON CONFLICT(kind) DO UPDATE SET value = value + excluded.value
+                """,
+                (kind, amount),
+            )
+            connection.commit()
+
+    def activity_summary(self) -> ActivitySummary:
+        """Summarise lifetime filing history and persisted safety counters."""
+
+        with self.connect() as connection:
+            organized = int(
+                connection.execute("SELECT COUNT(*) FROM events WHERE action = 'file'").fetchone()[
+                    0
+                ]
+            )
+            adopted = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM files
+                    WHERE origin = 'adopted' AND catalog_state = 'active'
+                    """
+                ).fetchone()[0]
+            )
+            returned = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE action = 'return'"
+                ).fetchone()[0]
+            )
+            undone = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE action = 'file' AND undone_at IS NOT NULL"
+                ).fetchone()[0]
+            )
+            counters = {
+                str(row["kind"]): int(row["value"])
+                for row in connection.execute(
+                    "SELECT kind, value FROM activity_counters"
+                ).fetchall()
+            }
+        return ActivitySummary(
+            organized=organized,
+            adopted=adopted,
+            returned=returned,
+            undone=undone,
+            collisions_renamed=counters.get(METRIC_COLLISIONS_RENAMED, 0),
+            operations_recovered=counters.get(METRIC_OPERATIONS_RECOVERED, 0),
+        )
 
     def filing_hints(self) -> list[FilingHint]:
         """Return live, confirmed filing choices for conservative local learning."""

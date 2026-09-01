@@ -7,8 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from organizador.db import Database
-from organizador.models import ExistingDownload, FilingHint, FindingReason, Subject
+from organizador.db import METRIC_COLLISIONS_RENAMED, Database
+from organizador.models import (
+    ActivitySummary,
+    ExistingDownload,
+    FilingHint,
+    FindingReason,
+    Subject,
+)
 from organizador.paths import normalise_path_key
 
 
@@ -222,7 +228,7 @@ def test_schema_v3_adds_operation_journal_metadata(database: Database) -> None:
     assert {"subject_id", "kind"} <= columns
     assert index_row is not None
     assert "'returning'" in str(index_row["sql"])
-    assert version == 4
+    assert version == 5
 
 
 def test_schema_v4_adds_file_origin_and_persisted_reviews(
@@ -260,7 +266,7 @@ def test_schema_v4_adds_file_origin_and_persisted_reviews(
     assert columns["record_token"]["notnull"] == 1
     assert columns["catalog_state"]["dflt_value"] == "'active'"
     assert columns["catalog_state"]["notnull"] == 1
-    assert version == 4
+    assert version == 5
     assert database.list_reviewed_finding_keys() == {
         (
             normalise_path_key(migrated.current_path),
@@ -403,7 +409,7 @@ def test_stale_index_job_cannot_write_after_same_path_is_readopted(
 
 def test_newer_database_version_is_refused_without_downgrade(database: Database) -> None:
     with database.connect() as connection:
-        connection.execute("PRAGMA user_version = 5")
+        connection.execute("PRAGMA user_version = 6")
         connection.commit()
 
     with pytest.raises(RuntimeError, match="versão mais recente"):
@@ -411,7 +417,7 @@ def test_newer_database_version_is_refused_without_downgrade(database: Database)
 
     with database.connect() as connection:
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    assert version == 5
+    assert version == 6
 
 
 def test_normal_filing_reuses_a_dropped_path_tombstone(
@@ -450,3 +456,40 @@ def test_normal_filing_reuses_a_dropped_path_tombstone(
     assert replacement.catalog_state == "active"
     assert replacement.record_token != original.record_token
     assert database.latest_undoable_filing() is not None
+
+
+def test_activity_summary_tracks_lifetime_history(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    assert database.activity_summary() == ActivitySummary(0, 0, 0, 0, 0, 0)
+
+    file_id = _file_record(database, subject, tmp_path)
+    document = database.get_file(file_id)
+    assert document is not None
+    event = database.latest_undoable_filing()
+    assert event is not None
+    database.mark_filing_undone(event, tmp_path / "restored.txt")
+    adopted_path = tmp_path / "adotado.txt"
+    adopted_path.write_text("cataloged in place", encoding="utf-8")
+    candidate = ExistingDownload.capture(adopted_path)
+    assert candidate is not None
+    database.adopt_subject_file(candidate, subject.id, "Outros")
+    return_path = tmp_path / "devolvido.txt"
+    item = database.add_inbox_item(
+        return_path,
+        tmp_path / "downloads" / "devolvido.txt",
+        return_path.name,
+        10,
+    )
+    database.record_return(item.id, tmp_path / "Downloads" / "devolvido.txt")
+    database.increment_metric(METRIC_COLLISIONS_RENAMED)
+    database.increment_metric(METRIC_COLLISIONS_RENAMED)
+
+    summary = database.activity_summary()
+
+    assert summary.organized == 1
+    assert summary.undone == 1
+    assert summary.adopted == 1
+    assert summary.returned == 1
+    assert summary.collisions_renamed == 2
+    assert summary.operations_recovered == 0

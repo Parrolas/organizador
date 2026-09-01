@@ -40,6 +40,7 @@ def test_ingest_and_file_document_are_collision_safe(
     assert document.current_path.read_bytes() == b"x" * 200
     assert database.count_inbox_items() == 0
     assert database.filing_hints() == [FilingHint("MAT101_ficha.pdf", subject.id, "Exercícios")]
+    assert database.activity_summary().collisions_renamed == 1
 
 
 def test_requested_extension_cannot_change_the_original(
@@ -98,7 +99,7 @@ def test_manual_import_rejects_a_file_changed_after_confirmation(
 
 
 def test_new_download_can_reuse_a_path_while_an_older_item_is_pending(
-    app_config: AppConfig, filer: FilingService
+    app_config: AppConfig, database: Database, filer: FilingService
 ) -> None:
     source = _download(app_config, "repetido.pdf")
     first = filer.ingest(source)
@@ -110,6 +111,23 @@ def test_new_download_can_reuse_a_path_while_an_older_item_is_pending(
     assert second is not None
     assert second.id != first.id
     assert second.path.name == "repetido (2).pdf"
+    assert database.activity_summary().collisions_renamed == 1
+
+
+def test_undo_collision_is_renamed_without_overwrite_and_counted(
+    app_config: AppConfig, database: Database, filer: FilingService, subject: Subject
+) -> None:
+    item = filer.ingest(_download(app_config))
+    assert item is not None
+    filer.file_document(item.id, subject.id, "Slides", "MAT101_ficha.pdf")
+    (app_config.inbox_dir / "MAT101_ficha.pdf").write_bytes(b"newer inbox file")
+
+    restored = filer.undo_latest_filing()
+
+    assert restored is not None
+    assert restored.path.name == "MAT101_ficha (2).pdf"
+    assert (app_config.inbox_dir / "MAT101_ficha.pdf").read_bytes() == b"newer inbox file"
+    assert database.activity_summary().collisions_renamed == 1
 
 
 def test_non_university_file_returns_without_overwrite(
