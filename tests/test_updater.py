@@ -63,20 +63,28 @@ def test_version_tuple_parsing() -> None:
     assert updater.version_tuple("not-a-version") is None
 
 
+def _newer_version() -> str:
+    current = updater.version_tuple(updater.__version__)
+    assert current is not None
+    return ".".join(str(part) for part in (current[0], current[1], current[2] + 1))
+
+
 def test_fetch_latest_release_returns_newer_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    fake_version = _newer_version()
+
     def fake_urlopen(request: object, **kwargs: object) -> _FakeResponse:
         assert isinstance(request, object)
-        return _FakeResponse(_fake_release("0.6.0"))
+        return _FakeResponse(_fake_release(fake_version))
 
     monkeypatch.setattr(updater.urllib.request, "urlopen", fake_urlopen)
 
     info = updater.fetch_latest_release()
 
     assert info is not None
-    assert info.version == (0, 6, 0)
-    assert "0.6.0.zip" in info.zip_url
+    assert info.version == tuple(int(part) for part in fake_version.split("."))
+    assert f"{fake_version}.zip" in info.zip_url
 
 
 def test_fetch_latest_release_ignores_older_or_equal_versions(
@@ -85,14 +93,14 @@ def test_fetch_latest_release_ignores_older_or_equal_versions(
     monkeypatch.setattr(
         updater.urllib.request,
         "urlopen",
-        lambda request, **kwargs: _FakeResponse(_fake_release("0.5.0")),
+        lambda request, **kwargs: _FakeResponse(_fake_release(updater.__version__)),
     )
     assert updater.fetch_latest_release() is None
 
     monkeypatch.setattr(
         updater.urllib.request,
         "urlopen",
-        lambda request, **kwargs: _FakeResponse(_fake_release("0.4.0")),
+        lambda request, **kwargs: _FakeResponse(_fake_release("0.0.1")),
     )
     assert updater.fetch_latest_release() is None
 
