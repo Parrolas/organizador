@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from organizador.config import AppConfig
 from organizador.db import Database
+from organizador.i18n import _
 from organizador.ui import theme as ui_theme
 from organizador.ui.pages import (
     HomePage,
@@ -69,8 +70,8 @@ class MainWindow(QMainWindow):
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(17, 24, 17, 18)
         sidebar_layout.setSpacing(8)
-        sidebar_layout.addWidget(label("Organizador", "Brand"))
-        sidebar_layout.addWidget(label("estudo local", "BrandDetail"))
+        sidebar_layout.addWidget(label(_("Organizador"), "Brand"))
+        sidebar_layout.addWidget(label(_("estudo local"), "BrandDetail"))
         sidebar_layout.addSpacing(22)
 
         self.stack = QStackedWidget()
@@ -95,12 +96,12 @@ class MainWindow(QMainWindow):
         self.nav_group.setExclusive(True)
         self.nav_buttons: dict[str, QPushButton] = {}
         labels = (
-            ("inicio", "Início"),
-            ("inbox", "Caixa de Entrada"),
-            ("pesquisa", "Pesquisa"),
-            ("tarefas", "Tarefas"),
-            ("disciplinas", "Disciplinas"),
-            ("definicoes", "Definições"),
+            ("inicio", _("Início")),
+            ("inbox", _("Caixa de Entrada")),
+            ("pesquisa", _("Pesquisa")),
+            ("tarefas", _("Tarefas")),
+            ("disciplinas", _("Disciplinas")),
+            ("definicoes", _("Definições")),
         )
         for index, (key, text) in enumerate(labels):
             nav = QPushButton(text)
@@ -120,7 +121,7 @@ class MainWindow(QMainWindow):
         self.status_dot.setFixedSize(8, 8)
         tokens = ui_theme.current()
         self.status_dot.setStyleSheet(f"background: {tokens.status_ok}; border-radius: 4px;")
-        self.status_label = QLabel("A iniciar…")
+        self.status_label = QLabel(_("A iniciar…"))
         self.status_label.setStyleSheet(f"color: {tokens.status_text}; font-size: 12px;")
         status_row.addWidget(self.status_dot)
         status_row.addWidget(self.status_label, 1)
@@ -164,7 +165,7 @@ class MainWindow(QMainWindow):
         self.subjects_page.refresh()
         count = self.database.count_inbox_items()
         self.nav_buttons["inbox"].setText(
-            f"Caixa de Entrada  {count}" if count else "Caixa de Entrada"
+            _("Caixa de Entrada  {count}").format(count=count) if count else _("Caixa de Entrada")
         )
         self.set_runtime_status(watching=watching, paused=paused)
 
@@ -172,13 +173,13 @@ class MainWindow(QMainWindow):
         """Show watcher state without relying on colour alone."""
 
         if paused:
-            self.status_label.setText("Vigilância em pausa")
+            self.status_label.setText(_("Vigilância em pausa"))
             color = ui_theme.current().status_warn
         elif watching:
-            self.status_label.setText("A vigiar Downloads")
+            self.status_label.setText(_("A vigiar Downloads"))
             color = ui_theme.current().status_ok
         else:
-            self.status_label.setText("Vigilância desligada")
+            self.status_label.setText(_("Vigilância desligada"))
             color = ui_theme.current().status_off
         self.status_dot.setStyleSheet(f"background: {color}; border-radius: 4px;")
 

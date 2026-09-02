@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from organizador.config import APP_NAME, AppConfig, default_data_dir
 from organizador.controller import AppController
 from organizador.db import NewerDatabaseError
+from organizador.i18n import _, set_language
 from organizador.logging_setup import configure_logging, log_uncaught_exception
 from organizador.ui.icons import app_icon
 from organizador.ui.theme import apply_theme, get_theme
@@ -101,9 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     if logging_error is not None:
         QMessageBox.critical(
             None,
-            "Não foi possível iniciar o registo",
-            "A pasta de dados da aplicação não está disponível. "
-            f"Nenhum ficheiro foi alterado.\n\n{logging_error}",
+            _("Não foi possível iniciar o registo"),
+            _(
+                "A pasta de dados da aplicação não está disponível. "
+                "Nenhum ficheiro foi alterado.\n\n{error}"
+            ).format(error=logging_error),
         )
         return 1
 
@@ -111,10 +114,13 @@ def main(argv: list[str] | None = None) -> int:
     if config_error is not None:
         QMessageBox.warning(
             None,
-            "Definições danificadas",
-            "Não foi possível ler as definições guardadas. "
-            f"A app abriu com valores seguros para poderes corrigi-las.\n\n{config_error}",
+            _("Definições danificadas"),
+            _(
+                "Não foi possível ler as definições guardadas. "
+                "A app abriu com valores seguros para poderes corrigi-las.\n\n{error}"
+            ).format(error=config_error),
         )
+    set_language(config.language)
     apply_theme(application, get_theme(config.theme))
     instance = SingleInstance(config.data_dir)
     if not arguments.smoke_test and not instance.acquire():
@@ -126,18 +132,22 @@ def main(argv: list[str] | None = None) -> int:
         LOGGER.error("Refusing to open a database from a newer application version")
         QMessageBox.critical(
             None,
-            "Versão da base de dados mais recente",
-            "Esta base de dados foi criada por uma versão mais recente do Organizador. "
-            "Abre a versão mais recente da app. Nenhum ficheiro foi alterado.",
+            _("Versão da base de dados mais recente"),
+            _(
+                "Esta base de dados foi criada por uma versão mais recente do Organizador. "
+                "Abre a versão mais recente da app. Nenhum ficheiro foi alterado."
+            ),
         )
         return 1
     except Exception as exc:
         LOGGER.exception("Could not initialize application data")
         QMessageBox.critical(
             None,
-            "Não foi possível abrir os dados",
-            "A aplicação não conseguiu abrir o catálogo local. "
-            f"Consulta organizador.log antes de tentar novamente.\n\n{exc}",
+            _("Não foi possível abrir os dados"),
+            _(
+                "A aplicação não conseguiu abrir o catálogo local. "
+                "Consulta organizador.log antes de tentar novamente.\n\n{error}"
+            ).format(error=exc),
         )
         return 1
     instance.show_requested.connect(controller.show_main)

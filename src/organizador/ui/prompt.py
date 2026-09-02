@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from organizador.classifier import extract_due_date
 from organizador.filer import render_final_name
+from organizador.i18n import _
 from organizador.models import FILE_KINDS, FilingGuess, InboxItem, Subject
 from organizador.ui.widgets import button, clear_layout, format_size, label
 
@@ -69,7 +70,7 @@ class FilingPrompt(QWidget):
         top.setSpacing(12)
         heading_copy = QVBoxLayout()
         heading_copy.setSpacing(2)
-        heading_copy.addWidget(label("Novo material de estudo", "SectionTitle"))
+        heading_copy.addWidget(label(_("Novo material de estudo"), "SectionTitle"))
         self.meta_label = label("", "Muted")
         heading_copy.addWidget(self.meta_label)
         top.addLayout(heading_copy, 1)
@@ -78,12 +79,12 @@ class FilingPrompt(QWidget):
         card_layout.addLayout(top)
 
         self.name_edit = QLineEdit()
-        self.name_edit.setAccessibleName("Nome final do ficheiro")
-        self.name_edit.setToolTip("Podes corrigir o nome; a extensão original é preservada")
+        self.name_edit.setAccessibleName(_("Nome final do ficheiro"))
+        self.name_edit.setToolTip(_("Podes corrigir o nome; a extensão original é preservada"))
         card_layout.addWidget(self.name_edit)
 
         subject_header = QHBoxLayout()
-        subject_header.addWidget(label("Disciplina", "RowTitle"))
+        subject_header.addWidget(label(_("Disciplina"), "RowTitle"))
         subject_header.addStretch(1)
         self.guess_label = label("", "Muted")
         subject_header.addWidget(self.guess_label)
@@ -96,7 +97,7 @@ class FilingPrompt(QWidget):
         self.subject_group.setExclusive(True)
         self.subject_group.idClicked.connect(self._subject_clicked)
 
-        card_layout.addWidget(label("Tipo de documento", "RowTitle"))
+        card_layout.addWidget(label(_("Tipo de documento"), "RowTitle"))
         type_row = QHBoxLayout()
         type_row.setSpacing(7)
         self.type_group = QButtonGroup(self)
@@ -131,11 +132,11 @@ class FilingPrompt(QWidget):
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        not_university = button("Não é da universidade", variant="quiet")
+        not_university = button(_("Não é da universidade"), variant="quiet")
         not_university.clicked.connect(self._return)
-        later = button("Mais tarde")
+        later = button(_("Mais tarde"))
         later.clicked.connect(self._later)
-        self.confirm_button = button("Organizar ficheiro", variant="primary")
+        self.confirm_button = button(_("Organizar ficheiro"), variant="primary")
         self.confirm_button.setEnabled(False)
         self.confirm_button.clicked.connect(self._confirm)
         actions.addWidget(not_university)
@@ -177,9 +178,13 @@ class FilingPrompt(QWidget):
             )
         )
         self.name_edit.selectAll()
-        self.meta_label.setText(f"{format_size(item.size)}  ·  recebido da pasta Downloads")
+        self.meta_label.setText(
+            _("{size}  ·  recebido da pasta Downloads").format(size=format_size(item.size))
+        )
         self.guess_label.setText(
-            f"Sugestão {guess.confidence}%" if guess.subject_id is not None else "Escolhe uma opção"
+            _("Sugestão {percent}%").format(percent=guess.confidence)
+            if guess.subject_id is not None
+            else _("Escolhe uma opção")
         )
 
         for old_button in self.subject_group.buttons():
@@ -263,7 +268,7 @@ class FilingPrompt(QWidget):
 
     def _confirm(self) -> None:
         if self.current_item_id is None or self.selected_subject_id is None:
-            self.error_label.setText("Escolhe uma disciplina antes de organizar.")
+            self.error_label.setText(_("Escolhe uma disciplina antes de organizar."))
             return
         checked = self.type_group.checkedButton()
         kind = checked.text() if checked is not None else "Outros"
@@ -311,7 +316,7 @@ class FilingPrompt(QWidget):
         self._update_countdown()
 
     def _update_countdown(self) -> None:
-        self.countdown_label.setText(f"Mais tarde em {self.remaining}s")
+        self.countdown_label.setText(_("Mais tarde em {count}s").format(count=self.remaining))
 
     def _place_and_animate(self) -> None:
         screen = QGuiApplication.screenAt(QCursor.pos()) or self.screen()

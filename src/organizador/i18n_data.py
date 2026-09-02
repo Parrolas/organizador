@@ -1,0 +1,1680 @@
+# ruff: noqa: E501
+"""English, Spanish and French translations for Organizador.
+
+Keys are the Portuguese source strings. English is complete; Spanish and
+French mirror it. A missing key falls back to the Portuguese source at
+runtime, and the parity tests keep the three languages aligned.
+"""
+
+from __future__ import annotations
+
+EN_STRINGS: dict[str, str] = {
+    " Os outros {count} ficam em Downloads para um próximo lote.": (
+        " The other {count} stay in Downloads for a later batch."
+    ),
+    " bytes": " bytes",
+    " dias": " days",
+    "({count}) por organizar": "({count}) to organize",
+    "1 dia antes": "1 day before",
+    "1 resultado · os parênteses retos mostram a correspondência": (
+        "1 result · square brackets mark the match"
+    ),
+    "1 semana antes": "1 week before",
+    "2 dias antes": "2 days before",
+    "3 dias antes": "3 days before",
+    "A aplicação não conseguiu abrir o catálogo local. Consulta organizador.log antes de tentar novamente.\n\n{error}": (
+        "The application could not open the local catalog. "
+        "Check organizador.log before trying again.\n\n{error}"
+    ),
+    "A app ainda não tem histórico. Organiza o primeiro ficheiro para começar.": (
+        "The app has no history yet. Organize your first file to get started."
+    ),
+    "A caixa está vazia": "The inbox is empty",
+    "A importar…": "Importing…",
+    "A importação foi interrompida. Os ficheiros ainda não importados ficaram em Downloads.": (
+        "The import was interrupted. Files not yet imported stayed in Downloads."
+    ),
+    "A iniciar…": "Starting…",
+    "A janela fechou, mas Downloads continua a ser vigiado no tabuleiro do sistema.": (
+        "The window closed, but Downloads is still being watched from the system tray."
+    ),
+    "A mostrar tarefas de {date}": "Showing tasks for {date}",
+    "A ocorrência foi marcada como revista. O ficheiro não foi alterado.": (
+        "The finding was marked as reviewed. The file was not changed."
+    ),
+    "A pasta de dados da aplicação não está disponível. Nenhum ficheiro foi alterado.\n\n{error}": (
+        "The application data folder is unavailable. No file was changed.\n\n{error}"
+    ),
+    "A pesquisa é local. Escreve duas ou mais letras para começar.": (
+        "Search is local. Type two or more letters to begin."
+    ),
+    "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm texto pesquisável.": (
+        "Search is local. Scanned image-only PDFs do not have searchable text yet."
+    ),
+    "A preparar a vigilância de Downloads…": "Preparing the Downloads watch…",
+    "A verificar {count} ficheiros…": "Checking {count} files…",
+    "A verificar {count} ficheiro…": "Checking {count} file…",
+    "A vigiar Downloads": "Watching Downloads",
+    "A vigilância de Downloads está desligada nas Definições.": (
+        "The Downloads watch is turned off in Settings."
+    ),
+    "Abre a Caixa de Entrada para rever.": "Open the Inbox to review.",
+    "Abrir": "Open",
+    "Abrir Downloads": "Open Downloads",
+    "Abrir Organizador": "Open Organizador",
+    "Abrir Universidade": "Open University folder",
+    "Abrir pasta": "Open folder",
+    "Abrir pasta Universidade": "Open University folder",
+    "Adiciona a próxima entrega acima ou cria-a ao organizar um documento.": (
+        "Add your next assignment above, or create one while organizing a document."
+    ),
+    "Adicionar": "Add",
+    "Adicionar disciplina": "Add subject",
+    "Adicionar à pesquisa sem mover o ficheiro": "Add to search without moving the file",
+    "Adotar": "Adopt",
+    "Ainda não existe uma organização reversível.": ("There is no reversible organization yet."),
+    "Ainda não há ficheiros organizados nesta disciplina.": (
+        "No files organized in this subject yet."
+    ),
+    "Ainda não há prazos. Cria uma tarefa ou associa-a quando organizares um ficheiro.": (
+        "No deadlines yet. Create a task or attach one while organizing a file."
+    ),
+    "Ainda sem ficheiros organizados": "No organized files yet",
+    "Alterar a pasta Universidade afeta os próximos ficheiros; os já organizados não são movidos automaticamente.": (
+        "Changing the University folder affects future files; organized ones are not moved automatically."
+    ),
+    "Arquivada": "Archived",
+    "Arquivar": "Archive",
+    "Arquivar disciplina?": "Archive subject?",
+    "As palavras-chave ajudam a reconhecer ficheiros pelo nome.": (
+        "Keywords help recognize files by their name."
+    ),
+    "Atrasada · {date}": "Overdue · {date}",
+    "Avisar prazos antes": "Remind before deadlines",
+    "Aviso": "Reminder",
+    "Caixa de Entrada": "Inbox",
+    "Caixa de Entrada  {count}": "Inbox  {count}",
+    "Caixa de Entrada ({count})": "Inbox ({count})",
+    "Caixa de Entrada vazia": "Inbox empty",
+    "Caminho não encontrado": "Path not found",
+    "Cancelar": "Cancel",
+    "Com quantos dias de antecedência avisar prazos": (
+        "How many days in advance to warn about deadlines"
+    ),
+    "Começa por uma disciplina": "Start with a subject",
+    "Começar a vigiar Downloads depois da configuração": ("Start watching Downloads after setup"),
+    "Conclui a configuração da aplicação antes de importar ficheiros.": (
+        "Finish setting up the application before importing files."
+    ),
+    "Controla exatamente quais ficheiros entram e onde ficam guardados.": (
+        "Control exactly which files come in and where they are stored."
+    ),
+    "Cor": "Color",
+    "Cor da disciplina": "Subject color",
+    "Cria outra disciplina antes de arquivar esta.": (
+        "Create another subject before archiving this one."
+    ),
+    "Cria uma disciplina para a app saber onde guardar o próximo download.": (
+        "Create a subject so the app knows where to keep your next download."
+    ),
+    "Criar a minha organização": "Create my organization",
+    "Criar tarefa para cada ficheiro": "Create a task for each file",
+    "Código": "Code",
+    "Definições": "Settings",
+    "Definições danificadas": "Damaged settings",
+    "Definições guardadas.": "Settings saved.",
+    "Desfazer última organização": "Undo last organization",
+    "Destino de uma organização interrompida; compara antes de continuar.": (
+        "Destination of an interrupted organization; compare before continuing."
+    ),
+    "Destino em Downloads de uma devolução interrompida; compara os ficheiros.": (
+        "Downloads destination of an interrupted return; compare the files."
+    ),
+    "Devolver este ficheiro a Downloads": "Return this file to Downloads",
+    "Disciplina": "Subject",
+    "Disciplinas": "Subjects",
+    "Documento registado que já não está no destino esperado.": (
+        "A cataloged document is no longer at its expected destination."
+    ),
+    "Downloads arrumados\nantes de se perderem.": "Downloads organized\nbefore they get lost.",
+    "Downloads vigiado. Só os formatos de estudo configurados entram.": (
+        "Downloads is watched. Only the configured study formats come in."
+    ),
+    "Editar": "Edit",
+    "Editar disciplina": "Edit subject",
+    "Editar tarefa": "Edit task",
+    "Elimina o filtro para ver todas as tarefas ou adiciona uma tarefa para este dia.": (
+        "Clear the filter to see all tasks, or add a task for this day."
+    ),
+    "Eliminar": "Delete",
+    "Encontrado numa disciplina sem registo. Não foi movido nem alterado.": (
+        "Found in a subject without a record. It was not moved or changed."
+    ),
+    "Escolhe o teu ponto de partida": "Choose your starting point",
+    "Escolhe uma disciplina antes de organizar.": "Choose a subject before organizing.",
+    "Escolhe uma opção": "Choose an option",
+    "Escolhe uma pasta para a Universidade.": "Choose a folder for the University.",
+    "Escolher pasta": "Choose folder",
+    "Escolher pasta Universidade": "Choose University folder",
+    "Escolher…": "Browse…",
+    "Escreve o nome da disciplina para continuar.": "Type the subject name to continue.",
+    "Escreve o nome da primeira disciplina.": "Type the first subject's name.",
+    "Escreve o título da tarefa para continuar.": "Type the task title to continue.",
+    "Escreve uma tarefa antes de adicionar.": "Type a task before adding.",
+    "Espera que a importação de Downloads termine antes de guardar.": (
+        "Wait for the Downloads import to finish before saving."
+    ),
+    "Espera que o lote atual termine antes de iniciar outro.": (
+        "Wait for the current batch to finish before starting another."
+    ),
+    "Esta base de dados foi criada por uma versão mais recente do Organizador. Abre a versão mais recente da app. Nenhum ficheiro foi alterado.": (
+        "This database was created by a newer version of Organizador. "
+        "Open the newest version of the app. No file was changed."
+    ),
+    "Ex.: Cálculo I": "e.g. Calculus I",
+    "Ex.: MAT101": "e.g. MAT101",
+    "Ex.: MAT101 (opcional)": "e.g. MAT101 (optional)",
+    "Ex.: cálculo, derivadas, integrais": "e.g. calculus, derivatives, integrals",
+    "Ex.: regra da cadeia, normalização, Revolução Francesa…": (
+        "e.g. chain rule, normalization, French Revolution…"
+    ),
+    "Experimenta menos palavras ou confirma se o ficheiro aparece nos organizados recentes.": (
+        "Try fewer words, or check whether the file appears under recently organized."
+    ),
+    "Extensões aceites": "Accepted extensions",
+    "Fechar": "Close",
+    "Ficheiro devolvido": "File returned",
+    "Ficheiro organizado": "File organized",
+    "Ficheiro restaurado por uma operação de desfazer interrompida.": (
+        "File restored by an interrupted undo operation."
+    ),
+    "Ficheiros adotados": "Adopted files",
+    "Ficheiros de {name}": "Files of {name}",
+    "Foram encontrados {total} ficheiros elegíveis. Serão verificados no máximo {selected} e movidos para a Caixa de Entrada.{remaining}\n\nCada ficheiro continuará a precisar da tua confirmação.": (
+        "{total} eligible files were found. At most {selected} will be checked and moved "
+        "to the Inbox.{remaining}\n\nEach file will still need your confirmation."
+    ),
+    "Geral": "General",
+    "Guardar definições": "Save settings",
+    "Guardar disciplina": "Save subject",
+    "Guardar tarefa": "Save task",
+    "Idioma": "Language",
+    "Importar de Downloads…": "Import from Downloads…",
+    "Importar ficheiros existentes?": "Import existing files?",
+    "Importação de Downloads concluída": "Downloads import finished",
+    "Importação em curso": "Import in progress",
+    "Importação indisponível": "Import unavailable",
+    "Iniciar o Organizador quando entro no Windows": "Start Organizador when I sign in to Windows",
+    "Início": "Home",
+    "Já existe uma disciplina ativa com o mesmo nome ou pasta: {names}. Edita-a primeiro para libertar o nome.": (
+        "An active subject already uses the same name or folder: {names}. "
+        "Edit it first to free the name."
+    ),
+    "Já existe uma disciplina com esse nome.\n\n{error}": (
+        "A subject with that name already exists.\n\n{error}"
+    ),
+    "Já existe uma disciplina ou pasta com esse nome.\n\n{error}": (
+        "A subject or folder with that name already exists.\n\n{error}"
+    ),
+    "Mais tarde": "Later",
+    "Mais tarde em {count}s": "Later in {count}s",
+    "Mantém cada entrega junto da disciplina a que pertence.": (
+        "Keep each assignment with the subject it belongs to."
+    ),
+    "Mantém uma disciplina ativa": "Keep one active subject",
+    "Marcar revisto": "Mark reviewed",
+    "Modelo do nome": "Name template",
+    "Mostrar arquivadas": "Show archived",
+    "Mostrar na pasta": "Show in folder",
+    "Mostrar os ficheiros organizados nesta disciplina": (
+        "Show the files organized in this subject"
+    ),
+    "Nada para desfazer": "Nothing to undo",
+    "Nada para importar": "Nothing to import",
+    "Nada é arquivado sem uma decisão. Organiza agora ou deixa para mais tarde.": (
+        "Nothing is filed without a decision. Organize now or leave it for later."
+    ),
+    "Nenhum ficheiro foi substituído ou apagado.": "No file was overwritten or deleted.",
+    "Nenhum ficheiro foi substituído ou apagado. ": "No file was overwritten or deleted. ",
+    "No dia": "On the day",
+    "Nome": "Name",
+    "Nome final do ficheiro": "Final file name",
+    "Nomes finais": "Final names",
+    "Nova disciplina": "New subject",
+    "Nova tarefa, por exemplo: entregar ficha 4": ("New task, for example: hand in worksheet 4"),
+    "Novo material de estudo": "New study material",
+    "Novo material na Caixa de Entrada": "New material in the Inbox",
+    "Não encontrei essa expressão": "I could not find that expression",
+    "Não existem ficheiros elegíveis no nível principal de Downloads.": (
+        "There are no eligible files at the top level of Downloads."
+    ),
+    "Não foi possível abrir": "Could not open",
+    "Não foi possível abrir a pasta configurada: {error}": (
+        "Could not open the configured folder: {error}"
+    ),
+    "Não foi possível abrir as pastas": "Could not open the folders",
+    "Não foi possível abrir os dados": "Could not open the data",
+    "Não foi possível adotar": "Could not adopt",
+    "Não foi possível criar": "Could not create",
+    "Não foi possível desfazer": "Could not undo",
+    "Não foi possível devolver": "Could not return",
+    "Não foi possível encontrar:\n{path}": "Could not find:\n{path}",
+    "Não foi possível guardar": "Could not save",
+    "Não foi possível iniciar o registo": "Could not start logging",
+    "Não foi possível ler as definições guardadas. A app abriu com valores seguros para poderes corrigi-las.\n\n{error}": (
+        "Could not read the saved settings. The app started with safe values "
+        "so you can fix them.\n\n{error}"
+    ),
+    "Não foi possível mostrar": "Could not show",
+    "Não foi possível procurar": "Could not search",
+    "Não foi possível recolher o ficheiro": "Could not collect the file",
+    "Não foi possível remover": "Could not remove",
+    "Não foi possível restaurar": "Could not restore",
+    "Não foi possível rever o histórico local: {error}": (
+        "Could not review the local history: {error}"
+    ),
+    "Não é da universidade": "Not university material",
+    "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado.": (
+        "The recorded path is no longer a regular file. It was not followed or changed."
+    ),
+    "O ficheiro ou o registo mudou desde a verificação. Nada foi removido.": (
+        "The file or the record changed since the scan. Nothing was removed."
+    ),
+    "O idioma novo é aplicado ao reiniciar a app.": (
+        "The new language is applied when the app restarts."
+    ),
+    "O primeiro documento organizado aparece aqui. A app não toca nos ficheiros antigos sem pedires.": (
+        "Your first organized document appears here. The app does not touch old files unless you ask."
+    ),
+    "O registo mudou desde que a página foi aberta. Nada foi removido.": (
+        "The record changed since the page was opened. Nothing was removed."
+    ),
+    "O teu semestre, arrumado.": "Your semester, organized.",
+    "Oculta a disciplina sem apagar os respetivos ficheiros": (
+        "Hides the subject without deleting its files"
+    ),
+    "Operação de desfazer interrompida; confirma as pastas antes de continuar.": (
+        "Interrupted undo operation; confirm the folders before continuing."
+    ),
+    "Organizador": "Organizador",
+    "Organizador continua ativo": "Organizador is still active",
+    "Organizador v{version} · código MIT · componentes de terceiros com licenças próprias": (
+        "Organizador v{version} · MIT license · third-party components under their own licenses"
+    ),
+    "Organizador · a preparar": "Organizador · preparing",
+    "Organizador · {state}": "Organizador · {state}",
+    "Organizar": "Organize",
+    "Organizar ficheiro": "Organize file",
+    "Organizar seleção": "Organize selection",
+    "Organizar seleção ({count})": "Organize selection ({count})",
+    "Organizar {count} ficheiro": "Organize {count} file",
+    "Organizar {count} ficheiros": "Organize {count} files",
+    "Organização desfeita": "Organization undone",
+    "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta.": (
+        "An organization that cannot be undone while the file is missing."
+    ),
+    "Origem de uma devolução interrompida; não foi alterada no arranque.": (
+        "Origin of an interrupted return; it was not changed at startup."
+    ),
+    "Origem de uma operação de desfazer interrompida; não foi alterada no arranque.": (
+        "Origin of an interrupted undo operation; it was not changed at startup."
+    ),
+    "Origem de uma organização interrompida; não foi alterada no arranque.": (
+        "Origin of an interrupted organization; it was not changed at startup."
+    ),
+    "Os códigos e palavras-chave tornam as sugestões de arquivo mais precisas.": (
+        "Codes and keywords make filing suggestions more accurate."
+    ),
+    "Os downloads novos aparecem aqui antes de irem para uma disciplina.": (
+        "New downloads appear here before they go to a subject."
+    ),
+    "Os ficheiros elegíveis passam primeiro por uma Caixa de Entrada segura. Tu confirmas a disciplina e nada é substituído.": (
+        "Eligible files first pass through a safe Inbox. You confirm the subject and "
+        "nothing is overwritten."
+    ),
+    "Os ficheiros mudaram ou já estavam a ser processados e ficaram em Downloads.": (
+        "The files changed or were already being processed and stayed in Downloads."
+    ),
+    "Padrão das Definições": "Settings default",
+    "Palavras-chave": "Keywords",
+    "Pasta Downloads": "Downloads folder",
+    "Pasta Universidade": "University folder",
+    "Pasta: {name}": "Folder: {name}",
+    "Pastas e vigilância": "Folders and watching",
+    "Pausar vigilância": "Pause watching",
+    "Pesquisa": "Search",
+    "Pesquisa nos documentos": "Search in documents",
+    "Pesquisar nos apontamentos": "Search your notes",
+    "Podes alterar estas opções depois. Começa por criar uma disciplina.": (
+        "You can change these options later. Start by creating a subject."
+    ),
+    "Podes corrigir o nome; a extensão original é preservada": (
+        "You can edit the name; the original extension is preserved"
+    ),
+    "Prazo": "Deadline",
+    "Prazo amanhã": "Due tomorrow",
+    "Prazo das tarefas": "Task deadline",
+    "Prazo em {count} dias · {date}": "Due in {count} days · {date}",
+    "Prazo hoje": "Due today",
+    "Preparar o Organizador": "Set up Organizador",
+    "Primeira disciplina": "First subject",
+    "Procura palavras dentro de PDFs, documentos Office, ficheiros de texto e notebooks já organizados.": (
+        "Search words inside organized PDFs, Office documents, text files and notebooks."
+    ),
+    "Próximos prazos": "Upcoming deadlines",
+    "Quando terminares um download elegível, ele aparece aqui e num pequeno popup.": (
+        "When a qualifying download finishes, it appears here and in a small popup."
+    ),
+    "Reativar disciplina?": "Restore subject?",
+    "Recuperação manual necessária  ·  {size}  ·  {when}": (
+        "Manual recovery needed  ·  {size}  ·  {when}"
+    ),
+    "Registo mantido": "Record kept",
+    "Remover apenas o registo local; nenhum ficheiro é apagado": (
+        "Removes only the local record; no file is deleted"
+    ),
+    "Remover do catálogo": "Remove from catalog",
+    "Remover do catálogo?": "Remove from catalog?",
+    "Remover registo": "Remove record",
+    "Remover registo em falta?": "Remove missing record?",
+    "Restaurar": "Restore",
+    "Retomar vigilância": "Resume watching",
+    "Rever {name}": "Review {name}",
+    "Revisão manual do histórico": "Manual history review",
+    "Revê as Definições antes de ativar a vigilância.\n\n{error}": (
+        "Review Settings before enabling the watch.\n\n{error}"
+    ),
+    "Revê: {errors}.": "Review: {errors}.",
+    "Sair": "Quit",
+    "Sair da configuração?": "Quit setup?",
+    "Selecionar {name}": "Select {name}",
+    "Sem palavras-chave": "No keywords",
+    "Sem prazo": "No deadline",
+    "Sem resultados. O documento pode ainda estar a ser indexado ou ser um PDF digitalizado.": (
+        "No results. The document may still be indexing or be a scanned PDF."
+    ),
+    "Sem sugestão": "No suggestion",
+    "Sem tarefas neste dia": "No tasks on this day",
+    "Sem tarefas pendentes": "No pending tasks",
+    "Sem uma disciplina, a app não começa a mover downloads. Podes voltar a configurar depois.": (
+        "Without a subject the app will not start moving downloads. You can set it up later."
+    ),
+    "Será removido apenas o registo local e o índice de pesquisa. Nenhum ficheiro será apagado. Se o ficheiro reaparecer durante a operação, ficará visível para poder ser adotado novamente.": (
+        "Only the local record and the search index will be removed. No file will be "
+        "deleted. If the file reappears during the operation, it becomes visible so it "
+        "can be adopted again."
+    ),
+    "Sugestão {percent}%": "Suggestion {percent}%",
+    "Só a organização mais recente pode ser desfeita.": (
+        "Only the most recent organization can be undone."
+    ),
+    "Tamanho mínimo": "Minimum size",
+    "Tarefa": "Task",
+    "Tarefa geral": "General task",
+    "Tarefas": "Tasks",
+    "Tarefas e prazos": "Tasks and deadlines",
+    "Tema": "Theme",
+    "Tempo do popup": "Popup timeout",
+    "Tipo": "Type",
+    "Tipo de documento": "Document type",
+    "Todos vão para a mesma disciplina e tipo. Cada ficheiro mantém o seu próprio histórico; só a última organização pode ser desfeita.": (
+        "All go to the same subject and type. Each file keeps its own history; only the "
+        "last organization can be undone."
+    ),
+    "Tokens: {tokens}. A extensão original é sempre preservada.": (
+        "Tokens: {tokens}. The original extension is always preserved."
+    ),
+    "Tranquilidade": "Peace of mind",
+    "Tudo fica neste computador. Nenhum documento é enviado para a internet.": (
+        "Everything stays on this computer. No document is sent to the internet."
+    ),
+    "Tudo no lugar": "Everything in place",
+    "Título da tarefa": "Task title",
+    "Ver ficheiros": "View files",
+    "Ver todas": "View all",
+    "Verificação de segurança concluída": "Safety check finished",
+    "Verificação de segurança incompleta": "Safety check incomplete",
+    "Verificação incompleta": "Check incomplete",
+    "Versão da base de dados mais recente": "Newer database version",
+    "Vigiar novos ficheiros em Downloads": "Watch for new files in Downloads",
+    "Vigilância de Downloads desligada": "Downloads watch turned off",
+    "Vigilância desligada": "Watching off",
+    "Vigilância em pausa": "Watching paused",
+    "Vigilância em pausa. Os novos downloads ficam onde estão.": (
+        "Watching paused. New downloads stay where they are."
+    ),
+    "Volta a mostrar a disciplina nas escolhas de arquivo": (
+        "Shows the subject again in filing choices"
+    ),
+    "a verificação atingiu o limite de segurança": "the scan reached its safety limit",
+    "alguns caminhos não puderam ser verificados": "some paths could not be checked",
+    "diapositivo {page}": "slide {page}",
+    "documento": "document",
+    "e mais {count}": "and {count} more",
+    "estudo local": "local study",
+    "está atrasada": "is overdue",
+    "folha {page}": "sheet {page}",
+    "página {page}": "page {page}",
+    "vence amanhã": "is due tomorrow",
+    "vence em {count} dias": "is due in {count} days",
+    "vence hoje": "is due today",
+    "verificação incompleta": "check incomplete",
+    "{count} arquivada": "{count} archived",
+    "{count} arquivadas": "{count} archived",
+    "{count} colisão de nomes resolvida sem substituir nada": (
+        "{count} name collision resolved without overwriting"
+    ),
+    "{count} colisões de nomes resolvidas sem substituir nada": (
+        "{count} name collisions resolved without overwriting"
+    ),
+    "{count} com erro": "{count} with errors",
+    "{count} devolução a Downloads": "{count} return to Downloads",
+    "{count} devoluções a Downloads": "{count} returns to Downloads",
+    "{count} disciplina ativa": "{count} active subject",
+    "{count} disciplinas ativas": "{count} active subjects",
+    "{count} ficheiro adotado sem mover": "{count} file adopted without moving",
+    "{count} ficheiro organizado": "{count} file organized",
+    "{count} ficheiro por decidir": "{count} file awaiting decision",
+    "{count} ficheiro por decidir · {recovery} precisam de recuperação": (
+        "{count} file awaiting decision · {recovery} need recovery"
+    ),
+    "{count} ficheiro precisa de recuperação manual": ("{count} file needs manual recovery"),
+    "{count} ficheiro precisa de revisão manual": "{count} finding needs manual review",
+    "{count} ficheiro · {size}": "{count} file · {size}",
+    "{count} ficheiros adotados sem mover": "{count} files adopted without moving",
+    "{count} ficheiros organizados": "{count} files organized",
+    "{count} ficheiros por decidir": "{count} files awaiting decision",
+    "{count} ficheiros por decidir · {recovery} precisam de recuperação": (
+        "{count} files awaiting decision · {recovery} need recovery"
+    ),
+    "{count} ficheiros precisam de recuperação manual": ("{count} files need manual recovery"),
+    "{count} ficheiros precisam de revisão manual": "{count} findings need manual review",
+    "{count} ficheiros · {size}": "{count} files · {size}",
+    "{count} ignorado": "{count} skipped",
+    "{count} ignorados": "{count} skipped",
+    "{count} importado": "{count} imported",
+    "{count} importados": "{count} imported",
+    "{count} não entraram neste lote e ficaram em Downloads.": (
+        "{count} did not join this batch and stayed in Downloads."
+    ),
+    "{count} ocorrência do histórico precisa de revisão": ("{count} history finding needs review"),
+    "{count} ocorrências do histórico precisam de revisão": (
+        "{count} history findings need review"
+    ),
+    "{count} operação interrompida recuperada": ("{count} interrupted operation recovered"),
+    "{count} operações interrompidas recuperadas": ("{count} interrupted operations recovered"),
+    "{count} organizado, {failed} com erro. Revê: {errors}.": (
+        "{count} organized, {failed} with errors. Review: {errors}."
+    ),
+    "{count} organizado.": "{count} organized.",
+    "{count} organizados, {failed} com erro. Revê: {errors}.": (
+        "{count} organized, {failed} with errors. Review: {errors}."
+    ),
+    "{count} organizados.": "{count} organized.",
+    "{count} organização desfeita": "{count} organization undone",
+    "{count} organizações desfeitas": "{count} organizations undone",
+    "{count} registo da Caixa de Entrada foi revisto": ("{count} Inbox record was reviewed"),
+    "{count} registos da Caixa de Entrada foram revistos": ("{count} Inbox records were reviewed"),
+    "{count} resultados · os parênteses retos mostram a correspondência": (
+        "{count} results · square brackets mark the match"
+    ),
+    "{kind} · {size} · organizado {date}": "{kind} · {size} · organized {date}",
+    "{name} (arquivada)": "{name} (archived)",
+    "{name} deixa de aparecer nas escolhas. Os ficheiros e tarefas não são apagados.": (
+        "{name} stops appearing in filing choices. Its files and tasks are not deleted."
+    ),
+    "{name} deixará de aparecer na pesquisa e nos recentes. O ficheiro permanecerá exatamente onde está.": (
+        "{name} will stop appearing in search and recents. The file stays exactly where it is."
+    ),
+    "{name} está pronto para organizar.": "{name} is ready to organize.",
+    "{name} foi adotado sem mover o ficheiro.": ("{name} was adopted without moving the file."),
+    "{name} foi guardado em {destination}.": "{name} was saved to {destination}.",
+    "{name} saiu do catálogo; o ficheiro ficou no lugar.": (
+        "{name} left the catalog; the file stayed in place."
+    ),
+    "{name} volta a aparecer nas escolhas de arquivo. Os ficheiros e tarefas não foram alterados.": (
+        "{name} appears again in filing choices. Files and tasks were not changed."
+    ),
+    "{name} voltou para Downloads.": "{name} went back to Downloads.",
+    "{name} voltou à Caixa de Entrada.": "{name} returned to the Inbox.",
+    "{size}  ·  recebido da pasta Downloads": "{size}  ·  received from the Downloads folder",
+    "{size}  ·  {when}  ·  Sugestão: {suggestion} / {kind}": (
+        "{size}  ·  {when}  ·  Suggestion: {suggestion} / {kind}"
+    ),
+    "{subject}  ·  {due}": "{subject}  ·  {due}",
+    "{subject}  ·  {kind}  ·  {location}": "{subject}  ·  {kind}  ·  {location}",
+    "{subject}  ·  {kind}  ·  {size}": "{subject}  ·  {kind}  ·  {size}",
+    "{subject} · {kind} · adotado sem mover": "{subject} · {kind} · adopted without moving",
+    "{title} {when}.": "{title} {when}.",
+}
+
+ES_STRINGS: dict[str, str] = {
+    " Os outros {count} ficam em Downloads para um próximo lote.": (
+        " Los otros {count} se quedan en Descargas para otro lote."
+    ),
+    " bytes": " bytes",
+    " dias": " días",
+    "({count}) por organizar": "({count}) por organizar",
+    "1 dia antes": "1 día antes",
+    "1 resultado · os parênteses retos mostram a correspondência": (
+        "1 resultado · los corchetes marcan la coincidencia"
+    ),
+    "1 semana antes": "1 semana antes",
+    "2 dias antes": "2 días antes",
+    "3 dias antes": "3 días antes",
+    "A aplicação não conseguiu abrir o catálogo local. Consulta organizador.log antes de tentar novamente.\n\n{error}": (
+        "La aplicación no pudo abrir el catálogo local. Consulta organizador.log "
+        "antes de intentarlo de nuevo.\n\n{error}"
+    ),
+    "A app ainda não tem histórico. Organiza o primeiro ficheiro para começar.": (
+        "La app aún no tiene historial. Organiza el primer archivo para empezar."
+    ),
+    "A caixa está vazia": "La bandeja está vacía",
+    "A importar…": "Importando…",
+    "A importação foi interrompida. Os ficheiros ainda não importados ficaram em Downloads.": (
+        "La importación fue interrumpida. Los archivos aún no importados se quedaron en Descargas."
+    ),
+    "A iniciar…": "Iniciando…",
+    "A janela fechou, mas Downloads continua a ser vigiado no tabuleiro do sistema.": (
+        "La ventana se cerró, pero Descargas sigue vigilándose desde la bandeja del sistema."
+    ),
+    "A mostrar tarefas de {date}": "Mostrando tareas del {date}",
+    "A ocorrência foi marcada como revista. O ficheiro não foi alterado.": (
+        "La incidencia fue marcada como revisada. El archivo no fue alterado."
+    ),
+    "A pasta de dados da aplicação não está disponível. Nenhum ficheiro foi alterado.\n\n{error}": (
+        "La carpeta de datos de la aplicación no está disponible. "
+        "Ningún archivo fue alterado.\n\n{error}"
+    ),
+    "A pesquisa é local. Escreve duas ou mais letras para começar.": (
+        "La búsqueda es local. Escribe dos o más letras para empezar."
+    ),
+    "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm texto pesquisável.": (
+        "La búsqueda es local. Los PDF escaneados solo como imagen aún no tienen texto buscable."
+    ),
+    "A preparar a vigilância de Downloads…": "Preparando la vigilancia de Descargas…",
+    "A verificar {count} ficheiros…": "Verificando {count} archivos…",
+    "A verificar {count} ficheiro…": "Verificando {count} archivo…",
+    "A vigiar Downloads": "Vigilando Descargas",
+    "A vigilância de Downloads está desligada nas Definições.": (
+        "La vigilancia de Descargas está desactivada en Ajustes."
+    ),
+    "Abre a Caixa de Entrada para rever.": "Abre la Bandeja de Entrada para revisar.",
+    "Abrir": "Abrir",
+    "Abrir Downloads": "Abrir Descargas",
+    "Abrir Organizador": "Abrir Organizador",
+    "Abrir Universidade": "Abrir carpeta Universidad",
+    "Abrir pasta": "Abrir carpeta",
+    "Abrir pasta Universidade": "Abrir carpeta Universidad",
+    "Adiciona a próxima entrega acima ou cria-a ao organizar um documento.": (
+        "Añade la próxima entrega arriba o créala al organizar un documento."
+    ),
+    "Adicionar": "Añadir",
+    "Adicionar disciplina": "Añadir asignatura",
+    "Adicionar à pesquisa sem mover o ficheiro": "Añadir a la búsqueda sin mover el archivo",
+    "Adotar": "Adoptar",
+    "Ainda não existe uma organização reversível.": ("Aún no existe una organización reversible."),
+    "Ainda não há ficheiros organizados nesta disciplina.": (
+        "Aún no hay archivos organizados en esta asignatura."
+    ),
+    "Ainda não há prazos. Cria uma tarefa ou associa-a quando organizares um ficheiro.": (
+        "Aún no hay plazos. Crea una tarea o asóciala al organizar un archivo."
+    ),
+    "Ainda sem ficheiros organizados": "Aún sin archivos organizados",
+    "Alterar a pasta Universidade afeta os próximos ficheiros; os já organizados não são movidos automaticamente.": (
+        "Cambiar la carpeta Universidad afecta a los archivos futuros; "
+        "los ya organizados no se mueven automáticamente."
+    ),
+    "Arquivada": "Archivada",
+    "Arquivar": "Archivar",
+    "Arquivar disciplina?": "¿Archivar asignatura?",
+    "As palavras-chave ajudam a reconhecer ficheiros pelo nome.": (
+        "Las palabras clave ayudan a reconocer archivos por su nombre."
+    ),
+    "Atrasada · {date}": "Atrasada · {date}",
+    "Avisar prazos antes": "Avisar de plazos con antelación",
+    "Aviso": "Aviso",
+    "Caixa de Entrada": "Bandeja de Entrada",
+    "Caixa de Entrada  {count}": "Bandeja de Entrada  {count}",
+    "Caixa de Entrada ({count})": "Bandeja de Entrada ({count})",
+    "Caixa de Entrada vazia": "Bandeja de Entrada vacía",
+    "Caminho não encontrado": "Ruta no encontrada",
+    "Cancelar": "Cancelar",
+    "Com quantos dias de antecedência avisar prazos": (
+        "Con cuántos días de antelación avisar de los plazos"
+    ),
+    "Começa por uma disciplina": "Empieza por una asignatura",
+    "Começar a vigiar Downloads depois da configuração": (
+        "Empezar a vigiar Descargas después de la configuración"
+    ),
+    "Conclui a configuração da aplicação antes de importar ficheiros.": (
+        "Termina la configuración de la aplicación antes de importar archivos."
+    ),
+    "Controla exatamente quais ficheiros entram e onde ficam guardados.": (
+        "Controla exactamente qué archivos entran y dónde se guardan."
+    ),
+    "Cor": "Color",
+    "Cor da disciplina": "Color de la asignatura",
+    "Cria outra disciplina antes de arquivar esta.": (
+        "Crea otra asignatura antes de archivar esta."
+    ),
+    "Cria uma disciplina para a app saber onde guardar o próximo download.": (
+        "Crea una asignatura para que la app sepa dónde guardar tu próxima descarga."
+    ),
+    "Criar a minha organização": "Crear mi organización",
+    "Criar tarefa para cada ficheiro": "Crear una tarea para cada archivo",
+    "Código": "Código",
+    "Definições": "Ajustes",
+    "Definições danificadas": "Ajustes dañados",
+    "Definições guardadas.": "Ajustes guardados.",
+    "Desfazer última organização": "Deshacer la última organización",
+    "Destino de uma organização interrompida; compara antes de continuar.": (
+        "Destino de una organización interrumpida; compara antes de continuar."
+    ),
+    "Destino em Downloads de uma devolução interrompida; compara os ficheiros.": (
+        "Destino en Descargas de una devolución interrumpida; compara los archivos."
+    ),
+    "Devolver este ficheiro a Downloads": "Devolver este archivo a Descargas",
+    "Disciplina": "Asignatura",
+    "Disciplinas": "Asignaturas",
+    "Documento registado que já não está no destino esperado.": (
+        "Documento registrado que ya no está en el destino esperado."
+    ),
+    "Downloads arrumados\nantes de se perderem.": "Descargas organizadas\nantes de perderse.",
+    "Downloads vigiado. Só os formatos de estudo configurados entram.": (
+        "Descargas vigilada. Solo entran los formatos de estudio configurados."
+    ),
+    "Editar": "Editar",
+    "Editar disciplina": "Editar asignatura",
+    "Editar tarefa": "Editar tarea",
+    "Elimina o filtro para ver todas as tarefas ou adiciona uma tarefa para este dia.": (
+        "Quita el filtro para ver todas las tareas o añade una tarea para este día."
+    ),
+    "Eliminar": "Eliminar",
+    "Encontrado numa disciplina sem registo. Não foi movido nem alterado.": (
+        "Encontrado en una asignatura sin registro. No fue movido ni alterado."
+    ),
+    "Escolhe o teu ponto de partida": "Elige tu punto de partida",
+    "Escolhe uma disciplina antes de organizar.": "Elige una asignatura antes de organizar.",
+    "Escolhe uma opção": "Elige una opción",
+    "Escolhe uma pasta para a Universidade.": "Elige una carpeta para la Universidad.",
+    "Escolher pasta": "Elegir carpeta",
+    "Escolher pasta Universidade": "Elegir carpeta Universidad",
+    "Escolher…": "Examinar…",
+    "Escreve o nome da disciplina para continuar.": "Escribe el nombre de la asignatura para continuar.",
+    "Escreve o nome da primeira disciplina.": "Escribe el nombre de la primera asignatura.",
+    "Escreve o título da tarefa para continuar.": "Escribe el título de la tarea para continuar.",
+    "Escreve uma tarefa antes de adicionar.": "Escribe una tarea antes de añadir.",
+    "Espera que a importação de Downloads termine antes de guardar.": (
+        "Espera a que termine la importación de Descargas antes de guardar."
+    ),
+    "Espera que o lote atual termine antes de iniciar outro.": (
+        "Espera a que termine el lote actual antes de iniciar otro."
+    ),
+    "Esta base de dados foi criada por uma versão mais recente do Organizador. Abre a versão mais recente da app. Nenhum ficheiro foi alterado.": (
+        "Esta base de datos fue creada por una versión más reciente de Organizador. "
+        "Abre la versión más reciente de la app. Ningún archivo fue alterado."
+    ),
+    "Ex.: Cálculo I": "Ej.: Cálculo I",
+    "Ex.: MAT101": "Ej.: MAT101",
+    "Ex.: MAT101 (opcional)": "Ej.: MAT101 (opcional)",
+    "Ex.: cálculo, derivadas, integrais": "Ej.: cálculo, derivadas, integrales",
+    "Ex.: regra da cadeia, normalização, Revolução Francesa…": (
+        "Ej.: regla de la cadena, normalización, Revolución Francesa…"
+    ),
+    "Experimenta menos palavras ou confirma se o ficheiro aparece nos organizados recentes.": (
+        "Prueba con menos palabras o comprueba si el archivo aparece en los organizados recientemente."
+    ),
+    "Extensões aceites": "Extensiones aceptadas",
+    "Fechar": "Cerrar",
+    "Ficheiro devolvido": "Archivo devuelto",
+    "Ficheiro organizado": "Archivo organizado",
+    "Ficheiro restaurado por uma operação de desfazer interrompida.": (
+        "Archivo restaurado por una operación de deshacer interrumpida."
+    ),
+    "Ficheiros adotados": "Archivos adoptados",
+    "Ficheiros de {name}": "Archivos de {name}",
+    "Foram encontrados {total} ficheiros elegíveis. Serão verificados no máximo {selected} e movidos para a Caixa de Entrada.{remaining}\n\nCada ficheiro continuará a precisar da tua confirmação.": (
+        "Se encontraron {total} archivos elegibles. Se verificarán como máximo {selected} "
+        "y se moverán a la Bandeja de Entrada.{remaining}\n\nCada archivo seguirá necesitando tu confirmación."
+    ),
+    "Geral": "General",
+    "Guardar definições": "Guardar ajustes",
+    "Guardar disciplina": "Guardar asignatura",
+    "Guardar tarefa": "Guardar tarea",
+    "Idioma": "Idioma",
+    "Importar de Downloads…": "Importar de Descargas…",
+    "Importar ficheiros existentes?": "¿Importar archivos existentes?",
+    "Importação de Downloads concluída": "Importación de Descargas terminada",
+    "Importação em curso": "Importación en curso",
+    "Importação indisponível": "Importación no disponible",
+    "Iniciar o Organizador quando entro no Windows": (
+        "Iniciar Organizador cuando entro en Windows"
+    ),
+    "Início": "Inicio",
+    "Já existe uma disciplina ativa com o mesmo nome ou pasta: {names}. Edita-a primeiro para libertar o nome.": (
+        "Ya existe una asignatura activa con el mismo nombre o carpeta: {names}. "
+        "Edítala primero para liberar el nombre."
+    ),
+    "Já existe uma disciplina com esse nome.\n\n{error}": (
+        "Ya existe una asignatura con ese nombre.\n\n{error}"
+    ),
+    "Já existe uma disciplina ou pasta com esse nome.\n\n{error}": (
+        "Ya existe una asignatura o carpeta con ese nombre.\n\n{error}"
+    ),
+    "Mais tarde": "Más tarde",
+    "Mais tarde em {count}s": "Más tarde en {count}s",
+    "Mantém cada entrega junto da disciplina a que pertence.": (
+        "Mantén cada entrega junto a la asignatura a la que pertenece."
+    ),
+    "Mantém uma disciplina ativa": "Mantén una asignatura activa",
+    "Marcar revisto": "Marcar como revisado",
+    "Modelo do nome": "Plantilla de nombre",
+    "Mostrar arquivadas": "Mostrar archivadas",
+    "Mostrar na pasta": "Mostrar en la carpeta",
+    "Mostrar os ficheiros organizados nesta disciplina": (
+        "Mostrar los archivos organizados en esta asignatura"
+    ),
+    "Nada para desfazer": "Nada que deshacer",
+    "Nada para importar": "Nada que importar",
+    "Nada é arquivado sem uma decisão. Organiza agora ou deixa para mais tarde.": (
+        "Nada se archiva sin una decisión. Organiza ahora o déjalo para más tarde."
+    ),
+    "Nenhum ficheiro foi substituído ou apagado.": "Ningún archivo fue sobrescrito o borrado.",
+    "Nenhum ficheiro foi substituído ou apagado. ": "Ningún archivo fue sobrescrito o borrado. ",
+    "No dia": "El mismo día",
+    "Nome": "Nombre",
+    "Nome final do ficheiro": "Nombre final del archivo",
+    "Nomes finais": "Nombres finales",
+    "Nova disciplina": "Nueva asignatura",
+    "Nova tarefa, por exemplo: entregar ficha 4": ("Nueva tarea, por ejemplo: entregar ficha 4"),
+    "Novo material de estudo": "Nuevo material de estudio",
+    "Novo material na Caixa de Entrada": "Nuevo material en la Bandeja de Entrada",
+    "Não encontrei essa expressão": "No encontré esa expresión",
+    "Não existem ficheiros elegíveis no nível principal de Downloads.": (
+        "No hay archivos elegibles en el nivel principal de Descargas."
+    ),
+    "Não foi possível abrir": "No se pudo abrir",
+    "Não foi possível abrir a pasta configurada: {error}": (
+        "No se pudo abrir la carpeta configurada: {error}"
+    ),
+    "Não foi possível abrir as pastas": "No se pudieron abrir las carpetas",
+    "Não foi possível abrir os dados": "No se pudieron abrir los datos",
+    "Não foi possível adotar": "No se pudo adoptar",
+    "Não foi possível criar": "No se pudo crear",
+    "Não foi possível desfazer": "No se pudo deshacer",
+    "Não foi possível devolver": "No se pudo devolver",
+    "Não foi possível encontrar:\n{path}": "No se pudo encontrar:\n{path}",
+    "Não foi possível guardar": "No se pudo guardar",
+    "Não foi possível iniciar o registo": "No se pudo iniciar el registro",
+    "Não foi possível ler as definições guardadas. A app abriu com valores seguros para poderes corrigi-las.\n\n{error}": (
+        "No se pudieron leer los ajustes guardados. La app abrió con valores seguros "
+        "para que puedas corregirlos.\n\n{error}"
+    ),
+    "Não foi possível mostrar": "No se pudo mostrar",
+    "Não foi possível procurar": "No se pudo buscar",
+    "Não foi possível recolher o ficheiro": "No se pudo recoger el archivo",
+    "Não foi possível remover": "No se pudo eliminar",
+    "Não foi possível restaurar": "No se pudo restaurar",
+    "Não foi possível rever o histórico local: {error}": (
+        "No se pudo revisar el historial local: {error}"
+    ),
+    "Não é da universidade": "No es de la universidad",
+    "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado.": (
+        "La ruta registrada ya no es un archivo normal. No fue seguida ni alterada."
+    ),
+    "O ficheiro ou o registo mudou desde a verificação. Nada foi removido.": (
+        "El archivo o el registro cambió desde la comprobación. Nada fue eliminado."
+    ),
+    "O idioma novo é aplicado ao reiniciar a app.": (
+        "El nuevo idioma se aplica al reiniciar la app."
+    ),
+    "O primeiro documento organizado aparece aqui. A app não toca nos ficheiros antigos sem pedires.": (
+        "El primer documento organizado aparece aquí. La app no toca los archivos antiguos sin que lo pidas."
+    ),
+    "O registo mudou desde que a página foi aberta. Nada foi removido.": (
+        "El registro cambió desde que se abrió la página. Nada fue eliminado."
+    ),
+    "O teu semestre, arrumado.": "Tu semestre, organizado.",
+    "Oculta a disciplina sem apagar os respetivos ficheiros": (
+        "Oculta la asignatura sin borrar sus archivos"
+    ),
+    "Operação de desfazer interrompida; confirma as pastas antes de continuar.": (
+        "Operación de deshacer interrumpida; confirma las carpetas antes de continuar."
+    ),
+    "Organizador": "Organizador",
+    "Organizador continua ativo": "Organizador sigue activo",
+    "Organizador v{version} · código MIT · componentes de terceiros com licenças próprias": (
+        "Organizador v{version} · licencia MIT · componentes de terceros con sus propias licencias"
+    ),
+    "Organizador · a preparar": "Organizador · preparando",
+    "Organizador · {state}": "Organizador · {state}",
+    "Organizar": "Organizar",
+    "Organizar ficheiro": "Organizar archivo",
+    "Organizar seleção": "Organizar selección",
+    "Organizar seleção ({count})": "Organizar selección ({count})",
+    "Organizar {count} ficheiro": "Organizar {count} archivo",
+    "Organizar {count} ficheiros": "Organizar {count} archivos",
+    "Organização desfeita": "Organización deshecha",
+    "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta.": (
+        "Organización que no puede deshacerse mientras falte el archivo."
+    ),
+    "Origem de uma devolução interrompida; não foi alterada no arranque.": (
+        "Origen de una devolución interrumpida; no fue alterada al arrancar."
+    ),
+    "Origem de uma operação de desfazer interrompida; não foi alterada no arranque.": (
+        "Origen de una operación de deshacer interrumpida; no fue alterada al arrancar."
+    ),
+    "Origem de uma organização interrompida; não foi alterada no arranque.": (
+        "Origen de una organización interrumpida; no fue alterada al arrancar."
+    ),
+    "Os códigos e palavras-chave tornam as sugestões de arquivo mais precisas.": (
+        "Los códigos y palabras clave hacen las sugerencias de archivo más precisas."
+    ),
+    "Os downloads novos aparecem aqui antes de irem para uma disciplina.": (
+        "Las descargas nuevas aparecen aquí antes de ir a una asignatura."
+    ),
+    "Os ficheiros elegíveis passam primeiro por uma Caixa de Entrada segura. Tu confirmas a disciplina e nada é substituído.": (
+        "Los archivos elegibles pasan primero por una Bandeja de Entrada segura. "
+        "Tú confirmas la asignatura y nada se sobrescribe."
+    ),
+    "Os ficheiros mudaram ou já estavam a ser processados e ficaram em Downloads.": (
+        "Los archivos cambiaron o ya se estaban procesando y se quedaron en Descargas."
+    ),
+    "Padrão das Definições": "Predeterminado de Ajustes",
+    "Palavras-chave": "Palabras clave",
+    "Pasta Downloads": "Carpeta Descargas",
+    "Pasta Universidade": "Carpeta Universidad",
+    "Pasta: {name}": "Carpeta: {name}",
+    "Pastas e vigilância": "Carpetas y vigilancia",
+    "Pausar vigilância": "Pausar vigilancia",
+    "Pesquisa": "Búsqueda",
+    "Pesquisa nos documentos": "Búsqueda en documentos",
+    "Pesquisar nos apontamentos": "Buscar en tus apuntes",
+    "Podes alterar estas opções depois. Começa por criar uma disciplina.": (
+        "Puedes cambiar estas opciones después. Empieza creando una asignatura."
+    ),
+    "Podes corrigir o nome; a extensão original é preservada": (
+        "Puedes editar el nombre; la extensión original se conserva"
+    ),
+    "Prazo": "Plazo",
+    "Prazo amanhã": "Vence mañana",
+    "Prazo das tarefas": "Plazo de las tareas",
+    "Prazo em {count} dias · {date}": "Vence en {count} días · {date}",
+    "Prazo hoje": "Vence hoy",
+    "Preparar o Organizador": "Preparar Organizador",
+    "Primeira disciplina": "Primera asignatura",
+    "Procura palavras dentro de PDFs, documentos Office, ficheiros de texto e notebooks já organizados.": (
+        "Busca palabras dentro de PDFs, documentos Office, archivos de texto y "
+        "notebooks ya organizados."
+    ),
+    "Próximos prazos": "Próximos plazos",
+    "Quando terminares um download elegível, ele aparece aqui e num pequeno popup.": (
+        "Cuando termine una descarga elegible, aparecerá aquí y en una pequeña ventana."
+    ),
+    "Reativar disciplina?": "¿Restaurar asignatura?",
+    "Recuperação manual necessária  ·  {size}  ·  {when}": (
+        "Recuperación manual necesaria  ·  {size}  ·  {when}"
+    ),
+    "Registo mantido": "Registro mantenido",
+    "Remover apenas o registo local; nenhum ficheiro é apagado": (
+        "Elimina solo el registro local; ningún archivo es borrado"
+    ),
+    "Remover do catálogo": "Quitar del catálogo",
+    "Remover do catálogo?": "¿Quitar del catálogo?",
+    "Remover registo": "Eliminar registro",
+    "Remover registo em falta?": "¿Eliminar registro faltante?",
+    "Restaurar": "Restaurar",
+    "Retomar vigilância": "Reanudar vigilancia",
+    "Rever {name}": "Revisar {name}",
+    "Revisão manual do histórico": "Revisión manual del historial",
+    "Revê as Definições antes de ativar a vigilância.\n\n{error}": (
+        "Revisa los Ajustes antes de activar la vigilancia.\n\n{error}"
+    ),
+    "Revê: {errors}.": "Revisa: {errors}.",
+    "Sair": "Salir",
+    "Sair da configuração?": "¿Salir de la configuración?",
+    "Selecionar {name}": "Seleccionar {name}",
+    "Sem palavras-chave": "Sin palabras clave",
+    "Sem prazo": "Sin plazo",
+    "Sem resultados. O documento pode ainda estar a ser indexado ou ser um PDF digitalizado.": (
+        "Sin resultados. El documento puede seguir indexándose o ser un PDF escaneado."
+    ),
+    "Sem sugestão": "Sin sugerencia",
+    "Sem tarefas neste dia": "Sin tareas este día",
+    "Sem tarefas pendentes": "Sin tareas pendientes",
+    "Sem uma disciplina, a app não começa a mover downloads. Podes voltar a configurar depois.": (
+        "Sin una asignatura la app no empieza a mover descargas. Puedes configurarla después."
+    ),
+    "Será removido apenas o registo local e o índice de pesquisa. Nenhum ficheiro será apagado. Se o ficheiro reaparecer durante a operação, ficará visível para poder ser adotado novamente.": (
+        "Solo se eliminará el registro local y el índice de búsqueda. Ningún archivo será "
+        "borrado. Si el archivo reaparece durante la operación, quedará visible para poder "
+        "ser adoptado de nuevo."
+    ),
+    "Sugestão {percent}%": "Sugerencia {percent}%",
+    "Só a organização mais recente pode ser desfeita.": (
+        "Solo la organización más reciente puede deshacerse."
+    ),
+    "Tamanho mínimo": "Tamaño mínimo",
+    "Tarefa": "Tarea",
+    "Tarefa geral": "Tarea general",
+    "Tarefas": "Tareas",
+    "Tarefas e prazos": "Tareas y plazos",
+    "Tema": "Tema",
+    "Tempo do popup": "Tiempo del popup",
+    "Tipo": "Tipo",
+    "Tipo de documento": "Tipo de documento",
+    "Todos vão para a mesma disciplina e tipo. Cada ficheiro mantém o seu próprio histórico; só a última organização pode ser desfeita.": (
+        "Todos van a la misma asignatura y tipo. Cada archivo mantiene su propio "
+        "historial; solo la última organización puede deshacerse."
+    ),
+    "Tokens: {tokens}. A extensão original é sempre preservada.": (
+        "Tokens: {tokens}. La extensión original siempre se conserva."
+    ),
+    "Tranquilidade": "Tranquilidad",
+    "Tudo fica neste computador. Nenhum documento é enviado para a internet.": (
+        "Todo se queda en este ordenador. Ningún documento se envía a internet."
+    ),
+    "Tudo no lugar": "Todo en su sitio",
+    "Título da tarefa": "Título de la tarea",
+    "Ver ficheiros": "Ver archivos",
+    "Ver todas": "Ver todas",
+    "Verificação de segurança concluída": "Comprobación de seguridad terminada",
+    "Verificação de segurança incompleta": "Comprobación de seguridad incompleta",
+    "Verificação incompleta": "Comprobación incompleta",
+    "Versão da base de dados mais recente": "Versión de base de datos más reciente",
+    "Vigiar novos ficheiros em Downloads": "Vigilar nuevos archivos en Descargas",
+    "Vigilância de Downloads desligada": "Vigilancia de Descargas desactivada",
+    "Vigilância desligada": "Vigilancia desactivada",
+    "Vigilância em pausa": "Vigilancia en pausa",
+    "Vigilância em pausa. Os novos downloads ficam onde estão.": (
+        "Vigilancia en pausa. Las descargas nuevas se quedan donde están."
+    ),
+    "Volta a mostrar a disciplina nas escolhas de arquivo": (
+        "Vuelve a mostrar la asignatura en las opciones de archivo"
+    ),
+    "a verificação atingiu o limite de segurança": "la comprobación alcanzó su límite de seguridad",
+    "alguns caminhos não puderam ser verificados": "algunas rutas no pudieron comprobarse",
+    "diapositivo {page}": "diapositiva {page}",
+    "documento": "documento",
+    "e mais {count}": "y {count} más",
+    "estudo local": "estudio local",
+    "está atrasada": "está atrasada",
+    "folha {page}": "hoja {page}",
+    "página {page}": "página {page}",
+    "vence amanhã": "vence mañana",
+    "vence em {count} dias": "vence en {count} días",
+    "vence hoje": "vence hoy",
+    "verificação incompleta": "comprobación incompleta",
+    "{count} arquivada": "{count} archivada",
+    "{count} arquivadas": "{count} archivadas",
+    "{count} colisão de nomes resolvida sem substituir nada": (
+        "{count} colisión de nombres resuelta sin sobrescribir nada"
+    ),
+    "{count} colisões de nomes resolvidas sem substituir nada": (
+        "{count} colisiones de nombres resueltas sin sobrescribir nada"
+    ),
+    "{count} com erro": "{count} con error",
+    "{count} devolução a Downloads": "{count} devolución a Descargas",
+    "{count} devoluções a Downloads": "{count} devoluciones a Descargas",
+    "{count} disciplina ativa": "{count} asignatura activa",
+    "{count} disciplinas ativas": "{count} asignaturas activas",
+    "{count} ficheiro adotado sem mover": "{count} archivo adoptado sin mover",
+    "{count} ficheiro organizado": "{count} archivo organizado",
+    "{count} ficheiro por decidir": "{count} archivo por decidir",
+    "{count} ficheiro por decidir · {recovery} precisam de recuperação": (
+        "{count} archivo por decidir · {recovery} necesitan recuperación"
+    ),
+    "{count} ficheiro precisa de recuperação manual": (
+        "{count} archivo necesita recuperación manual"
+    ),
+    "{count} ficheiro precisa de revisão manual": "{count} incidencia necesita revisión manual",
+    "{count} ficheiro · {size}": "{count} archivo · {size}",
+    "{count} ficheiros adotados sem mover": "{count} archivos adoptados sin mover",
+    "{count} ficheiros organizados": "{count} archivos organizados",
+    "{count} ficheiros por decidir": "{count} archivos por decidir",
+    "{count} ficheiros por decidir · {recovery} precisam de recuperação": (
+        "{count} archivos por decidir · {recovery} necesitan recuperación"
+    ),
+    "{count} ficheiros precisam de recuperação manual": (
+        "{count} archivos necesitan recuperación manual"
+    ),
+    "{count} ficheiros precisam de revisão manual": "{count} incidencias necesitan revisión manual",
+    "{count} ficheiros · {size}": "{count} archivos · {size}",
+    "{count} ignorado": "{count} ignorado",
+    "{count} ignorados": "{count} ignorados",
+    "{count} importado": "{count} importado",
+    "{count} importados": "{count} importados",
+    "{count} não entraram neste lote e ficaram em Downloads.": (
+        "{count} no entraron en este lote y se quedaron en Descargas."
+    ),
+    "{count} ocorrência do histórico precisa de revisão": (
+        "{count} incidencia del historial necesita revisión"
+    ),
+    "{count} ocorrências do histórico precisam de revisão": (
+        "{count} incidencias del historial necesitan revisión"
+    ),
+    "{count} operação interrompida recuperada": ("{count} operación interrumpida recuperada"),
+    "{count} operações interrompidas recuperadas": (
+        "{count} operaciones interrumpidas recuperadas"
+    ),
+    "{count} organizado, {failed} com erro. Revê: {errors}.": (
+        "{count} organizado, {failed} con error. Revisa: {errors}."
+    ),
+    "{count} organizado.": "{count} organizado.",
+    "{count} organizados, {failed} com erro. Revê: {errors}.": (
+        "{count} organizados, {failed} con error. Revisa: {errors}."
+    ),
+    "{count} organizados.": "{count} organizados.",
+    "{count} organização desfeita": "{count} organización deshecha",
+    "{count} organizações desfeitas": "{count} organizaciones deshechas",
+    "{count} registo da Caixa de Entrada foi revisto": (
+        "{count} registro de la Bandeja de Entrada fue revisado"
+    ),
+    "{count} registos da Caixa de Entrada foram revistos": (
+        "{count} registros de la Bandeja de Entrada fueron revisados"
+    ),
+    "{count} resultados · os parênteses retos mostram a correspondência": (
+        "{count} resultados · los corchetes marcan la coincidencia"
+    ),
+    "{kind} · {size} · organizado {date}": "{kind} · {size} · organizado {date}",
+    "{name} (arquivada)": "{name} (archivada)",
+    "{name} deixa de aparecer nas escolhas. Os ficheiros e tarefas não são apagados.": (
+        "{name} deja de aparecer en las opciones. Sus archivos y tareas no se borran."
+    ),
+    "{name} deixará de aparecer na pesquisa e nos recentes. O ficheiro permanecerá exatamente onde está.": (
+        "{name} dejará de aparecer en la búsqueda y en recientes. El archivo se queda "
+        "exactamente donde está."
+    ),
+    "{name} está pronto para organizar.": "{name} está listo para organizar.",
+    "{name} foi adotado sem mover o ficheiro.": ("{name} fue adoptado sin mover el archivo."),
+    "{name} foi guardado em {destination}.": "{name} se guardó en {destination}.",
+    "{name} saiu do catálogo; o ficheiro ficou no lugar.": (
+        "{name} salió del catálogo; el archivo se quedó en su sitio."
+    ),
+    "{name} volta a aparecer nas escolhas de arquivo. Os ficheiros e tarefas não foram alterados.": (
+        "{name} vuelve a aparecer en las opciones de archivo. Los archivos y tareas no fueron alterados."
+    ),
+    "{name} voltou para Downloads.": "{name} volvió a Descargas.",
+    "{name} voltou à Caixa de Entrada.": "{name} volvió a la Bandeja de Entrada.",
+    "{size}  ·  recebido da pasta Downloads": "{size}  ·  recibido de la carpeta Descargas",
+    "{size}  ·  {when}  ·  Sugestão: {suggestion} / {kind}": (
+        "{size}  ·  {when}  ·  Sugerencia: {suggestion} / {kind}"
+    ),
+    "{subject}  ·  {due}": "{subject}  ·  {due}",
+    "{subject}  ·  {kind}  ·  {location}": "{subject}  ·  {kind}  ·  {location}",
+    "{subject}  ·  {kind}  ·  {size}": "{subject}  ·  {kind}  ·  {size}",
+    "{subject} · {kind} · adotado sem mover": "{subject} · {kind} · adoptado sin mover",
+    "{title} {when}.": "{title} {when}.",
+}
+
+FR_STRINGS: dict[str, str] = {
+    " Os outros {count} ficam em Downloads para um próximo lote.": (
+        " Les autres {count} restent dans Téléchargements pour un prochain lot."
+    ),
+    " bytes": " octets",
+    " dias": " jours",
+    "({count}) por organizar": "({count}) à organiser",
+    "1 dia antes": "1 jour avant",
+    "1 resultado · os parênteses retos mostram a correspondência": (
+        "1 résultat · les crochets marquent la correspondance"
+    ),
+    "1 semana antes": "1 semaine avant",
+    "2 dias antes": "2 jours avant",
+    "3 dias antes": "3 jours avant",
+    "A aplicação não conseguiu abrir o catálogo local. Consulta organizador.log antes de tentar novamente.\n\n{error}": (
+        "L'application n'a pas pu ouvrir le catalogue local. Consulte organizador.log "
+        "avant de réessayer.\n\n{error}"
+    ),
+    "A app ainda não tem histórico. Organiza o primeiro ficheiro para começar.": (
+        "L'application n'a pas encore d'historique. Organise ton premier fichier pour commencer."
+    ),
+    "A caixa está vazia": "La boîte de réception est vide",
+    "A importar…": "Importation…",
+    "A importação foi interrompida. Os ficheiros ainda não importados ficaram em Downloads.": (
+        "L'importation a été interrompue. Les fichiers non encore importés sont restés dans Téléchargements."
+    ),
+    "A iniciar…": "Démarrage…",
+    "A janela fechou, mas Downloads continua a ser vigiado no tabuleiro do sistema.": (
+        "La fenêtre s'est fermée, mais Téléchargements reste surveillé depuis la zone de notification."
+    ),
+    "A mostrar tarefas de {date}": "Affichage des tâches du {date}",
+    "A ocorrência foi marcada como revista. O ficheiro não foi alterado.": (
+        "Le signalement a été marqué comme examiné. Le fichier n'a pas été modifié."
+    ),
+    "A pasta de dados da aplicação não está disponível. Nenhum ficheiro foi alterado.\n\n{error}": (
+        "Le dossier de données de l'application n'est pas disponible. "
+        "Aucun fichier n'a été modifié.\n\n{error}"
+    ),
+    "A pesquisa é local. Escreve duas ou mais letras para começar.": (
+        "La recherche est locale. Tape deux lettres ou plus pour commencer."
+    ),
+    "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm texto pesquisável.": (
+        "La recherche est locale. Les PDF numérisés en image seule n'ont pas encore de texte cherchable."
+    ),
+    "A preparar a vigilância de Downloads…": "Préparation de la surveillance de Téléchargements…",
+    "A verificar {count} ficheiros…": "Vérification de {count} fichiers…",
+    "A verificar {count} ficheiro…": "Vérification de {count} fichier…",
+    "A vigiar Downloads": "Surveillance de Téléchargements",
+    "A vigilância de Downloads está desligada nas Definições.": (
+        "La surveillance de Téléchargements est désactivée dans les Paramètres."
+    ),
+    "Abre a Caixa de Entrada para rever.": "Ouvre la Boîte de réception pour vérifier.",
+    "Abrir": "Ouvrir",
+    "Abrir Downloads": "Ouvrir Téléchargements",
+    "Abrir Organizador": "Ouvrir Organizador",
+    "Abrir Universidade": "Ouvrir le dossier Université",
+    "Abrir pasta": "Ouvrir le dossier",
+    "Abrir pasta Universidade": "Ouvrir le dossier Université",
+    "Adiciona a próxima entrega acima ou cria-a ao organizar um documento.": (
+        "Ajoute ton prochain devoir ci-dessus, ou crée-le en organisant un document."
+    ),
+    "Adicionar": "Ajouter",
+    "Adicionar disciplina": "Ajouter une matière",
+    "Adicionar à pesquisa sem mover o ficheiro": "Ajouter à la recherche sans déplacer le fichier",
+    "Adotar": "Adopter",
+    "Ainda não existe uma organização reversível.": (
+        "Il n'existe pas encore d'organisation réversible."
+    ),
+    "Ainda não há ficheiros organizados nesta disciplina.": (
+        "Aucun fichier organisé dans cette matière pour l'instant."
+    ),
+    "Ainda não há prazos. Cria uma tarefa ou associa-a quando organizares um ficheiro.": (
+        "Pas encore d'échéances. Crée une tâche ou associe-la en organisant un fichier."
+    ),
+    "Ainda sem ficheiros organizados": "Pas encore de fichiers organisés",
+    "Alterar a pasta Universidade afeta os próximos ficheiros; os já organizados não são movidos automaticamente.": (
+        "Changer le dossier Université affecte les fichiers futurs ; ceux déjà organisés "
+        "ne sont pas déplacés automatiquement."
+    ),
+    "Arquivada": "Archivée",
+    "Arquivar": "Archiver",
+    "Arquivar disciplina?": "Archiver la matière ?",
+    "As palavras-chave ajudam a reconhecer ficheiros pelo nome.": (
+        "Les mots-clés aident à reconnaître les fichiers par leur nom."
+    ),
+    "Atrasada · {date}": "En retard · {date}",
+    "Avisar prazos antes": "Rappeler les échéances à l'avance",
+    "Aviso": "Rappel",
+    "Caixa de Entrada": "Boîte de réception",
+    "Caixa de Entrada  {count}": "Boîte de réception  {count}",
+    "Caixa de Entrada ({count})": "Boîte de réception ({count})",
+    "Caixa de Entrada vazia": "Boîte de réception vide",
+    "Caminho não encontrado": "Chemin introuvable",
+    "Cancelar": "Annuler",
+    "Com quantos dias de antecedência avisar prazos": (
+        "Combien de jours à l'avance prévenir des échéances"
+    ),
+    "Começa por uma disciplina": "Commence par une matière",
+    "Começar a vigiar Downloads depois da configuração": (
+        "Commencer à surveiller Téléchargements après la configuration"
+    ),
+    "Conclui a configuração da aplicação antes de importar ficheiros.": (
+        "Termine la configuration de l'application avant d'importer des fichiers."
+    ),
+    "Controla exatamente quais ficheiros entram e onde ficam guardados.": (
+        "Contrôle exactement quels fichiers entrent et où ils sont rangés."
+    ),
+    "Cor": "Couleur",
+    "Cor da disciplina": "Couleur de la matière",
+    "Cria outra disciplina antes de arquivar esta.": (
+        "Crée une autre matière avant d'archiver celle-ci."
+    ),
+    "Cria uma disciplina para a app saber onde guardar o próximo download.": (
+        "Crée une matière pour que l'application sache où ranger ton prochain téléchargement."
+    ),
+    "Criar a minha organização": "Créer mon organisation",
+    "Criar tarefa para cada ficheiro": "Créer une tâche pour chaque fichier",
+    "Código": "Code",
+    "Definições": "Paramètres",
+    "Definições danificadas": "Paramètres endommagés",
+    "Definições guardadas.": "Paramètres enregistrés.",
+    "Desfazer última organização": "Annuler le dernier rangement",
+    "Destino de uma organização interrompida; compara antes de continuar.": (
+        "Destination d'un rangement interrompu ; compare avant de continuer."
+    ),
+    "Destino em Downloads de uma devolução interrompida; compara os ficheiros.": (
+        "Destination dans Téléchargements d'un retour interrompu ; compare les fichiers."
+    ),
+    "Devolver este ficheiro a Downloads": "Renvoyer ce fichier dans Téléchargements",
+    "Disciplina": "Matière",
+    "Disciplinas": "Matières",
+    "Documento registado que já não está no destino esperado.": (
+        "Document enregistré qui n'est plus à la destination prévue."
+    ),
+    "Downloads arrumados\nantes de se perderem.": "Téléchargements rangés\navant de se perdre.",
+    "Downloads vigiado. Só os formatos de estudo configurados entram.": (
+        "Téléchargements est surveillé. Seuls les formats d'étude configurés entrent."
+    ),
+    "Editar": "Modifier",
+    "Editar disciplina": "Modifier la matière",
+    "Editar tarefa": "Modifier la tâche",
+    "Elimina o filtro para ver todas as tarefas ou adiciona uma tarefa para este dia.": (
+        "Supprime le filtre pour voir toutes les tâches, ou ajoute une tâche pour ce jour."
+    ),
+    "Eliminar": "Supprimer",
+    "Encontrado numa disciplina sem registo. Não foi movido nem alterado.": (
+        "Trouvé dans une matière sans enregistrement. Il n'a été ni déplacé ni modifié."
+    ),
+    "Escolhe o teu ponto de partida": "Choisis ton point de départ",
+    "Escolhe uma disciplina antes de organizar.": "Choisis une matière avant de ranger.",
+    "Escolhe uma opção": "Choisis une option",
+    "Escolhe uma pasta para a Universidade.": "Choisis un dossier pour l'Université.",
+    "Escolher pasta": "Choisir un dossier",
+    "Escolher pasta Universidade": "Choisir le dossier Université",
+    "Escolher…": "Parcourir…",
+    "Escreve o nome da disciplina para continuar.": "Tape le nom de la matière pour continuer.",
+    "Escreve o nome da primeira disciplina.": "Tape le nom de la première matière.",
+    "Escreve o título da tarefa para continuar.": "Tape le titre de la tâche pour continuer.",
+    "Escreve uma tarefa antes de adicionar.": "Tape une tâche avant d'ajouter.",
+    "Espera que a importação de Downloads termine antes de guardar.": (
+        "Attends la fin de l'importation de Téléchargements avant d'enregistrer."
+    ),
+    "Espera que o lote atual termine antes de iniciar outro.": (
+        "Attends la fin du lot en cours avant d'en commencer un autre."
+    ),
+    "Esta base de dados foi criada por uma versão mais recente do Organizador. Abre a versão mais recente da app. Nenhum ficheiro foi alterado.": (
+        "Cette base de données a été créée par une version plus récente d'Organizador. "
+        "Ouvre la version la plus récente de l'application. Aucun fichier n'a été modifié."
+    ),
+    "Ex.: Cálculo I": "ex. : Calcul I",
+    "Ex.: MAT101": "ex. : MAT101",
+    "Ex.: MAT101 (opcional)": "ex. : MAT101 (facultatif)",
+    "Ex.: cálculo, derivadas, integrais": "ex. : calcul, dérivées, intégrales",
+    "Ex.: regra da cadeia, normalização, Revolução Francesa…": (
+        "ex. : règle de la chaîne, normalisation, Révolution française…"
+    ),
+    "Experimenta menos palavras ou confirma se o ficheiro aparece nos organizados recentes.": (
+        "Essaie moins de mots, ou vérifie si le fichier apparaît dans les rangements récents."
+    ),
+    "Extensões aceites": "Extensions acceptées",
+    "Fechar": "Fermer",
+    "Ficheiro devolvido": "Fichier renvoyé",
+    "Ficheiro organizado": "Fichier rangé",
+    "Ficheiro restaurado por uma operação de desfazer interrompida.": (
+        "Fichier restauré par une opération d'annulation interrompue."
+    ),
+    "Ficheiros adotados": "Fichiers adoptés",
+    "Ficheiros de {name}": "Fichiers de {name}",
+    "Foram encontrados {total} ficheiros elegíveis. Serão verificados no máximo {selected} e movidos para a Caixa de Entrada.{remaining}\n\nCada ficheiro continuará a precisar da tua confirmação.": (
+        "{total} fichiers éligibles ont été trouvés. Au maximum {selected} seront vérifiés "
+        "et déplacés vers la Boîte de réception.{remaining}\n\nChaque fichier continuera de "
+        "nécessiter ta confirmation."
+    ),
+    "Geral": "Général",
+    "Guardar definições": "Enregistrer les paramètres",
+    "Guardar disciplina": "Enregistrer la matière",
+    "Guardar tarefa": "Enregistrer la tâche",
+    "Idioma": "Langue",
+    "Importar de Downloads…": "Importer depuis Téléchargements…",
+    "Importar ficheiros existentes?": "Importer les fichiers existants ?",
+    "Importação de Downloads concluída": "Importation de Téléchargements terminée",
+    "Importação em curso": "Importation en cours",
+    "Importação indisponível": "Importation indisponible",
+    "Iniciar o Organizador quando entro no Windows": (
+        "Lancer Organizador à l'ouverture de Windows"
+    ),
+    "Início": "Accueil",
+    "Já existe uma disciplina ativa com o mesmo nome ou pasta: {names}. Edita-a primeiro para libertar o nome.": (
+        "Une matière active utilise déjà le même nom ou dossier : {names}. "
+        "Modifie-la d'abord pour libérer le nom."
+    ),
+    "Já existe uma disciplina com esse nome.\n\n{error}": (
+        "Une matière avec ce nom existe déjà.\n\n{error}"
+    ),
+    "Já existe uma disciplina ou pasta com esse nome.\n\n{error}": (
+        "Une matière ou un dossier avec ce nom existe déjà.\n\n{error}"
+    ),
+    "Mais tarde": "Plus tard",
+    "Mais tarde em {count}s": "Plus tard dans {count}s",
+    "Mantém cada entrega junto da disciplina a que pertence.": (
+        "Garde chaque devoir avec la matière à laquelle il appartient."
+    ),
+    "Mantém uma disciplina ativa": "Garde une matière active",
+    "Marcar revisto": "Marquer comme examiné",
+    "Modelo do nome": "Modèle de nom",
+    "Mostrar arquivadas": "Afficher les archivées",
+    "Mostrar na pasta": "Afficher dans le dossier",
+    "Mostrar os ficheiros organizados nesta disciplina": (
+        "Afficher les fichiers organisés dans cette matière"
+    ),
+    "Nada para desfazer": "Rien à annuler",
+    "Nada para importar": "Rien à importer",
+    "Nada é arquivado sem uma decisão. Organiza agora ou deixa para mais tarde.": (
+        "Rien n'est classé sans une décision. Range maintenant ou laisse pour plus tard."
+    ),
+    "Nenhum ficheiro foi substituído ou apagado.": ("Aucun fichier n'a été écrasé ni supprimé."),
+    "Nenhum ficheiro foi substituído ou apagado. ": ("Aucun fichier n'a été écrasé ni supprimé. "),
+    "No dia": "Le jour même",
+    "Nome": "Nom",
+    "Nome final do ficheiro": "Nom final du fichier",
+    "Nomes finais": "Noms finaux",
+    "Nova disciplina": "Nouvelle matière",
+    "Nova tarefa, por exemplo: entregar ficha 4": (
+        "Nouvelle tâche, par exemple : rendre la fiche 4"
+    ),
+    "Novo material de estudo": "Nouveau matériel d'étude",
+    "Novo material na Caixa de Entrada": "Nouveau matériel dans la Boîte de réception",
+    "Não encontrei essa expressão": "Je n'ai pas trouvé cette expression",
+    "Não existem ficheiros elegíveis no nível principal de Downloads.": (
+        "Il n'y a pas de fichiers éligibles à la racine de Téléchargements."
+    ),
+    "Não foi possível abrir": "Impossible d'ouvrir",
+    "Não foi possível abrir a pasta configurada: {error}": (
+        "Impossible d'ouvrir le dossier configuré : {error}"
+    ),
+    "Não foi possível abrir as pastas": "Impossible d'ouvrir les dossiers",
+    "Não foi possível abrir os dados": "Impossible d'ouvrir les données",
+    "Não foi possível adotar": "Impossible d'adopter",
+    "Não foi possível criar": "Impossible de créer",
+    "Não foi possível desfazer": "Impossible d'annuler",
+    "Não foi possível devolver": "Impossible de renvoyer",
+    "Não foi possível encontrar:\n{path}": "Impossible de trouver :\n{path}",
+    "Não foi possível guardar": "Impossible d'enregistrer",
+    "Não foi possível iniciar o registo": "Impossible de démarrer la journalisation",
+    "Não foi possível ler as definições guardadas. A app abriu com valores seguros para poderes corrigi-las.\n\n{error}": (
+        "Impossible de lire les paramètres enregistrés. L'application a démarré avec des "
+        "valeurs sûres pour que tu puisses les corriger.\n\n{error}"
+    ),
+    "Não foi possível mostrar": "Impossible d'afficher",
+    "Não foi possível procurar": "Impossible de rechercher",
+    "Não foi possível recolher o ficheiro": "Impossible de récupérer le fichier",
+    "Não foi possível remover": "Impossible de supprimer",
+    "Não foi possível restaurar": "Impossible de restaurer",
+    "Não foi possível rever o histórico local: {error}": (
+        "Impossible de consulter l'historique local : {error}"
+    ),
+    "Não é da universidade": "Pas pour l'université",
+    "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado.": (
+        "Le chemin enregistré n'est plus un fichier normal. Il n'a été ni suivi ni modifié."
+    ),
+    "O ficheiro ou o registo mudou desde a verificação. Nada foi removido.": (
+        "Le fichier ou l'enregistrement a changé depuis la vérification. Rien n'a été supprimé."
+    ),
+    "O idioma novo é aplicado ao reiniciar a app.": (
+        "La nouvelle langue est appliquée au redémarrage de l'application."
+    ),
+    "O primeiro documento organizado aparece aqui. A app não toca nos ficheiros antigos sem pedires.": (
+        "Ton premier document rangé apparaît ici. L'application ne touche pas aux anciens "
+        "fichiers sans ta demande."
+    ),
+    "O registo mudou desde que a página foi aberta. Nada foi removido.": (
+        "L'enregistrement a changé depuis l'ouverture de la page. Rien n'a été supprimé."
+    ),
+    "O teu semestre, arrumado.": "Ton semestre, bien rangé.",
+    "Oculta a disciplina sem apagar os respetivos ficheiros": (
+        "Masque la matière sans supprimer ses fichiers"
+    ),
+    "Operação de desfazer interrompida; confirma as pastas antes de continuar.": (
+        "Opération d'annulation interrompue ; vérifie les dossiers avant de continuer."
+    ),
+    "Organizador": "Organizador",
+    "Organizador continua ativo": "Organizador reste actif",
+    "Organizador v{version} · código MIT · componentes de terceiros com licenças próprias": (
+        "Organizador v{version} · licence MIT · composants tiers sous leurs propres licences"
+    ),
+    "Organizador · a preparar": "Organizador · préparation",
+    "Organizador · {state}": "Organizador · {state}",
+    "Organizar": "Ranger",
+    "Organizar ficheiro": "Ranger le fichier",
+    "Organizar seleção": "Ranger la sélection",
+    "Organizar seleção ({count})": "Ranger la sélection ({count})",
+    "Organizar {count} ficheiro": "Ranger {count} fichier",
+    "Organizar {count} ficheiros": "Ranger {count} fichiers",
+    "Organização desfeita": "Rangement annulé",
+    "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta.": (
+        "Rangement impossible à annuler tant que le fichier est manquant."
+    ),
+    "Origem de uma devolução interrompida; não foi alterada no arranque.": (
+        "Origine d'un retour interrompu ; non modifié au démarrage."
+    ),
+    "Origem de uma operação de desfazer interrompida; não foi alterada no arranque.": (
+        "Origine d'une opération d'annulation interrompue ; non modifiée au démarrage."
+    ),
+    "Origem de uma organização interrompida; não foi alterada no arranque.": (
+        "Origine d'un rangement interrompu ; non modifié au démarrage."
+    ),
+    "Os códigos e palavras-chave tornam as sugestões de arquivo mais precisas.": (
+        "Les codes et mots-clés rendent les suggestions de rangement plus précises."
+    ),
+    "Os downloads novos aparecem aqui antes de irem para uma disciplina.": (
+        "Les nouveaux téléchargements apparaissent ici avant d'aller dans une matière."
+    ),
+    "Os ficheiros elegíveis passam primeiro por uma Caixa de Entrada segura. Tu confirmas a disciplina e nada é substituído.": (
+        "Les fichiers éligibles passent d'abord par une Boîte de réception sûre. Tu "
+        "confirmes la matière et rien n'est écrasé."
+    ),
+    "Os ficheiros mudaram ou já estavam a ser processados e ficaram em Downloads.": (
+        "Les fichiers ont changé ou étaient déjà en traitement et sont restés dans Téléchargements."
+    ),
+    "Padrão das Definições": "Valeur des Paramètres",
+    "Palavras-chave": "Mots-clés",
+    "Pasta Downloads": "Dossier Téléchargements",
+    "Pasta Universidade": "Dossier Université",
+    "Pasta: {name}": "Dossier : {name}",
+    "Pastas e vigilância": "Dossiers et surveillance",
+    "Pausar vigilância": "Mettre la surveillance en pause",
+    "Pesquisa": "Recherche",
+    "Pesquisa nos documentos": "Recherche dans les documents",
+    "Pesquisar nos apontamentos": "Chercher dans tes notes",
+    "Podes alterar estas opções depois. Começa por criar uma disciplina.": (
+        "Tu pourras modifier ces options plus tard. Commence par créer une matière."
+    ),
+    "Podes corrigir o nome; a extensão original é preservada": (
+        "Tu peux corriger le nom ; l'extension d'origine est conservée"
+    ),
+    "Prazo": "Échéance",
+    "Prazo amanhã": "À rendre demain",
+    "Prazo das tarefas": "Échéance des tâches",
+    "Prazo em {count} dias · {date}": "Dans {count} jours · {date}",
+    "Prazo hoje": "À rendre aujourd'hui",
+    "Preparar o Organizador": "Configurer Organizador",
+    "Primeira disciplina": "Première matière",
+    "Procura palavras dentro de PDFs, documentos Office, ficheiros de texto e notebooks já organizados.": (
+        "Cherche des mots dans les PDF, documents Office, fichiers texte et notebooks déjà organisés."
+    ),
+    "Próximos prazos": "Prochaines échéances",
+    "Quando terminares um download elegível, ele aparece aqui e num pequeno popup.": (
+        "Quand un téléchargement éligible se termine, il apparaît ici et dans une petite fenêtre."
+    ),
+    "Reativar disciplina?": "Restaurer la matière ?",
+    "Recuperação manual necessária  ·  {size}  ·  {when}": (
+        "Récupération manuelle nécessaire  ·  {size}  ·  {when}"
+    ),
+    "Registo mantido": "Enregistrement conservé",
+    "Remover apenas o registo local; nenhum ficheiro é apagado": (
+        "Supprime uniquement l'enregistrement local ; aucun fichier n'est supprimé"
+    ),
+    "Remover do catálogo": "Retirer du catalogue",
+    "Remover do catálogo?": "Retirer du catalogue ?",
+    "Remover registo": "Supprimer l'enregistrement",
+    "Remover registo em falta?": "Supprimer l'enregistrement manquant ?",
+    "Restaurar": "Restaurer",
+    "Retomar vigilância": "Reprendre la surveillance",
+    "Rever {name}": "Réviser {name}",
+    "Revisão manual do histórico": "Révision manuelle de l'historique",
+    "Revê as Definições antes de ativar a vigilância.\n\n{error}": (
+        "Vérifie les Paramètres avant d'activer la surveillance.\n\n{error}"
+    ),
+    "Revê: {errors}.": "À vérifier : {errors}.",
+    "Sair": "Quitter",
+    "Sair da configuração?": "Quitter la configuration ?",
+    "Selecionar {name}": "Sélectionner {name}",
+    "Sem palavras-chave": "Sans mots-clés",
+    "Sem prazo": "Sans échéance",
+    "Sem resultados. O documento pode ainda estar a ser indexado ou ser um PDF digitalizado.": (
+        "Aucun résultat. Le document est peut-être encore en cours d'indexation "
+        "ou s'agit-il d'un PDF numérisé."
+    ),
+    "Sem sugestão": "Aucune suggestion",
+    "Sem tarefas neste dia": "Aucune tâche ce jour",
+    "Sem tarefas pendentes": "Aucune tâche en attente",
+    "Sem uma disciplina, a app não começa a mover downloads. Podes voltar a configurar depois.": (
+        "Sans matière, l'application ne commence pas à déplacer les téléchargements. "
+        "Tu pourras la configurer plus tard."
+    ),
+    "Será removido apenas o registo local e o índice de pesquisa. Nenhum ficheiro será apagado. Se o ficheiro reaparecer durante a operação, ficará visível para poder ser adotado novamente.": (
+        "Seuls l'enregistrement local et l'index de recherche seront supprimés. Aucun "
+        "fichier ne sera effacé. Si le fichier réapparaît pendant l'opération, il deviendra "
+        "visible pour pouvoir être adopté de nouveau."
+    ),
+    "Sugestão {percent}%": "Suggestion {percent}%",
+    "Só a organização mais recente pode ser desfeita.": (
+        "Seul le rangement le plus récent peut être annulé."
+    ),
+    "Tamanho mínimo": "Taille minimale",
+    "Tarefa": "Tâche",
+    "Tarefa geral": "Tâche générale",
+    "Tarefas": "Tâches",
+    "Tarefas e prazos": "Tâches et échéances",
+    "Tema": "Thème",
+    "Tempo do popup": "Durée du popup",
+    "Tipo": "Type",
+    "Tipo de documento": "Type de document",
+    "Todos vão para a mesma disciplina e tipo. Cada ficheiro mantém o seu próprio histórico; só a última organização pode ser desfeita.": (
+        "Tous vont dans la même matière et le même type. Chaque fichier garde son propre "
+        "historique ; seul le dernier rangement peut être annulé."
+    ),
+    "Tokens: {tokens}. A extensão original é sempre preservada.": (
+        "Jetons : {tokens}. L'extension d'origine est toujours conservée."
+    ),
+    "Tranquilidade": "Tranquillité",
+    "Tudo fica neste computador. Nenhum documento é enviado para a internet.": (
+        "Tout reste sur cet ordinateur. Aucun document n'est envoyé sur internet."
+    ),
+    "Tudo no lugar": "Tout est en ordre",
+    "Título da tarefa": "Titre de la tâche",
+    "Ver ficheiros": "Voir les fichiers",
+    "Ver todas": "Tout afficher",
+    "Verificação de segurança concluída": "Vérification de sécurité terminée",
+    "Verificação de segurança incompleta": "Vérification de sécurité incomplète",
+    "Verificação incompleta": "Vérification incomplète",
+    "Versão da base de dados mais recente": "Version de base de données plus récente",
+    "Vigiar novos ficheiros em Downloads": "Surveiller les nouveaux fichiers dans Téléchargements",
+    "Vigilância de Downloads desligada": "Surveillance de Téléchargements désactivée",
+    "Vigilância desligada": "Surveillance désactivée",
+    "Vigilância em pausa": "Surveillance en pause",
+    "Vigilância em pausa. Os novos downloads ficam onde estão.": (
+        "Surveillance en pause. Les nouveaux téléchargements restent où ils sont."
+    ),
+    "Volta a mostrar a disciplina nas escolhas de arquivo": (
+        "Affiche de nouveau la matière dans les choix de rangement"
+    ),
+    "a verificação atingiu o limite de segurança": (
+        "la vérification a atteint sa limite de sécurité"
+    ),
+    "alguns caminhos não puderam ser verificados": "certains chemins n'ont pas pu être vérifiés",
+    "diapositivo {page}": "diapositive {page}",
+    "documento": "document",
+    "e mais {count}": "et {count} de plus",
+    "estudo local": "étude locale",
+    "está atrasada": "est en retard",
+    "folha {page}": "feuille {page}",
+    "página {page}": "page {page}",
+    "vence amanhã": "à rendre demain",
+    "vence em {count} dias": "à rendre dans {count} jours",
+    "vence hoje": "à rendre aujourd'hui",
+    "verificação incompleta": "vérification incomplète",
+    "{count} arquivada": "{count} archivée",
+    "{count} arquivadas": "{count} archivées",
+    "{count} colisão de nomes resolvida sem substituir nada": (
+        "{count} collision de noms résolue sans rien écraser"
+    ),
+    "{count} colisões de nomes resolvidas sem substituir nada": (
+        "{count} collisions de noms résolues sans rien écraser"
+    ),
+    "{count} com erro": "{count} en erreur",
+    "{count} devolução a Downloads": "{count} renvoi vers Téléchargements",
+    "{count} devoluções a Downloads": "{count} renvois vers Téléchargements",
+    "{count} disciplina ativa": "{count} matière active",
+    "{count} disciplinas ativas": "{count} matières actives",
+    "{count} ficheiro adotado sem mover": "{count} fichier adopté sans déplacement",
+    "{count} ficheiro organizado": "{count} fichier rangé",
+    "{count} ficheiro por decidir": "{count} fichier à décider",
+    "{count} ficheiro por decidir · {recovery} precisam de recuperação": (
+        "{count} fichier à décider · {recovery} nécessitent une récupération"
+    ),
+    "{count} ficheiro precisa de recuperação manual": (
+        "{count} fichier nécessite une récupération manuelle"
+    ),
+    "{count} ficheiro precisa de revisão manual": (
+        "{count} signalement nécessite une révision manuelle"
+    ),
+    "{count} ficheiro · {size}": "{count} fichier · {size}",
+    "{count} ficheiros adotados sem mover": "{count} fichiers adoptés sans déplacement",
+    "{count} ficheiros organizados": "{count} fichiers rangés",
+    "{count} ficheiros por decidir": "{count} fichiers à décider",
+    "{count} ficheiros por decidir · {recovery} precisam de recuperação": (
+        "{count} fichiers à décider · {recovery} nécessitent une récupération"
+    ),
+    "{count} ficheiros precisam de recuperação manual": (
+        "{count} fichiers nécessitent une récupération manuelle"
+    ),
+    "{count} ficheiros precisam de revisão manual": (
+        "{count} signalements nécessitent une révision manuelle"
+    ),
+    "{count} ficheiros · {size}": "{count} fichiers · {size}",
+    "{count} ignorado": "{count} ignoré",
+    "{count} ignorados": "{count} ignorés",
+    "{count} importado": "{count} importé",
+    "{count} importados": "{count} importés",
+    "{count} não entraram neste lote e ficaram em Downloads.": (
+        "{count} n'ont pas rejoint ce lot et sont restés dans Téléchargements."
+    ),
+    "{count} ocorrência do histórico precisa de revisão": (
+        "{count} signalement de l'historique nécessite une révision"
+    ),
+    "{count} ocorrências do histórico precisam de revisão": (
+        "{count} signalements de l'historique nécessitent une révision"
+    ),
+    "{count} operação interrompida recuperada": ("{count} opération interrompue récupérée"),
+    "{count} operações interrompidas recuperadas": ("{count} opérations interrompues récupérées"),
+    "{count} organizado, {failed} com erro. Revê: {errors}.": (
+        "{count} rangé, {failed} en erreur. À vérifier : {errors}."
+    ),
+    "{count} organizado.": "{count} rangé.",
+    "{count} organizados, {failed} com erro. Revê: {errors}.": (
+        "{count} rangés, {failed} en erreur. À vérifier : {errors}."
+    ),
+    "{count} organizados.": "{count} rangés.",
+    "{count} organização desfeita": "{count} rangement annulé",
+    "{count} organizações desfeitas": "{count} rangements annulés",
+    "{count} registo da Caixa de Entrada foi revisto": (
+        "{count} enregistrement de la Boîte de réception a été examiné"
+    ),
+    "{count} registos da Caixa de Entrada foram revistos": (
+        "{count} enregistrements de la Boîte de réception ont été examinés"
+    ),
+    "{count} resultados · os parênteses retos mostram a correspondência": (
+        "{count} résultats · les crochets marquent la correspondance"
+    ),
+    "{kind} · {size} · organizado {date}": "{kind} · {size} · rangé le {date}",
+    "{name} (arquivada)": "{name} (archivée)",
+    "{name} deixa de aparecer nas escolhas. Os ficheiros e tarefas não são apagados.": (
+        "{name} n'apparaît plus dans les choix. Ses fichiers et tâches ne sont pas supprimés."
+    ),
+    "{name} deixará de aparecer na pesquisa e nos recentes. O ficheiro permanecerá exatamente onde está.": (
+        "{name} n'apparaîtra plus dans la recherche ni dans les récents. Le fichier reste "
+        "exactement où il est."
+    ),
+    "{name} está pronto para organizar.": "{name} est prêt à être rangé.",
+    "{name} foi adotado sem mover o ficheiro.": ("{name} a été adopté sans déplacer le fichier."),
+    "{name} foi guardado em {destination}.": "{name} a été enregistré dans {destination}.",
+    "{name} saiu do catálogo; o ficheiro ficou no lugar.": (
+        "{name} a quitté le catalogue ; le fichier est resté en place."
+    ),
+    "{name} volta a aparecer nas escolhas de arquivo. Os ficheiros e tarefas não foram alterados.": (
+        "{name} réapparaît dans les choix de rangement. Fichiers et tâches n'ont pas été modifiés."
+    ),
+    "{name} voltou para Downloads.": "{name} est retourné dans Téléchargements.",
+    "{name} voltou à Caixa de Entrada.": "{name} est revenu dans la Boîte de réception.",
+    "{size}  ·  recebido da pasta Downloads": "{size}  ·  reçu du dossier Téléchargements",
+    "{size}  ·  {when}  ·  Sugestão: {suggestion} / {kind}": (
+        "{size}  ·  {when}  ·  Suggestion : {suggestion} / {kind}"
+    ),
+    "{subject}  ·  {due}": "{subject}  ·  {due}",
+    "{subject}  ·  {kind}  ·  {location}": "{subject}  ·  {kind}  ·  {location}",
+    "{subject}  ·  {kind}  ·  {size}": "{subject}  ·  {kind}  ·  {size}",
+    "{subject} · {kind} · adotado sem mover": "{subject} · {kind} · adopté sans déplacement",
+    "{title} {when}.": "{title} {when}.",
+}

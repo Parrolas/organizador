@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from organizador.i18n import _
 from organizador.ui.icons import app_icon
 
 
@@ -21,17 +22,17 @@ class TrayIcon(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.tray = QSystemTrayIcon(app_icon(), self)
-        self.tray.setToolTip("Organizador · a preparar")
+        self.tray.setToolTip(_("Organizador · a preparar"))
         menu = QMenu()
-        self.open_action = menu.addAction("Abrir Organizador")
-        self.inbox_action = menu.addAction("Caixa de Entrada")
+        self.open_action = menu.addAction(_("Abrir Organizador"))
+        self.inbox_action = menu.addAction(_("Caixa de Entrada"))
         menu.addSeparator()
-        self.pause_action = menu.addAction("Pausar vigilância")
+        self.pause_action = menu.addAction(_("Pausar vigilância"))
         self.pause_action.setCheckable(True)
-        self.undo_action = menu.addAction("Desfazer última organização")
-        self.settings_action = menu.addAction("Definições")
+        self.undo_action = menu.addAction(_("Desfazer última organização"))
+        self.settings_action = menu.addAction(_("Definições"))
         menu.addSeparator()
-        self.quit_action = menu.addAction("Sair")
+        self.quit_action = menu.addAction(_("Sair"))
         self.tray.setContextMenu(menu)
 
         self.open_action.triggered.connect(self.open_requested)
@@ -61,16 +62,22 @@ class TrayIcon(QObject):
     def update_inbox_count(self, count: int) -> None:
         """Reflect pending files in both menu copy and tooltip."""
 
-        self.inbox_action.setText(f"Caixa de Entrada ({count})" if count else "Caixa de Entrada")
-        state = f"{count} por organizar" if count else "Caixa de Entrada vazia"
-        self.tray.setToolTip(f"Organizador · {state}")
+        self.inbox_action.setText(
+            _("Caixa de Entrada ({count})").format(count=count) if count else _("Caixa de Entrada")
+        )
+        state = (
+            _("({count}) por organizar").format(count=count)
+            if count
+            else _("Caixa de Entrada vazia")
+        )
+        self.tray.setToolTip(_("Organizador · {state}").format(state=state))
 
     def set_paused(self, paused: bool) -> None:
         """Synchronise the checkable pause action without emitting a loop."""
 
         self.pause_action.blockSignals(True)
         self.pause_action.setChecked(paused)
-        self.pause_action.setText("Retomar vigilância" if paused else "Pausar vigilância")
+        self.pause_action.setText(_("Retomar vigilância") if paused else _("Pausar vigilância"))
         self.pause_action.blockSignals(False)
 
     def notify(self, title: str, message: str) -> None:

@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from organizador import __version__
 from organizador.config import THEME_IDS, AppConfig
 from organizador.db import Database
+from organizador.i18n import LANGUAGE_NAMES, _
 from organizador.models import (
     FiledDocument,
     FindingReason,
@@ -65,6 +66,7 @@ class SettingsPayload(TypedDict):
     reminder_lead_days: int
     filename_template: str
     theme: str
+    language: str
     watch_enabled: bool
     launch_at_login: bool
 
@@ -99,12 +101,12 @@ class HomePage(QWidget):
         super().__init__(parent)
         self.database = database
         layout = _page_layout(self)
-        open_button = button("Abrir pasta Universidade")
+        open_button = button(_("Abrir pasta Universidade"))
         open_button.clicked.connect(self.open_university)
         layout.addWidget(
             PageHeading(
-                "O teu semestre, arrumado.",
-                "Os downloads novos aparecem aqui antes de irem para uma disciplina.",
+                _("O teu semestre, arrumado."),
+                _("Os downloads novos aparecem aqui antes de irem para uma disciplina."),
                 [open_button],
             )
         )
@@ -113,8 +115,8 @@ class HomePage(QWidget):
         self.intake_strip.setObjectName("IntakeStrip")
         intake_layout = QHBoxLayout(self.intake_strip)
         intake_layout.setContentsMargins(18, 13, 14, 13)
-        self.watch_label = label("A preparar a vigilância de Downloads…", "RowTitle")
-        self.inbox_button = button("Caixa de Entrada", variant="quiet")
+        self.watch_label = label(_("A preparar a vigilância de Downloads…"), "RowTitle")
+        self.inbox_button = button(_("Caixa de Entrada"), variant="quiet")
         self.inbox_button.clicked.connect(self.show_inbox)
         intake_layout.addWidget(self.watch_label, 1)
         intake_layout.addWidget(self.inbox_button)
@@ -140,7 +142,7 @@ class HomePage(QWidget):
         task_panel_layout = QVBoxLayout(task_panel)
         task_panel_layout.setContentsMargins(8, 7, 0, 0)
         task_panel_layout.setSpacing(11)
-        task_panel_layout.addWidget(label("Próximos prazos", "SectionTitle"))
+        task_panel_layout.addWidget(label(_("Próximos prazos"), "SectionTitle"))
         self.deadline_layout = QVBoxLayout()
         self.deadline_layout.setSpacing(8)
         task_panel_layout.addLayout(self.deadline_layout)
@@ -152,7 +154,7 @@ class HomePage(QWidget):
         activity_layout = QVBoxLayout(activity_panel)
         activity_layout.setContentsMargins(18, 14, 18, 16)
         activity_layout.setSpacing(8)
-        activity_layout.addWidget(label("Tranquilidade", "SectionTitle"))
+        activity_layout.addWidget(label(_("Tranquilidade"), "SectionTitle"))
         self.activity_label = label("", "Muted")
         self.activity_label.setWordWrap(True)
         activity_layout.addWidget(self.activity_label)
@@ -165,28 +167,32 @@ class HomePage(QWidget):
 
         inbox_count = self.database.count_inbox_items()
         if paused:
-            self.watch_label.setText("Vigilância em pausa. Os novos downloads ficam onde estão.")
+            self.watch_label.setText(_("Vigilância em pausa. Os novos downloads ficam onde estão."))
             self.intake_strip.setObjectName("WarningStrip")
         elif watching:
             self.watch_label.setText(
-                "Downloads vigiado. Só os formatos de estudo configurados entram."
+                _("Downloads vigiado. Só os formatos de estudo configurados entram.")
             )
             self.intake_strip.setObjectName("IntakeStrip")
         else:
-            self.watch_label.setText("A vigilância de Downloads está desligada nas Definições.")
+            self.watch_label.setText(_("A vigilância de Downloads está desligada nas Definições."))
             self.intake_strip.setObjectName("WarningStrip")
         self.intake_strip.style().unpolish(self.intake_strip)
         self.intake_strip.style().polish(self.intake_strip)
         self.inbox_button.setText(
-            f"Caixa de Entrada ({inbox_count})" if inbox_count else "Caixa de Entrada"
+            _("Caixa de Entrada ({count})").format(count=inbox_count)
+            if inbox_count
+            else _("Caixa de Entrada")
         )
 
         clear_layout(self.recent_layout)
         recent = self.database.list_recent_files(limit=7)
         if not recent:
             empty_copy = label(
-                "O primeiro documento organizado aparece aqui. "
-                "A app não toca nos ficheiros antigos sem pedires.",
+                _(
+                    "O primeiro documento organizado aparece aqui. "
+                    "A app não toca nos ficheiros antigos sem pedires."
+                ),
                 "Muted",
             )
             empty_copy.setWordWrap(True)
@@ -194,9 +200,10 @@ class HomePage(QWidget):
         else:
             for document in recent:
                 recent_subject = self.database.get_subject(document.subject_id)
-                detail = (
-                    f"{recent_subject.name if recent_subject else 'Disciplina'}  ·  "
-                    f"{document.kind}  ·  {format_size(document.size)}"
+                detail = _("{subject}  ·  {kind}  ·  {size}").format(
+                    subject=recent_subject.name if recent_subject else _("Disciplina"),
+                    kind=document.kind,
+                    size=format_size(document.size),
                 )
                 self.recent_layout.addWidget(
                     PathActionRow(
@@ -211,7 +218,10 @@ class HomePage(QWidget):
         tasks = self.database.list_tasks(include_completed=False)[:6]
         if not tasks:
             empty_copy = label(
-                "Ainda não há prazos. Cria uma tarefa ou associa-a quando organizares um ficheiro.",
+                _(
+                    "Ainda não há prazos. Cria uma tarefa ou associa-a "
+                    "quando organizares um ficheiro."
+                ),
                 "Muted",
             )
             empty_copy.setWordWrap(True)
@@ -226,9 +236,14 @@ class HomePage(QWidget):
                 title = label(task.title, "RowTitle")
                 title.setWordWrap(True)
                 row_layout.addWidget(title)
-                task_subject = task.subject_name or "Geral"
+                task_subject = task.subject_name or _("Geral")
                 row_layout.addWidget(
-                    label(f"{task_subject}  ·  {format_day(task.due_date)}", "Muted")
+                    label(
+                        _("{subject}  ·  {due}").format(
+                            subject=task_subject, due=format_day(task.due_date)
+                        ),
+                        "Muted",
+                    )
                 )
                 self.deadline_layout.addWidget(row)
         self._refresh_activity()
@@ -240,40 +255,51 @@ class HomePage(QWidget):
         parts: list[str] = []
         if summary.organized:
             parts.append(
-                f"{summary.organized} ficheiro{'s' if summary.organized != 1 else ''} "
-                f"organizado{'s' if summary.organized != 1 else ''}"
+                _("{count} ficheiro organizado").format(count=summary.organized)
+                if summary.organized == 1
+                else _("{count} ficheiros organizados").format(count=summary.organized)
             )
         if summary.collisions_renamed:
             count = summary.collisions_renamed
             parts.append(
-                f"{count} colisã{'o' if count == 1 else 'ões'} de nomes resolvida"
-                f"{'s' if count != 1 else ''} sem substituir nada"
+                _("{count} colisão de nomes resolvida sem substituir nada").format(count=count)
+                if count == 1
+                else _("{count} colisões de nomes resolvidas sem substituir nada").format(
+                    count=count
+                )
             )
         if summary.operations_recovered:
             count = summary.operations_recovered
             parts.append(
-                f"{count} operaçã{'o' if count == 1 else 'ões'} interrompida"
-                f"{'s' if count != 1 else ''} recuperada{'s' if count != 1 else ''}"
+                _("{count} operação interrompida recuperada").format(count=count)
+                if count == 1
+                else _("{count} operações interrompidas recuperadas").format(count=count)
             )
         if summary.adopted:
             parts.append(
-                f"{summary.adopted} ficheiro{'s' if summary.adopted != 1 else ''} "
-                f"adotado{'s' if summary.adopted != 1 else ''} sem mover"
+                _("{count} ficheiro adotado sem mover").format(count=summary.adopted)
+                if summary.adopted == 1
+                else _("{count} ficheiros adotados sem mover").format(count=summary.adopted)
             )
         if summary.undone:
             count = summary.undone
             parts.append(
-                f"{count} organizaçã{'o' if count == 1 else 'ões'} "
-                f"desfeita{'s' if count != 1 else ''}"
+                _("{count} organização desfeita").format(count=count)
+                if count == 1
+                else _("{count} organizações desfeitas").format(count=count)
             )
         if summary.returned:
             count = summary.returned
-            parts.append(f"{count} devoluçã{'o' if count == 1 else 'ões'} a Downloads")
+            parts.append(
+                _("{count} devolução a Downloads").format(count=count)
+                if count == 1
+                else _("{count} devoluções a Downloads").format(count=count)
+            )
         if parts:
             self.activity_label.setText(" · ".join(parts) + ".")
         else:
             self.activity_label.setText(
-                "A app ainda não tem histórico. Organiza o primeiro ficheiro para começar."
+                _("A app ainda não tem histórico. Organiza o primeiro ficheiro para começar.")
             )
 
 
@@ -304,13 +330,13 @@ class InboxPage(QWidget):
         layout = _page_layout(self)
         self.import_button = button("Importar de Downloads…")
         self.import_button.clicked.connect(self.import_existing_requested.emit)
-        self.bulk_button = button("Organizar seleção", variant="primary")
+        self.bulk_button = button(_("Organizar seleção"), variant="primary")
         self.bulk_button.setEnabled(False)
         self.bulk_button.clicked.connect(self._emit_selection)
         layout.addWidget(
             PageHeading(
-                "Caixa de Entrada",
-                "Nada é arquivado sem uma decisão. Organiza agora ou deixa para mais tarde.",
+                _("Caixa de Entrada"),
+                _("Nada é arquivado sem uma decisão. Organiza agora ou deixa para mais tarde."),
                 [self.import_button, self.bulk_button],
             )
         )
@@ -320,14 +346,14 @@ class InboxPage(QWidget):
         self.import_status_label.setWordWrap(True)
         self.import_status_label.hide()
         layout.addWidget(self.import_status_label)
-        area, _, self.items_layout = _scroll_list()
+        area, _container, self.items_layout = _scroll_list()
         layout.addWidget(area, 1)
 
     def set_import_running(self, running: bool) -> None:
         """Prevent overlapping confirmed batches while the worker checks files."""
 
         self.import_button.setEnabled(not running)
-        self.import_button.setText("A importar…" if running else "Importar de Downloads…")
+        self.import_button.setText(_("A importar…") if running else _("Importar de Downloads…"))
 
     def _emit_selection(self) -> None:
         if self._selected_ids:
@@ -342,7 +368,11 @@ class InboxPage(QWidget):
 
     def _update_bulk_button(self) -> None:
         count = len(self._selected_ids)
-        self.bulk_button.setText(f"Organizar seleção ({count})" if count else "Organizar seleção")
+        self.bulk_button.setText(
+            _("Organizar seleção ({count})").format(count=count)
+            if count
+            else _("Organizar seleção")
+        )
         self.bulk_button.setEnabled(count > 0 and self.database.count_subjects() > 0)
 
     def set_import_status(self, message: str) -> None:
@@ -367,47 +397,56 @@ class InboxPage(QWidget):
         summary_parts: list[str] = []
         if pending_count and recovery_count:
             summary_parts.append(
-                f"{pending_count} ficheiro{'s' if pending_count != 1 else ''} por decidir · "
-                f"{recovery_count} precisa{'m' if recovery_count != 1 else ''} de recuperação"
+                (
+                    _("{count} ficheiros por decidir · {recovery} precisam de recuperação")
+                    if pending_count != 1
+                    else _("{count} ficheiro por decidir · {recovery} precisam de recuperação")
+                ).format(count=pending_count, recovery=recovery_count)
             )
         elif recovery_count:
             summary_parts.append(
-                f"{recovery_count} ficheiro{'s' if recovery_count != 1 else ''} "
-                f"precisa{'m' if recovery_count != 1 else ''} de recuperação manual"
+                _("{count} ficheiros precisam de recuperação manual").format(count=recovery_count)
+                if recovery_count != 1
+                else _("{count} ficheiro precisa de recuperação manual").format(
+                    count=recovery_count
+                )
             )
         elif pending_count:
             summary_parts.append(
-                f"{pending_count} ficheiro{'s' if pending_count != 1 else ''} por decidir"
+                _("{count} ficheiros por decidir").format(count=pending_count)
+                if pending_count != 1
+                else _("{count} ficheiro por decidir").format(count=pending_count)
             )
         if manual_findings:
             count = len(manual_findings)
             summary_parts.append(
-                f"{count} ocorrência{'s' if count != 1 else ''} do histórico "
-                f"precisa{'m' if count != 1 else ''} de revisão"
+                _("{count} ocorrências do histórico precisam de revisão").format(count=count)
+                if count != 1
+                else _("{count} ocorrência do histórico precisa de revisão").format(count=count)
             )
         report = self.reconciliation_report
         if report is not None and (report.incomplete or report.truncated):
-            summary_parts.append("verificação incompleta")
-        summary = " · ".join(summary_parts) if summary_parts else "A caixa está vazia"
+            summary_parts.append(_("verificação incompleta"))
+        summary = " · ".join(summary_parts) if summary_parts else _("A caixa está vazia")
         self.summary_label.setText(summary)
         self._selected_ids &= {item.id for item in items}
         self._update_bulk_button()
         clear_layout(self.items_layout)
         if not items and not manual_findings:
             empty = EmptyState(
-                "Tudo no lugar",
-                "Quando terminares um download elegível, ele aparece aqui e num pequeno popup.",
+                _("Tudo no lugar"),
+                _("Quando terminares um download elegível, ele aparece aqui e num pequeno popup."),
             )
             self.items_layout.addWidget(empty)
         subjects = {subject.id: subject for subject in self.database.list_subjects()}
         for item in items:
             self.items_layout.addWidget(self._row(item, subjects))
         if manual_findings:
-            self.items_layout.addWidget(label("Revisão manual do histórico", "SectionTitle"))
+            self.items_layout.addWidget(label(_("Revisão manual do histórico"), "SectionTitle"))
             for finding in manual_findings:
                 self.items_layout.addWidget(self._finding_row(finding))
         if adopted_documents:
-            self.items_layout.addWidget(label("Ficheiros adotados", "SectionTitle"))
+            self.items_layout.addWidget(label(_("Ficheiros adotados"), "SectionTitle"))
             for document in adopted_documents:
                 self.items_layout.addWidget(self._adopted_row(document, subjects))
         self.items_layout.addStretch(1)
@@ -421,7 +460,7 @@ class InboxPage(QWidget):
 
         if item.status != "recovery":
             selected = QCheckBox()
-            selected.setAccessibleName(f"Selecionar {item.original_name}")
+            selected.setAccessibleName(_("Selecionar {name}").format(name=item.original_name))
             selected.setChecked(item.id in self._selected_ids)
             selected.toggled.connect(
                 lambda checked, item_id=item.id: self._set_selected(item_id, checked)
@@ -434,16 +473,18 @@ class InboxPage(QWidget):
         title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         copy.addWidget(title)
         if item.status == "recovery":
-            metadata = (
-                f"Recuperação manual necessária  ·  {format_size(item.size)}  ·  "
-                f"{item.detected_at.strftime('%d/%m às %H:%M')}"
+            metadata = _("Recuperação manual necessária  ·  {size}  ·  {when}").format(
+                size=format_size(item.size),
+                when=item.detected_at.strftime("%d/%m às %H:%M"),
             )
         else:
             subject = subjects.get(item.suggested_subject_id or -1)
-            suggestion = subject.name if subject else "Sem sugestão"
-            metadata = (
-                f"{format_size(item.size)}  ·  {item.detected_at.strftime('%d/%m às %H:%M')}  ·  "
-                f"Sugestão: {suggestion} / {item.suggested_kind}"
+            suggestion = subject.name if subject else _("Sem sugestão")
+            metadata = _("{size}  ·  {when}  ·  Sugestão: {suggestion} / {kind}").format(
+                size=format_size(item.size),
+                when=item.detected_at.strftime("%d/%m às %H:%M"),
+                suggestion=suggestion,
+                kind=item.suggested_kind,
             )
         copy.addWidget(label(metadata, "Muted"))
         if item.last_error:
@@ -453,21 +494,21 @@ class InboxPage(QWidget):
         row_layout.addLayout(copy, 1)
 
         open_button = button(
-            "Abrir Universidade" if item.status == "recovery" else "Abrir",
+            _("Abrir Universidade") if item.status == "recovery" else _("Abrir"),
             variant="quiet",
         )
         open_path = self.config.university_root if item.status == "recovery" else item.path
         open_button.clicked.connect(lambda: self.open_path.emit(open_path))
         row_layout.addWidget(open_button)
         if item.status == "recovery":
-            downloads_button = button("Abrir Downloads")
+            downloads_button = button(_("Abrir Downloads"))
             downloads_button.clicked.connect(lambda: self.open_path.emit(self.config.downloads_dir))
             row_layout.addWidget(downloads_button)
             return row
-        return_button = button("Não é da universidade")
-        return_button.setToolTip("Devolver este ficheiro a Downloads")
+        return_button = button(_("Não é da universidade"))
+        return_button.setToolTip(_("Devolver este ficheiro a Downloads"))
         return_button.clicked.connect(lambda: self.return_requested.emit(item.id))
-        organise = button("Organizar", variant="primary")
+        organise = button(_("Organizar"), variant="primary")
         organise.clicked.connect(lambda: self.organise_requested.emit(item.id))
         row_layout.addWidget(return_button)
         row_layout.addWidget(organise)
@@ -482,37 +523,37 @@ class InboxPage(QWidget):
     def _finding_row(self, finding: ReconciliationFinding) -> QFrame:
         path = finding.path
         details = {
-            FindingReason.UNTRACKED_SUBJECT_FILE: (
+            FindingReason.UNTRACKED_SUBJECT_FILE: _(
                 "Encontrado numa disciplina sem registo. Não foi movido nem alterado."
             ),
-            FindingReason.MISSING_DOCUMENT: (
+            FindingReason.MISSING_DOCUMENT: _(
                 "Documento registado que já não está no destino esperado."
             ),
-            FindingReason.BROKEN_UNDO_EVENT: (
+            FindingReason.BROKEN_UNDO_EVENT: _(
                 "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta."
             ),
-            FindingReason.PENDING_FILING_SOURCE: (
+            FindingReason.PENDING_FILING_SOURCE: _(
                 "Origem de uma organização interrompida; não foi alterada no arranque."
             ),
-            FindingReason.PENDING_FILING_DESTINATION: (
+            FindingReason.PENDING_FILING_DESTINATION: _(
                 "Destino de uma organização interrompida; compara antes de continuar."
             ),
-            FindingReason.PENDING_RETURN_SOURCE: (
+            FindingReason.PENDING_RETURN_SOURCE: _(
                 "Origem de uma devolução interrompida; não foi alterada no arranque."
             ),
-            FindingReason.PENDING_RETURN_DESTINATION: (
+            FindingReason.PENDING_RETURN_DESTINATION: _(
                 "Destino em Downloads de uma devolução interrompida; compara os ficheiros."
             ),
-            FindingReason.PENDING_UNDO_SOURCE: (
+            FindingReason.PENDING_UNDO_SOURCE: _(
                 "Origem de uma operação de desfazer interrompida; não foi alterada no arranque."
             ),
-            FindingReason.PENDING_UNDO_DESTINATION: (
+            FindingReason.PENDING_UNDO_DESTINATION: _(
                 "Operação de desfazer interrompida; confirma as pastas antes de continuar."
             ),
-            FindingReason.LEGACY_INTERRUPTED_UNDO: (
+            FindingReason.LEGACY_INTERRUPTED_UNDO: _(
                 "Ficheiro restaurado por uma operação de desfazer interrompida."
             ),
-            FindingReason.UNSAFE_PATH: (
+            FindingReason.UNSAFE_PATH: _(
                 "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado."
             ),
         }
@@ -532,21 +573,21 @@ class InboxPage(QWidget):
         row_layout.addLayout(copy, 1)
         expected_parent = path.parent
         target = expected_parent if expected_parent.is_dir() else self.config.university_root
-        open_button = button("Abrir pasta", variant="quiet")
+        open_button = button(_("Abrir pasta"), variant="quiet")
         open_button.clicked.connect(lambda: self.open_path.emit(target))
         row_layout.addWidget(open_button)
         if finding.reason is FindingReason.UNTRACKED_SUBJECT_FILE:
-            adopt_button = button("Adotar", variant="primary")
-            adopt_button.setToolTip("Adicionar à pesquisa sem mover o ficheiro")
+            adopt_button = button(_("Adotar"), variant="primary")
+            adopt_button.setToolTip(_("Adicionar à pesquisa sem mover o ficheiro"))
             adopt_button.clicked.connect(lambda: self.adopt_requested.emit(finding))
             row_layout.addWidget(adopt_button)
         elif finding.reason is FindingReason.MISSING_DOCUMENT:
-            drop_button = button("Remover registo")
-            drop_button.setToolTip("Remover apenas o registo local; nenhum ficheiro é apagado")
+            drop_button = button(_("Remover registo"))
+            drop_button.setToolTip(_("Remover apenas o registo local; nenhum ficheiro é apagado"))
             drop_button.clicked.connect(lambda: self.drop_record_requested.emit(finding))
             row_layout.addWidget(drop_button)
         if finding.reason in DISMISSIBLE_FINDING_REASONS:
-            dismiss_button = button("Marcar revisto", variant="quiet")
+            dismiss_button = button(_("Marcar revisto"), variant="quiet")
             dismiss_button.clicked.connect(lambda: self.dismiss_finding_requested.emit(finding))
             row_layout.addWidget(dismiss_button)
         return row
@@ -566,16 +607,18 @@ class InboxPage(QWidget):
         subject = subjects.get(document.subject_id)
         copy.addWidget(
             label(
-                f"{subject.name if subject else 'Disciplina'} · {document.kind} · "
-                "adotado sem mover",
+                _("{subject} · {kind} · adotado sem mover").format(
+                    subject=subject.name if subject else _("Disciplina"),
+                    kind=document.kind,
+                ),
                 "Muted",
             )
         )
         row_layout.addLayout(copy, 1)
-        open_button = button("Abrir", variant="quiet")
+        open_button = button(_("Abrir"), variant="quiet")
         open_button.clicked.connect(lambda: self.open_path.emit(document.current_path))
         row_layout.addWidget(open_button)
-        unregister_button = button("Remover do catálogo")
+        unregister_button = button(_("Remover do catálogo"))
         unregister_button.clicked.connect(lambda: self.unregister_requested.emit(document.id))
         row_layout.addWidget(unregister_button)
         return row
@@ -593,26 +636,30 @@ class SearchPage(QWidget):
         layout = _page_layout(self)
         layout.addWidget(
             PageHeading(
-                "Pesquisar nos apontamentos",
-                "Procura palavras dentro de PDFs, documentos Office, ficheiros de texto "
-                "e notebooks já organizados.",
+                _("Pesquisar nos apontamentos"),
+                _(
+                    "Procura palavras dentro de PDFs, documentos Office, ficheiros de texto "
+                    "e notebooks já organizados."
+                ),
             )
         )
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(
-            "Ex.: regra da cadeia, normalização, Revolução Francesa…"
+            _("Ex.: regra da cadeia, normalização, Revolução Francesa…")
         )
         self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.setAccessibleName("Pesquisa nos documentos")
+        self.search_edit.setAccessibleName(_("Pesquisa nos documentos"))
         layout.addWidget(self.search_edit)
         self.status_label = label(
-            "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm "
-            "texto pesquisável.",
+            _(
+                "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm "
+                "texto pesquisável."
+            ),
             "PageSubtitle",
         )
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
-        area, _, self.results_layout = _scroll_list()
+        area, _container, self.results_layout = _scroll_list()
         layout.addWidget(area, 1)
 
         self.timer = QTimer(self)
@@ -635,27 +682,34 @@ class SearchPage(QWidget):
         clear_layout(self.results_layout)
         if not text:
             self.status_label.setText(
-                "A pesquisa é local. Escreve duas ou mais letras para começar."
+                _("A pesquisa é local. Escreve duas ou mais letras para começar.")
             )
             self.results_layout.addStretch(1)
             return
         results = self.database.search(text)
         if not results:
             self.status_label.setText(
-                "Sem resultados. O documento pode ainda estar a ser indexado "
-                "ou ser um PDF digitalizado."
+                _(
+                    "Sem resultados. O documento pode ainda estar a ser indexado "
+                    "ou ser um PDF digitalizado."
+                )
             )
             empty = EmptyState(
-                "Não encontrei essa expressão",
-                "Experimenta menos palavras ou confirma se o ficheiro aparece "
-                "nos organizados recentes.",
+                _("Não encontrei essa expressão"),
+                _(
+                    "Experimenta menos palavras ou confirma se o ficheiro aparece "
+                    "nos organizados recentes."
+                ),
             )
             self.results_layout.addWidget(empty)
             self.results_layout.addStretch(1)
             return
         self.status_label.setText(
-            f"{len(results)} resultado{'s' if len(results) != 1 else ''} · "
-            "os parênteses retos mostram a correspondência"
+            _("{count} resultados · os parênteses retos mostram a correspondência").format(
+                count=len(results)
+            )
+            if len(results) != 1
+            else _("1 resultado · os parênteses retos mostram a correspondência")
         )
         for result in results:
             row = QFrame()
@@ -669,17 +723,20 @@ class SearchPage(QWidget):
             copy.addWidget(label(result.title, "RowTitle"))
             copy.addWidget(
                 label(
-                    f"{result.subject_name}  ·  {result.kind}  ·  "
-                    f"{self._location_copy(result.path, result.page)}",
+                    _("{subject}  ·  {kind}  ·  {location}").format(
+                        subject=result.subject_name,
+                        kind=result.kind,
+                        location=self._location_copy(result.path, result.page),
+                    ),
                     "Muted",
                 )
             )
             top.addLayout(copy, 1)
-            reveal = button("Mostrar na pasta", variant="quiet")
+            reveal = button(_("Mostrar na pasta"), variant="quiet")
             reveal.clicked.connect(
                 lambda _checked=False, path=result.path: self.reveal_path.emit(path)
             )
-            open_button = button("Abrir")
+            open_button = button(_("Abrir"))
             open_button.clicked.connect(
                 lambda _checked=False, path=result.path: self.open_path.emit(path)
             )
@@ -698,12 +755,12 @@ class SearchPage(QWidget):
     def _location_copy(path: Path, page: int) -> str:
         suffix = path.suffix.casefold()
         if suffix == ".pptx":
-            return f"diapositivo {page}"
+            return _("diapositivo {page}").format(page=page)
         if suffix == ".xlsx":
-            return f"folha {page}"
+            return _("folha {page}").format(page=page)
         if suffix == ".docx":
-            return "documento"
-        return f"página {page}"
+            return _("documento")
+        return _("página {page}").format(page=page)
 
 
 class TasksPage(QWidget):
@@ -718,8 +775,8 @@ class TasksPage(QWidget):
         layout = _page_layout(self)
         layout.addWidget(
             PageHeading(
-                "Tarefas e prazos",
-                "Mantém cada entrega junto da disciplina a que pertence.",
+                _("Tarefas e prazos"),
+                _("Mantém cada entrega junto da disciplina a que pertence."),
             )
         )
 
@@ -729,18 +786,18 @@ class TasksPage(QWidget):
         form_layout.setContentsMargins(16, 14, 14, 14)
         form_layout.setSpacing(10)
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("Nova tarefa, por exemplo: entregar ficha 4")
+        self.title_edit.setPlaceholderText(_("Nova tarefa, por exemplo: entregar ficha 4"))
         self.title_edit.returnPressed.connect(self._add_task)
         self.subject_combo = QComboBox()
         self.subject_combo.setMinimumWidth(170)
-        self.due_check = QCheckBox("Prazo")
+        self.due_check = QCheckBox(_("Prazo"))
         self.due_check.setChecked(True)
         self.due_edit = QDateEdit(QDate.currentDate().addDays(7))
         self.due_edit.setCalendarPopup(True)
         self.due_edit.setDisplayFormat("dd/MM/yyyy")
         self.due_edit.setMinimumWidth(150)
         self.due_check.toggled.connect(self.due_edit.setEnabled)
-        add = button("Adicionar", variant="primary")
+        add = button(_("Adicionar"), variant="primary")
         add.clicked.connect(self._add_task)
         form_layout.addWidget(self.title_edit, 1)
         form_layout.addWidget(self.subject_combo)
@@ -770,13 +827,13 @@ class TasksPage(QWidget):
         right.setSpacing(8)
         self.filter_row = QHBoxLayout()
         self.filter_label = label("", "Muted")
-        self.clear_filter_button = button("Ver todas", variant="quiet")
+        self.clear_filter_button = button(_("Ver todas"), variant="quiet")
         self.clear_filter_button.clicked.connect(self._clear_date_filter)
         self.filter_row.addWidget(self.filter_label)
         self.filter_row.addStretch(1)
         self.filter_row.addWidget(self.clear_filter_button)
         right.addLayout(self.filter_row)
-        area, _, self.tasks_layout = _scroll_list()
+        area, _container, self.tasks_layout = _scroll_list()
         right.addWidget(area, 1)
         body.addLayout(right, 1)
         layout.addLayout(body, 1)
@@ -787,7 +844,7 @@ class TasksPage(QWidget):
 
         current_subject = self.subject_combo.currentData()
         self.subject_combo.clear()
-        self.subject_combo.addItem("Geral", None)
+        self.subject_combo.addItem(_("Geral"), None)
         for subject in self.database.list_subjects():
             self.subject_combo.addItem(subject.name, subject.id)
         if current_subject is not None:
@@ -801,7 +858,9 @@ class TasksPage(QWidget):
         if self._selected_date is not None:
             visible = [task for task in tasks if task.due_date == self._selected_date]
             self.filter_label.setText(
-                f"A mostrar tarefas de {self._selected_date.strftime('%d/%m/%Y')}"
+                _("A mostrar tarefas de {date}").format(
+                    date=self._selected_date.strftime("%d/%m/%Y")
+                )
             )
             self.clear_filter_button.show()
         else:
@@ -812,16 +871,18 @@ class TasksPage(QWidget):
             if self._selected_date is not None:
                 self.tasks_layout.addWidget(
                     EmptyState(
-                        "Sem tarefas neste dia",
-                        "Elimina o filtro para ver todas as tarefas "
-                        "ou adiciona uma tarefa para este dia.",
+                        _("Sem tarefas neste dia"),
+                        _(
+                            "Elimina o filtro para ver todas as tarefas "
+                            "ou adiciona uma tarefa para este dia."
+                        ),
                     )
                 )
             else:
                 self.tasks_layout.addWidget(
                     EmptyState(
-                        "Sem tarefas pendentes",
-                        "Adiciona a próxima entrega acima ou cria-a ao organizar um documento.",
+                        _("Sem tarefas pendentes"),
+                        _("Adiciona a próxima entrega acima ou cria-a ao organizar um documento."),
                     )
                 )
             self.tasks_layout.addStretch(1)
@@ -906,14 +967,14 @@ class TasksPage(QWidget):
                 f"color: {ui_theme.current().muted}; text-decoration: line-through;"
             )
         copy.addWidget(title)
-        subject = task.subject_name or "Geral"
+        subject = task.subject_name or _("Geral")
         due = self._due_copy(task)
-        copy.addWidget(label(f"{subject}  ·  {due}", "Muted"))
+        copy.addWidget(label(_("{subject}  ·  {due}").format(subject=subject, due=due), "Muted"))
         row_layout.addLayout(copy, 1)
-        edit = button("Editar")
+        edit = button(_("Editar"))
         edit.clicked.connect(lambda: self._edit_task(task.id))
         row_layout.addWidget(edit)
-        delete = button("Eliminar", variant="danger")
+        delete = button(_("Eliminar"), variant="danger")
         delete.clicked.connect(lambda: self._delete_task(task.id))
         row_layout.addWidget(delete)
         return row
@@ -921,22 +982,24 @@ class TasksPage(QWidget):
     @staticmethod
     def _due_copy(task: StudyTask) -> str:
         if task.due_date is None:
-            return "Sem prazo"
+            return _("Sem prazo")
         if task.completed:
             return format_day(task.due_date)
         delta = (task.due_date - date.today()).days
         if delta < 0:
-            return f"Atrasada · {format_day(task.due_date)}"
+            return _("Atrasada · {date}").format(date=format_day(task.due_date))
         if delta == 0:
-            return "Prazo hoje"
+            return _("Prazo hoje")
         if delta == 1:
-            return "Prazo amanhã"
-        return f"Prazo em {delta} dias · {format_day(task.due_date)}"
+            return _("Prazo amanhã")
+        return _("Prazo em {count} dias · {date}").format(
+            count=delta, date=format_day(task.due_date)
+        )
 
     def _add_task(self) -> None:
         title = self.title_edit.text().strip()
         if not title:
-            self.error_label.setText("Escreve uma tarefa antes de adicionar.")
+            self.error_label.setText(_("Escreve uma tarefa antes de adicionar."))
             self.title_edit.setFocus()
             return
         due_date = (
@@ -993,23 +1056,23 @@ class SubjectsPage(QWidget):
         self.config = config
         self.show_archived = False
         layout = _page_layout(self)
-        add = button("Adicionar disciplina", variant="primary")
+        add = button(_("Adicionar disciplina"), variant="primary")
         add.clicked.connect(self.add_requested)
         layout.addWidget(
             PageHeading(
-                "Disciplinas",
-                "Os códigos e palavras-chave tornam as sugestões de arquivo mais precisas.",
+                _("Disciplinas"),
+                _("Os códigos e palavras-chave tornam as sugestões de arquivo mais precisas."),
                 [add],
             )
         )
         header_row = QHBoxLayout()
         self.summary_label = label("", "PageSubtitle")
         header_row.addWidget(self.summary_label, 1)
-        self.archived_check = QCheckBox("Mostrar arquivadas")
+        self.archived_check = QCheckBox(_("Mostrar arquivadas"))
         self.archived_check.toggled.connect(self._set_show_archived)
         header_row.addWidget(self.archived_check)
         layout.addLayout(header_row)
-        area, _, self.subjects_layout = _scroll_list()
+        area, _container, self.subjects_layout = _scroll_list()
         layout.addWidget(area, 1)
         self.refresh()
 
@@ -1024,17 +1087,24 @@ class SubjectsPage(QWidget):
         summaries = self.database.count_files_by_subject()
         active_count = self.database.count_subjects()
         archived_count = len(self.database.list_subjects(active_only=False)) - active_count
-        plural = active_count != 1
-        summary = f"{active_count} disciplina{'s' if plural else ''} ativa{'s' if plural else ''}"
+        summary = (
+            _("{count} disciplinas ativas").format(count=active_count)
+            if active_count != 1
+            else _("{count} disciplina ativa").format(count=active_count)
+        )
         if self.show_archived and archived_count:
-            summary += f" · {archived_count} arquivada{'s' if archived_count != 1 else ''}"
+            summary += " · " + (
+                _("{count} arquivadas").format(count=archived_count)
+                if archived_count != 1
+                else _("{count} arquivada").format(count=archived_count)
+            )
         self.summary_label.setText(summary)
         clear_layout(self.subjects_layout)
         if not subjects:
             empty = EmptyState(
-                "Começa por uma disciplina",
-                "Cria uma disciplina para a app saber onde guardar o próximo download.",
-                "Adicionar disciplina",
+                _("Começa por uma disciplina"),
+                _("Cria uma disciplina para a app saber onde guardar o próximo download."),
+                _("Adicionar disciplina"),
             )
             empty.action_requested.connect(self.add_requested)
             self.subjects_layout.addWidget(empty)
@@ -1060,10 +1130,10 @@ class SubjectsPage(QWidget):
         copy.setSpacing(3)
         title = subject.name + (f"  ·  {subject.code}" if subject.code else "")
         copy.addWidget(label(title, "RowTitle"))
-        keyword_copy = ", ".join(subject.keywords) if subject.keywords else "Sem palavras-chave"
+        keyword_copy = ", ".join(subject.keywords) if subject.keywords else _("Sem palavras-chave")
         copy.addWidget(label(keyword_copy, "Muted"))
         subject_path = self.config.university_root / subject.folder_name
-        folder_copy = label(f"Pasta: {subject.folder_name}", "Muted")
+        folder_copy = label(_("Pasta: {name}").format(name=subject.folder_name), "Muted")
         folder_copy.setToolTip(str(subject_path))
         folder_copy.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         copy.addWidget(folder_copy)
@@ -1071,36 +1141,41 @@ class SubjectsPage(QWidget):
         if file_count:
             copy.addWidget(
                 label(
-                    f"{file_count} ficheiro{'s' if file_count != 1 else ''} · "
-                    f"{format_size(total_bytes)}",
+                    _("{count} ficheiro · {size}").format(
+                        count=file_count, size=format_size(total_bytes)
+                    )
+                    if file_count == 1
+                    else _("{count} ficheiros · {size}").format(
+                        count=file_count, size=format_size(total_bytes)
+                    ),
                     "Muted",
                 )
             )
         else:
-            copy.addWidget(label("Ainda sem ficheiros organizados", "Muted"))
+            copy.addWidget(label(_("Ainda sem ficheiros organizados"), "Muted"))
         if not subject.active:
-            copy.addWidget(label("Arquivada", "Muted"))
+            copy.addWidget(label(_("Arquivada"), "Muted"))
         row_layout.addLayout(copy, 1)
-        view_files = button("Ver ficheiros")
-        view_files.setToolTip("Mostrar os ficheiros organizados nesta disciplina")
+        view_files = button(_("Ver ficheiros"))
+        view_files.setToolTip(_("Mostrar os ficheiros organizados nesta disciplina"))
         view_files.clicked.connect(lambda: self.view_files_requested.emit(subject.id))
-        open_button = button("Abrir pasta", variant="quiet")
+        open_button = button(_("Abrir pasta"), variant="quiet")
         open_button.clicked.connect(
             lambda: self.open_folder.emit(self.config.university_root / subject.folder_name)
         )
-        edit = button("Editar")
+        edit = button(_("Editar"))
         edit.clicked.connect(lambda: self.edit_requested.emit(subject.id))
         row_layout.addWidget(view_files)
         row_layout.addWidget(open_button)
         row_layout.addWidget(edit)
         if subject.active:
-            archive = button("Arquivar", variant="danger")
-            archive.setToolTip("Oculta a disciplina sem apagar os respetivos ficheiros")
+            archive = button(_("Arquivar"), variant="danger")
+            archive.setToolTip(_("Oculta a disciplina sem apagar os respetivos ficheiros"))
             archive.clicked.connect(lambda: self.archive_requested.emit(subject.id))
             row_layout.addWidget(archive)
         else:
-            restore = button("Restaurar", variant="primary")
-            restore.setToolTip("Volta a mostrar a disciplina nas escolhas de arquivo")
+            restore = button(_("Restaurar"), variant="primary")
+            restore.setToolTip(_("Volta a mostrar a disciplina nas escolhas de arquivo"))
             restore.clicked.connect(lambda: self.restore_requested.emit(subject.id))
             row_layout.addWidget(restore)
         return row
@@ -1117,8 +1192,8 @@ class SettingsPage(QWidget):
         layout = _page_layout(self)
         layout.addWidget(
             PageHeading(
-                "Definições",
-                "Controla exatamente quais ficheiros entram e onde ficam guardados.",
+                _("Definições"),
+                _("Controla exatamente quais ficheiros entram e onde ficam guardados."),
             )
         )
 
@@ -1127,7 +1202,7 @@ class SettingsPage(QWidget):
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(22, 20, 22, 22)
         panel_layout.setSpacing(18)
-        panel_layout.addWidget(label("Pastas e vigilância", "SectionTitle"))
+        panel_layout.addWidget(label(_("Pastas e vigilância"), "SectionTitle"))
         form = QFormLayout()
         form.setVerticalSpacing(14)
         form.setHorizontalSpacing(22)
@@ -1135,55 +1210,64 @@ class SettingsPage(QWidget):
         self.root_edit = QLineEdit()
         root_row = QHBoxLayout()
         root_row.addWidget(self.root_edit, 1)
-        root_choose = button("Escolher…")
+        root_choose = button(_("Escolher…"))
         root_choose.clicked.connect(lambda: self._choose_folder(self.root_edit))
         root_row.addWidget(root_choose)
-        form.addRow("Pasta Universidade", root_row)
+        form.addRow(_("Pasta Universidade"), root_row)
 
         self.downloads_edit = QLineEdit()
         downloads_row = QHBoxLayout()
         downloads_row.addWidget(self.downloads_edit, 1)
-        downloads_choose = button("Escolher…")
+        downloads_choose = button(_("Escolher…"))
         downloads_choose.clicked.connect(lambda: self._choose_folder(self.downloads_edit))
         downloads_row.addWidget(downloads_choose)
-        form.addRow("Pasta Downloads", downloads_row)
+        form.addRow(_("Pasta Downloads"), downloads_row)
 
         self.extensions_edit = QLineEdit()
         self.extensions_edit.setPlaceholderText(".pdf, .docx, .pptx, .ipynb")
-        form.addRow("Extensões aceites", self.extensions_edit)
+        form.addRow(_("Extensões aceites"), self.extensions_edit)
         self.template_edit = QLineEdit()
         self.template_edit.setPlaceholderText("{nome_original}")
         self.template_edit.setToolTip(
-            "Tokens: {disciplina} {codigo} {tipo} {nome_original} {data} {ano} {mes} {dia}. "
-            "A extensão original é sempre preservada."
+            _("Tokens: {tokens}. A extensão original é sempre preservada.").format(
+                tokens="{disciplina} {codigo} {tipo} {nome_original} {data} {ano} {mes} {dia}"
+            )
         )
-        form.addRow("Modelo do nome", self.template_edit)
+        form.addRow(_("Modelo do nome"), self.template_edit)
         self.minimum_size = QSpinBox()
         self.minimum_size.setRange(0, 100 * 1024 * 1024)
-        self.minimum_size.setSuffix(" bytes")
-        form.addRow("Tamanho mínimo", self.minimum_size)
+        self.minimum_size.setSuffix(_(" bytes"))
+        form.addRow(_("Tamanho mínimo"), self.minimum_size)
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(10, 300)
         self.timeout_spin.setSuffix(" s")
-        form.addRow("Tempo do popup", self.timeout_spin)
+        form.addRow(_("Tempo do popup"), self.timeout_spin)
         self.reminder_spin = QSpinBox()
         self.reminder_spin.setRange(0, 30)
-        self.reminder_spin.setSuffix(" dias")
-        self.reminder_spin.setToolTip("Com quantos dias de antecedência avisar prazos")
-        form.addRow("Avisar prazos antes", self.reminder_spin)
+        self.reminder_spin.setSuffix(_(" dias"))
+        self.reminder_spin.setToolTip(_("Com quantos dias de antecedência avisar prazos"))
+        form.addRow(_("Avisar prazos antes"), self.reminder_spin)
         self.theme_combo = QComboBox()
         for theme_id in THEME_IDS:
             self.theme_combo.addItem(ui_theme.get_theme(theme_id).display_name, theme_id)
-        form.addRow("Tema", self.theme_combo)
+        form.addRow(_("Tema"), self.theme_combo)
+        self.language_combo = QComboBox()
+        for code, name in LANGUAGE_NAMES.items():
+            self.language_combo.addItem(name, code)
+        form.addRow(_("Idioma"), self.language_combo)
+        language_note = label(_("O idioma novo é aplicado ao reiniciar a app."), "Muted")
+        form.addRow("", language_note)
         panel_layout.addLayout(form)
 
-        self.watch_check = QCheckBox("Vigiar novos ficheiros em Downloads")
-        self.startup_check = QCheckBox("Iniciar o Organizador quando entro no Windows")
+        self.watch_check = QCheckBox(_("Vigiar novos ficheiros em Downloads"))
+        self.startup_check = QCheckBox(_("Iniciar o Organizador quando entro no Windows"))
         panel_layout.addWidget(self.watch_check)
         panel_layout.addWidget(self.startup_check)
         note = label(
-            "Alterar a pasta Universidade afeta os próximos ficheiros; "
-            "os já organizados não são movidos automaticamente.",
+            _(
+                "Alterar a pasta Universidade afeta os próximos ficheiros; "
+                "os já organizados não são movidos automaticamente."
+            ),
             "Muted",
         )
         note.setWordWrap(True)
@@ -1194,13 +1278,15 @@ class SettingsPage(QWidget):
         self.status_label = label("", "SuccessText")
         self.status_label.setWordWrap(True)
         action_row.addWidget(self.status_label, 1)
-        save = button("Guardar definições", variant="primary")
+        save = button(_("Guardar definições"), variant="primary")
         save.clicked.connect(self._save)
         action_row.addWidget(save)
         layout.addLayout(action_row)
         version_label = label(
-            f"Organizador v{__version__} · código MIT · "
-            "componentes de terceiros com licenças próprias",
+            _(
+                "Organizador v{version} · código MIT · "
+                "componentes de terceiros com licenças próprias"
+            ).format(version=__version__),
             "Muted",
         )
         version_label.setWordWrap(True)
@@ -1224,6 +1310,8 @@ class SettingsPage(QWidget):
         self.reminder_spin.setValue(config.reminder_lead_days)
         theme_index = self.theme_combo.findData(config.theme)
         self.theme_combo.setCurrentIndex(theme_index if theme_index >= 0 else 0)
+        language_index = self.language_combo.findData(config.language)
+        self.language_combo.setCurrentIndex(language_index if language_index >= 0 else 0)
         self.watch_check.setChecked(config.watch_enabled)
         self.startup_check.setChecked(config.launch_at_login)
 
@@ -1236,7 +1324,7 @@ class SettingsPage(QWidget):
         self.status_label.style().polish(self.status_label)
 
     def _choose_folder(self, target: QLineEdit) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "Escolher pasta", target.text())
+        selected = QFileDialog.getExistingDirectory(self, _("Escolher pasta"), target.text())
         if selected:
             target.setText(selected)
 
@@ -1250,6 +1338,7 @@ class SettingsPage(QWidget):
             "prompt_timeout_seconds": self.timeout_spin.value(),
             "reminder_lead_days": self.reminder_spin.value(),
             "theme": str(self.theme_combo.currentData()),
+            "language": str(self.language_combo.currentData()),
             "watch_enabled": self.watch_check.isChecked(),
             "launch_at_login": self.startup_check.isChecked(),
         }

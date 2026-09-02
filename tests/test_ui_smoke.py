@@ -403,6 +403,7 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
         "prompt_timeout_seconds": 45,
         "reminder_lead_days": 2,
         "theme": "escuro",
+        "language": "pt",
         "watch_enabled": True,
         "launch_at_login": True,
     }

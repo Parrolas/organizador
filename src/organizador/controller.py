@@ -19,6 +19,7 @@ from organizador.classifier import guess_filing
 from organizador.config import AppConfig, parse_extensions
 from organizador.db import Database
 from organizador.filer import FilingError, FilingService, render_final_name
+from organizador.i18n import _
 from organizador.indexer import DocumentIndexer
 from organizador.logging_setup import configure_logging
 from organizador.models import (
@@ -57,12 +58,12 @@ LOGGER = logging.getLogger(__name__)
 
 def _deadline_copy(delta_days: int) -> str:
     if delta_days < 0:
-        return "está atrasada"
+        return _("está atrasada")
     if delta_days == 0:
-        return "vence hoje"
+        return _("vence hoje")
     if delta_days == 1:
-        return "vence amanhã"
-    return f"vence em {delta_days} dias"
+        return _("vence amanhã")
+    return _("vence em {count} dias").format(count=delta_days)
 
 
 class AppController(QObject):
@@ -127,8 +128,10 @@ class AppController(QObject):
             except (ValueError, OSError) as exc:
                 QMessageBox.critical(
                     self.main_window,
-                    "Não foi possível abrir as pastas",
-                    f"Revê as Definições antes de ativar a vigilância.\n\n{exc}",
+                    _("Não foi possível abrir as pastas"),
+                    _("Revê as Definições antes de ativar a vigilância.\n\n{error}").format(
+                        error=exc
+                    ),
                 )
             else:
                 self._reconcile_startup()
@@ -157,8 +160,8 @@ class AppController(QObject):
         except sqlite3.Error as exc:
             LOGGER.exception("Startup reconciliation failed")
             self.tray.notify(
-                "Verificação de segurança incompleta",
-                f"Não foi possível rever o histórico local: {exc}",
+                _("Verificação de segurança incompleta"),
+                _("Não foi possível rever o histórico local: {error}").format(error=exc),
             )
             return
 
@@ -182,27 +185,32 @@ class AppController(QObject):
         details: list[str] = []
         if outcome.change_count:
             details.append(
-                f"{outcome.change_count} registo"
-                f"{'s' if outcome.change_count != 1 else ''} da Caixa de Entrada "
-                f"{'foram revistos' if outcome.change_count != 1 else 'foi revisto'}"
+                (
+                    _("{count} registos da Caixa de Entrada foram revistos")
+                    if outcome.change_count != 1
+                    else _("{count} registo da Caixa de Entrada foi revisto")
+                ).format(count=outcome.change_count)
             )
         if manual_paths:
             count = len(manual_paths)
             details.append(
-                f"{count} ficheiro{'s' if count != 1 else ''} "
-                f"precisa{'m' if count != 1 else ''} de revisão manual"
+                (
+                    _("{count} ficheiros precisam de revisão manual")
+                    if count != 1
+                    else _("{count} ficheiro precisa de revisão manual")
+                ).format(count=count)
             )
         if remaining.truncated:
-            details.append("a verificação atingiu o limite de segurança")
+            details.append(_("a verificação atingiu o limite de segurança"))
         if remaining.incomplete:
-            details.append("alguns caminhos não puderam ser verificados")
+            details.append(_("alguns caminhos não puderam ser verificados"))
         self.tray.notify(
             (
-                "Verificação de segurança incompleta"
+                _("Verificação de segurança incompleta")
                 if remaining.incomplete
-                else "Verificação de segurança concluída"
+                else _("Verificação de segurança concluída")
             ),
-            ". ".join(details) + ". Abre a Caixa de Entrada para rever.",
+            ". ".join(details) + ". " + _("Abre a Caixa de Entrada para rever."),
         )
 
     def shutdown(self) -> None:
@@ -282,8 +290,10 @@ class AppController(QObject):
         if interrupted_import:
             self._reset_manual_import_state()
             self.main_window.inbox_page.set_import_status(
-                "A importação foi interrompida. Os ficheiros ainda não importados "
-                "ficaram em Downloads."
+                _(
+                    "A importação foi interrompida. Os ficheiros ainda não importados "
+                    "ficaram em Downloads."
+                )
             )
         if not (self.config.initialized and self.database.count_subjects() > 0):
             return
@@ -300,8 +310,8 @@ class AppController(QObject):
                 candidate.stop()
             self.watcher = None
             self.tray.notify(
-                "Vigilância de Downloads desligada",
-                f"Não foi possível abrir a pasta configurada: {exc}",
+                _("Vigilância de Downloads desligada"),
+                _("Não foi possível abrir a pasta configurada: {error}").format(error=exc),
             )
             return
         self.watcher = candidate
@@ -327,7 +337,7 @@ class AppController(QObject):
                 self._manual_import_failed += 1
                 self._manual_import_errors.append(f"{path.name}: {exc}")
             else:
-                self.tray.notify("Não foi possível recolher o ficheiro", str(exc))
+                self.tray.notify(_("Não foi possível recolher o ficheiro"), str(exc))
             return
         if item is None:
             if manual_candidate is not None:
@@ -347,8 +357,8 @@ class AppController(QObject):
             self.prompt_queue.append(item.id)
         if notify:
             self.tray.notify(
-                "Novo material na Caixa de Entrada",
-                f"{item.original_name} está pronto para organizar.",
+                _("Novo material na Caixa de Entrada"),
+                _("{name} está pronto para organizar.").format(name=item.original_name),
             )
             self._refresh()
         self._show_next_prompt()
@@ -358,41 +368,45 @@ class AppController(QObject):
         if watcher is None or not watcher.active:
             QMessageBox.warning(
                 self.main_window,
-                "Importação indisponível",
-                "Conclui a configuração da aplicação antes de importar ficheiros.",
+                _("Importação indisponível"),
+                _("Conclui a configuração da aplicação antes de importar ficheiros."),
             )
             return
         if self._manual_import_active or watcher.manual_import_running:
             QMessageBox.information(
                 self.main_window,
-                "Importação em curso",
-                "Espera que o lote atual termine antes de iniciar outro.",
+                _("Importação em curso"),
+                _("Espera que o lote atual termine antes de iniciar outro."),
             )
             return
         try:
             plan = self.filer.plan_existing_downloads()
         except FilingError as exc:
-            QMessageBox.warning(self.main_window, "Não foi possível procurar", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível procurar"), str(exc))
             return
         if not plan.selected:
             QMessageBox.information(
                 self.main_window,
-                "Nada para importar",
-                "Não existem ficheiros elegíveis no nível principal de Downloads.",
+                _("Nada para importar"),
+                _("Não existem ficheiros elegíveis no nível principal de Downloads."),
             )
             return
 
         selected_count = len(plan.selected)
         remaining = plan.total - selected_count
         remaining_copy = (
-            f" Os outros {remaining} ficam em Downloads para um próximo lote." if remaining else ""
+            _(" Os outros {count} ficam em Downloads para um próximo lote.").format(count=remaining)
+            if remaining
+            else ""
         )
         answer = QMessageBox.question(
             self.main_window,
-            "Importar ficheiros existentes?",
-            f"Foram encontrados {plan.total} ficheiros elegíveis. "
-            f"Serão verificados no máximo {selected_count} e movidos para a Caixa de Entrada."
-            f"{remaining_copy}\n\nCada ficheiro continuará a precisar da tua confirmação.",
+            _("Importar ficheiros existentes?"),
+            _(
+                "Foram encontrados {total} ficheiros elegíveis. "
+                "Serão verificados no máximo {selected} e movidos para a Caixa de Entrada."
+                "{remaining}\n\nCada ficheiro continuará a precisar da tua confirmação."
+            ).format(total=plan.total, selected=selected_count, remaining=remaining_copy),
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
             QMessageBox.StandardButton.Cancel,
         )
@@ -407,13 +421,15 @@ class AppController(QObject):
         self._manual_import_errors.clear()
         self.main_window.inbox_page.set_import_running(True)
         self.main_window.inbox_page.set_import_status(
-            f"A verificar {selected_count} ficheiro{'s' if selected_count != 1 else ''}…"
+            _("A verificar {count} ficheiro…").format(count=selected_count)
+            if selected_count == 1
+            else _("A verificar {count} ficheiros…").format(count=selected_count)
         )
         queued = watcher.enqueue_existing(plan.selected)
         if queued == 0:
             self._reset_manual_import_state()
             self.main_window.inbox_page.set_import_status(
-                "Os ficheiros mudaram ou já estavam a ser processados e ficaram em Downloads."
+                _("Os ficheiros mudaram ou já estavam a ser processados e ficaram em Downloads.")
             )
 
     def _manual_import_finished(self, worker_skipped: int) -> None:
@@ -422,26 +438,36 @@ class AppController(QObject):
         skipped = self._manual_import_skipped + worker_skipped
         imported = self._manual_imported
         failed = self._manual_import_failed
-        parts = [f"{imported} importado{'s' if imported != 1 else ''}"]
+        parts = [
+            _("{count} importado").format(count=imported)
+            if imported == 1
+            else _("{count} importados").format(count=imported)
+        ]
         if skipped:
-            parts.append(f"{skipped} ignorado{'s' if skipped != 1 else ''}")
+            parts.append(
+                _("{count} ignorado").format(count=skipped)
+                if skipped == 1
+                else _("{count} ignorados").format(count=skipped)
+            )
         if failed:
-            parts.append(f"{failed} com erro")
+            parts.append(_("{count} com erro").format(count=failed))
         message = ", ".join(parts) + "."
         if self._manual_import_deferred:
-            message += (
-                f" {self._manual_import_deferred} não entraram neste lote e ficaram em Downloads."
+            message += " " + _("{count} não entraram neste lote e ficaram em Downloads.").format(
+                count=self._manual_import_deferred
             )
         if self._manual_import_errors:
             shown_errors = "; ".join(self._manual_import_errors[:3])
             if len(self._manual_import_errors) > 3:
-                shown_errors += f"; e mais {len(self._manual_import_errors) - 3}"
-            message += f" Revê: {shown_errors}."
-        message += " Nenhum ficheiro foi substituído ou apagado."
+                shown_errors += " " + _("e mais {count}").format(
+                    count=len(self._manual_import_errors) - 3
+                )
+            message += " " + _("Revê: {errors}.").format(errors=shown_errors)
+        message += " " + _("Nenhum ficheiro foi substituído ou apagado.")
         self._reset_manual_import_state()
         self.main_window.inbox_page.set_import_status(message)
         self._refresh()
-        self.tray.notify("Importação de Downloads concluída", message)
+        self.tray.notify(_("Importação de Downloads concluída"), message)
 
     def _adopt_untracked_file(self, finding: ReconciliationFinding) -> None:
         if finding.reason is not FindingReason.UNTRACKED_SUBJECT_FILE:
@@ -459,12 +485,12 @@ class AppController(QObject):
         try:
             document = adopt_untracked_subject_file(self.config, self.database, finding)
         except (LookupError, ValueError, OSError, sqlite3.Error) as exc:
-            QMessageBox.warning(self.main_window, "Não foi possível adotar", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível adotar"), str(exc))
             self._refresh_reconciliation_report()
             return
         self.indexer.submit(document)
         self.main_window.inbox_page.set_import_status(
-            f"{document.current_path.name} foi adotado sem mover o ficheiro."
+            _("{name} foi adotado sem mover o ficheiro.").format(name=document.current_path.name)
         )
         self._refresh_reconciliation_report()
 
@@ -473,10 +499,12 @@ class AppController(QObject):
             return
         answer = QMessageBox.question(
             self.main_window,
-            "Remover registo em falta?",
-            "Será removido apenas o registo local e o índice de pesquisa. "
-            "Nenhum ficheiro será apagado. Se o ficheiro reaparecer durante a operação, "
-            "ficará visível para poder ser adotado novamente.",
+            _("Remover registo em falta?"),
+            _(
+                "Será removido apenas o registo local e o índice de pesquisa. "
+                "Nenhum ficheiro será apagado. Se o ficheiro reaparecer durante a operação, "
+                "ficará visível para poder ser adotado novamente."
+            ),
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
             QMessageBox.StandardButton.Cancel,
         )
@@ -486,14 +514,14 @@ class AppController(QObject):
             removed = drop_missing_document(self.database, finding.document)
         except sqlite3.Error as exc:
             LOGGER.exception("Could not drop missing catalog record")
-            QMessageBox.warning(self.main_window, "Não foi possível remover", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível remover"), str(exc))
             self._refresh_reconciliation_report()
             return
         if not removed:
             QMessageBox.information(
                 self.main_window,
-                "Registo mantido",
-                "O ficheiro ou o registo mudou desde a verificação. Nada foi removido.",
+                _("Registo mantido"),
+                _("O ficheiro ou o registo mudou desde a verificação. Nada foi removido."),
             )
         self._refresh_reconciliation_report()
 
@@ -501,11 +529,11 @@ class AppController(QObject):
         try:
             dismissed = dismiss_finding(self.database, finding)
         except sqlite3.Error as exc:
-            QMessageBox.warning(self.main_window, "Não foi possível guardar", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível guardar"), str(exc))
             return
         if dismissed:
             self.main_window.inbox_page.set_import_status(
-                "A ocorrência foi marcada como revista. O ficheiro não foi alterado."
+                _("A ocorrência foi marcada como revista. O ficheiro não foi alterado.")
             )
             self._refresh_reconciliation_report()
 
@@ -516,9 +544,11 @@ class AppController(QObject):
             return
         answer = QMessageBox.question(
             self.main_window,
-            "Remover do catálogo?",
-            f"{document.current_path.name} deixará de aparecer na pesquisa e nos recentes. "
-            "O ficheiro permanecerá exatamente onde está.",
+            _("Remover do catálogo?"),
+            _(
+                "{name} deixará de aparecer na pesquisa e nos recentes. "
+                "O ficheiro permanecerá exatamente onde está."
+            ).format(name=document.current_path.name),
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
             QMessageBox.StandardButton.Cancel,
         )
@@ -528,18 +558,20 @@ class AppController(QObject):
             removed = unregister_adopted_document(self.database, document)
         except sqlite3.Error as exc:
             LOGGER.exception("Could not unregister adopted file")
-            QMessageBox.warning(self.main_window, "Não foi possível remover", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível remover"), str(exc))
             self._refresh_reconciliation_report()
             return
         if not removed:
             QMessageBox.information(
                 self.main_window,
-                "Registo mantido",
-                "O registo mudou desde que a página foi aberta. Nada foi removido.",
+                _("Registo mantido"),
+                _("O registo mudou desde que a página foi aberta. Nada foi removido."),
             )
         else:
             self.main_window.inbox_page.set_import_status(
-                f"{document.current_path.name} saiu do catálogo; o ficheiro ficou no lugar."
+                _("{name} saiu do catálogo; o ficheiro ficou no lugar.").format(
+                    name=document.current_path.name
+                )
             )
         self._refresh_reconciliation_report()
 
@@ -549,7 +581,7 @@ class AppController(QObject):
             visible_findings(self.database, report)
         except sqlite3.Error as exc:
             LOGGER.exception("Could not refresh reconciliation findings")
-            QMessageBox.warning(self.main_window, "Verificação incompleta", str(exc))
+            QMessageBox.warning(self.main_window, _("Verificação incompleta"), str(exc))
             return
         self.main_window.inbox_page.set_reconciliation_report(report)
         self._refresh()
@@ -610,9 +642,11 @@ class AppController(QObject):
         self.indexer.submit(document)
         subject = self.database.get_subject(subject_id)
         self.tray.notify(
-            "Ficheiro organizado",
-            f"{document.current_path.name} foi guardado em "
-            f"{subject.name if subject else kind} / {kind}.",
+            _("Ficheiro organizado"),
+            _("{name} foi guardado em {destination}.").format(
+                name=document.current_path.name,
+                destination=f"{subject.name if subject else kind} / {kind}",
+            ),
         )
         self._refresh()
         QTimer.singleShot(120, self._show_next_prompt)
@@ -647,7 +681,7 @@ class AppController(QObject):
                 self._show_next_prompt()
                 self.prompt.show_error(str(exc))
             else:
-                QMessageBox.warning(self.main_window, "Não foi possível devolver", str(exc))
+                QMessageBox.warning(self.main_window, _("Não foi possível devolver"), str(exc))
             return
         finally:
             if watcher is not None and destination is not None:
@@ -656,7 +690,10 @@ class AppController(QObject):
                 watcher.set_paused(False)
         if destination is None:  # pragma: no cover - success assigns a path
             return
-        self.tray.notify("Ficheiro devolvido", f"{destination.name} voltou para Downloads.")
+        self.tray.notify(
+            _("Ficheiro devolvido"),
+            _("{name} voltou para Downloads.").format(name=destination.name),
+        )
         self._refresh()
         QTimer.singleShot(120, self._show_next_prompt)
 
@@ -668,18 +705,21 @@ class AppController(QObject):
         try:
             item = self.filer.undo_latest_filing()
         except FilingError as exc:
-            QMessageBox.warning(self.main_window, "Não foi possível desfazer", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível desfazer"), str(exc))
             return
         if item is None:
-            self.tray.notify("Nada para desfazer", "Ainda não existe uma organização reversível.")
+            self.tray.notify(
+                _("Nada para desfazer"),
+                _("Ainda não existe uma organização reversível."),
+            )
             return
         subjects = self.database.list_subjects()
         guess = self._filing_guess(item.original_name, subjects)
         self.database.update_inbox_suggestion(item.id, guess.subject_id, guess.kind)
         self.prompt_queue.appendleft(item.id)
         self.tray.notify(
-            "Organização desfeita",
-            f"{item.path.name} voltou à Caixa de Entrada.",
+            _("Organização desfeita"),
+            _("{name} voltou à Caixa de Entrada.").format(name=item.path.name),
         )
         self._refresh()
         self._show_next_prompt()
@@ -699,8 +739,8 @@ class AppController(QObject):
         except (sqlite3.IntegrityError, OSError) as exc:
             QMessageBox.warning(
                 self.main_window,
-                "Não foi possível criar",
-                f"Já existe uma disciplina ou pasta com esse nome.\n\n{exc}",
+                _("Não foi possível criar"),
+                _("Já existe uma disciplina ou pasta com esse nome.\n\n{error}").format(error=exc),
             )
             return
         if not self.config.initialized:
@@ -726,8 +766,8 @@ class AppController(QObject):
         except sqlite3.IntegrityError as exc:
             QMessageBox.warning(
                 self.main_window,
-                "Não foi possível guardar",
-                f"Já existe uma disciplina com esse nome.\n\n{exc}",
+                _("Não foi possível guardar"),
+                _("Já existe uma disciplina com esse nome.\n\n{error}").format(error=exc),
             )
             return
         self._refresh()
@@ -736,8 +776,8 @@ class AppController(QObject):
         if self.database.count_subjects() <= 1:
             QMessageBox.information(
                 self.main_window,
-                "Mantém uma disciplina ativa",
-                "Cria outra disciplina antes de arquivar esta.",
+                _("Mantém uma disciplina ativa"),
+                _("Cria outra disciplina antes de arquivar esta."),
             )
             return
         subject = self.database.get_subject(subject_id)
@@ -745,9 +785,10 @@ class AppController(QObject):
             return
         answer = QMessageBox.question(
             self.main_window,
-            "Arquivar disciplina?",
-            f"{subject.name} deixa de aparecer nas escolhas. "
-            "Os ficheiros e tarefas não são apagados.",
+            _("Arquivar disciplina?"),
+            _(
+                "{name} deixa de aparecer nas escolhas. Os ficheiros e tarefas não são apagados."
+            ).format(name=subject.name),
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
             QMessageBox.StandardButton.Cancel,
         )
@@ -763,17 +804,20 @@ class AppController(QObject):
         if conflicts:
             QMessageBox.warning(
                 self.main_window,
-                "Não foi possível restaurar",
-                "Já existe uma disciplina ativa com o mesmo nome ou pasta: "
-                + ", ".join(conflicts)
-                + ". Edita-a primeiro para libertar o nome.",
+                _("Não foi possível restaurar"),
+                _(
+                    "Já existe uma disciplina ativa com o mesmo nome ou pasta: {names}. "
+                    "Edita-a primeiro para libertar o nome."
+                ).format(names=", ".join(conflicts)),
             )
             return
         answer = QMessageBox.question(
             self.main_window,
-            "Reativar disciplina?",
-            f"{subject.name} volta a aparecer nas escolhas de arquivo. "
-            "Os ficheiros e tarefas não foram alterados.",
+            _("Reativar disciplina?"),
+            _(
+                "{name} volta a aparecer nas escolhas de arquivo. "
+                "Os ficheiros e tarefas não foram alterados."
+            ).format(name=subject.name),
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
             QMessageBox.StandardButton.Cancel,
         )
@@ -783,7 +827,7 @@ class AppController(QObject):
             restored = self.database.set_subject_active(subject_id, True)
             self.filer.ensure_subject_structure(restored)
         except (sqlite3.Error, OSError) as exc:
-            QMessageBox.warning(self.main_window, "Não foi possível restaurar", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível restaurar"), str(exc))
             return
         self._refresh()
 
@@ -845,7 +889,10 @@ class AppController(QObject):
             filed += 1
             if create_task:
                 self.database.add_task(
-                    f"Rever {Path(item.original_name).stem}", subject_id, due_date, document.id
+                    _("Rever {name}").format(name=Path(item.original_name).stem),
+                    subject_id,
+                    due_date,
+                    document.id,
                 )
             self.indexer.submit(document)
         self.prompt_queue = deque(item for item in self.prompt_queue if item not in handled)
@@ -854,15 +901,20 @@ class AppController(QObject):
         if failures:
             shown = "; ".join(failures[:3])
             if len(failures) > 3:
-                shown += f"; e mais {len(failures) - 3}"
+                shown += " " + _("e mais {count}").format(count=len(failures) - 3)
             message = (
-                f"{filed} organizado{'s' if filed != 1 else ''}, "
-                f"{len(failures)} com erro. Revê: {shown}."
-            )
+                _("{count} organizados, {failed} com erro. Revê: {errors}.")
+                if filed != 1
+                else _("{count} organizado, {failed} com erro. Revê: {errors}.")
+            ).format(count=filed, failed=len(failures), errors=shown)
         else:
-            message = f"{filed} organizado{'s' if filed != 1 else ''}."
-        message += " Nenhum ficheiro foi substituído ou apagado. "
-        message += "Só a organização mais recente pode ser desfeita."
+            message = (
+                _("{count} organizados.").format(count=filed)
+                if filed != 1
+                else _("{count} organizado.").format(count=filed)
+            )
+        message += " " + _("Nenhum ficheiro foi substituído ou apagado. ")
+        message += _("Só a organização mais recente pode ser desfeita.")
         self.main_window.inbox_page.set_import_status(message)
         self._refresh()
 
@@ -871,7 +923,7 @@ class AppController(QObject):
             self.watcher is not None and self.watcher.manual_import_running
         ):
             self.main_window.settings_page.set_status(
-                "Espera que a importação de Downloads termine antes de guardar.",
+                _("Espera que a importação de Downloads termine antes de guardar."),
                 error=True,
             )
             return
@@ -888,6 +940,7 @@ class AppController(QObject):
             self.config.reminder_lead_days = int(values["reminder_lead_days"])
             self.config.filename_template = str(values["filename_template"])
             self.config.theme = str(values["theme"])
+            self.config.language = str(values["language"])
             self.config.watch_enabled = bool(values["watch_enabled"])
             desired_startup = bool(values["launch_at_login"])
             self.config.launch_at_login = desired_startup
@@ -911,7 +964,7 @@ class AppController(QObject):
             apply_theme(application, get_theme(self.config.theme))
         self._restart_watcher()
         self.main_window.settings_page.load_config(self.config)
-        self.main_window.settings_page.set_status("Definições guardadas.")
+        self.main_window.settings_page.set_status(_("Definições guardadas."))
         self._refresh()
 
     def _reset_manual_import_state(self) -> None:
@@ -934,6 +987,7 @@ class AppController(QObject):
         self.config.reminder_lead_days = previous.reminder_lead_days
         self.config.filename_template = previous.filename_template
         self.config.theme = previous.theme
+        self.config.language = previous.language
         self.config.initialized = previous.initialized
 
     def _set_paused(self, paused: bool) -> None:
@@ -964,8 +1018,11 @@ class AppController(QObject):
             delta = (task.due_date - today).days
             if delta > lead:
                 continue
-            subject = task.subject_name or "Tarefa geral"
-            self.tray.notify(subject, f"{task.title} {_deadline_copy(delta)}.")
+            subject = task.subject_name or _("Tarefa geral")
+            self.tray.notify(
+                subject,
+                _("{title} {when}.").format(title=task.title, when=_deadline_copy(delta)),
+            )
             self.database.mark_task_notified(task.id, today)
 
     def _index_finished(self, file_id: int, error: str) -> None:
@@ -980,8 +1037,8 @@ class AppController(QObject):
             return
         self.hide_notice_shown = True
         self.tray.notify(
-            "Organizador continua ativo",
-            "A janela fechou, mas Downloads continua a ser vigiado no tabuleiro do sistema.",
+            _("Organizador continua ativo"),
+            _("A janela fechou, mas Downloads continua a ser vigiado no tabuleiro do sistema."),
         )
 
     def _open_path(self, value: Path | str) -> None:
@@ -989,14 +1046,14 @@ class AppController(QObject):
         if not path.exists():
             QMessageBox.warning(
                 self.main_window,
-                "Caminho não encontrado",
-                f"Não foi possível encontrar:\n{path}",
+                _("Caminho não encontrado"),
+                _("Não foi possível encontrar:\n{path}").format(path=path),
             )
             return
         try:
             os.startfile(path)
         except OSError as exc:
-            QMessageBox.warning(self.main_window, "Não foi possível abrir", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível abrir"), str(exc))
 
     def _reveal_path(self, value: Path | str) -> None:
         path = Path(value)
@@ -1006,4 +1063,4 @@ class AppController(QObject):
         try:
             subprocess.Popen(["explorer.exe", "/select,", str(path)])
         except OSError as exc:
-            QMessageBox.warning(self.main_window, "Não foi possível mostrar", str(exc))
+            QMessageBox.warning(self.main_window, _("Não foi possível mostrar"), str(exc))

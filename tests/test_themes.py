@@ -99,6 +99,7 @@ def test_theme_round_trips_through_settings(
         "prompt_timeout_seconds": 45,
         "reminder_lead_days": 2,
         "theme": "claro",
+        "language": "pt",
         "watch_enabled": True,
         "launch_at_login": False,
     }
@@ -111,6 +112,7 @@ def test_theme_round_trips_through_settings(
     assert reloaded.theme == "claro"
 
     payload["theme"] = "escuro"
+    payload["language"] = "pt"
     controller._save_settings(payload)
 
     assert ui_theme.current().id == "escuro"

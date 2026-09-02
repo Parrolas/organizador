@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from organizador.i18n import _
+
 
 def button(text: str, *, variant: str = "default") -> QPushButton:
     """Create a consistently styled action button."""
@@ -167,6 +169,6 @@ class PathActionRow(QFrame):
         copy.addWidget(title_label)
         copy.addWidget(label(detail, "Muted"))
         row.addLayout(copy, 1)
-        open_button = button("Abrir", variant="quiet")
+        open_button = button(_("Abrir"), variant="quiet")
         open_button.clicked.connect(lambda: open_callback(path))
         row.addWidget(open_button)

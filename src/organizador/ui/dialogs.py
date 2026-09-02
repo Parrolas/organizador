@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from organizador.config import AppConfig
 from organizador.db import Database
 from organizador.filer import FilingService, render_final_name
+from organizador.i18n import _
 from organizador.models import FILE_KINDS, FiledDocument, InboxItem, StudyTask, Subject
 from organizador.ui import theme as ui_theme
 from organizador.ui.widgets import button, format_size, label
@@ -46,7 +47,7 @@ class SubjectDialog(QDialog):
         super().__init__(parent)
         self.subject = subject
         self.color = subject.color if subject else ui_theme.current().teal
-        self.setWindowTitle("Editar disciplina" if subject else "Nova disciplina")
+        self.setWindowTitle(_("Editar disciplina") if subject else _("Nova disciplina"))
         self.setModal(True)
         self.setMinimumWidth(520)
 
@@ -54,11 +55,11 @@ class SubjectDialog(QDialog):
         root.setContentsMargins(28, 26, 28, 24)
         root.setSpacing(18)
         root.addWidget(
-            label("Editar disciplina" if subject else "Adicionar disciplina", "PageTitle")
+            label(_("Editar disciplina") if subject else _("Adicionar disciplina"), "PageTitle")
         )
         root.addWidget(
             label(
-                "As palavras-chave ajudam a reconhecer ficheiros pelo nome.",
+                _("As palavras-chave ajudam a reconhecer ficheiros pelo nome."),
                 "PageSubtitle",
             )
         )
@@ -67,19 +68,19 @@ class SubjectDialog(QDialog):
         form.setHorizontalSpacing(18)
         form.setVerticalSpacing(14)
         self.name_edit = QLineEdit(subject.name if subject else "")
-        self.name_edit.setPlaceholderText("Ex.: Cálculo I")
+        self.name_edit.setPlaceholderText(_("Ex.: Cálculo I"))
         self.code_edit = QLineEdit(subject.code if subject else "")
-        self.code_edit.setPlaceholderText("Ex.: MAT101")
+        self.code_edit.setPlaceholderText(_("Ex.: MAT101"))
         self.keywords_edit = QLineEdit(", ".join(subject.keywords) if subject else "")
-        self.keywords_edit.setPlaceholderText("Ex.: cálculo, derivadas, integrais")
+        self.keywords_edit.setPlaceholderText(_("Ex.: cálculo, derivadas, integrais"))
         self.color_button = QPushButton()
         self.color_button.setMinimumWidth(120)
         self.color_button.clicked.connect(self._choose_color)
         self._update_color_button()
-        form.addRow("Nome", self.name_edit)
-        form.addRow("Código", self.code_edit)
-        form.addRow("Palavras-chave", self.keywords_edit)
-        form.addRow("Cor", self.color_button)
+        form.addRow(_("Nome"), self.name_edit)
+        form.addRow(_("Código"), self.code_edit)
+        form.addRow(_("Palavras-chave"), self.keywords_edit)
+        form.addRow(_("Cor"), self.color_button)
         root.addLayout(form)
 
         self.error_label = label("", "ErrorText")
@@ -88,9 +89,9 @@ class SubjectDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        cancel = button("Cancelar")
+        cancel = button(_("Cancelar"))
         cancel.clicked.connect(self.reject)
-        save = button("Guardar disciplina", variant="primary")
+        save = button(_("Guardar disciplina"), variant="primary")
         save.clicked.connect(self._validate)
         actions.addWidget(cancel)
         actions.addWidget(save)
@@ -107,7 +108,7 @@ class SubjectDialog(QDialog):
         return self.name_edit.text().strip(), self.code_edit.text().strip(), self.color, keywords
 
     def _choose_color(self) -> None:
-        selected = QColorDialog.getColor(QColor(self.color), self, "Cor da disciplina")
+        selected = QColorDialog.getColor(QColor(self.color), self, _("Cor da disciplina"))
         if selected.isValid():
             self.color = selected.name()
             self._update_color_button()
@@ -131,7 +132,7 @@ class SubjectDialog(QDialog):
 
     def _validate(self) -> None:
         if not self.name_edit.text().strip():
-            self.error_label.setText("Escreve o nome da disciplina para continuar.")
+            self.error_label.setText(_("Escreve o nome da disciplina para continuar."))
             self.name_edit.setFocus()
             return
         self.accept()
@@ -147,33 +148,37 @@ class TaskDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Editar tarefa")
+        self.setWindowTitle(_("Editar tarefa"))
         self.setModal(True)
         self.setMinimumWidth(500)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 26, 28, 24)
         root.setSpacing(18)
-        root.addWidget(label("Editar tarefa", "PageTitle"))
+        root.addWidget(label(_("Editar tarefa"), "PageTitle"))
 
         form = QFormLayout()
         form.setHorizontalSpacing(18)
         form.setVerticalSpacing(14)
 
         self.title_edit = QLineEdit(task.title)
-        self.title_edit.setAccessibleName("Título da tarefa")
-        form.addRow("Tarefa", self.title_edit)
+        self.title_edit.setAccessibleName(_("Título da tarefa"))
+        form.addRow(_("Tarefa"), self.title_edit)
 
         self.subject_combo = QComboBox()
         for subject in subjects:
-            name = subject.name if subject.active else f"{subject.name} (arquivada)"
+            name = (
+                subject.name
+                if subject.active
+                else _("{name} (arquivada)").format(name=subject.name)
+            )
             self.subject_combo.addItem(name, subject.id)
         current = self.subject_combo.findData(task.subject_id)
         if current >= 0:
             self.subject_combo.setCurrentIndex(current)
-        form.addRow("Disciplina", self.subject_combo)
+        form.addRow(_("Disciplina"), self.subject_combo)
 
-        self.due_check = QCheckBox("Prazo")
+        self.due_check = QCheckBox(_("Prazo"))
         self.due_edit = QDateEdit()
         self.due_edit.setCalendarPopup(True)
         self.due_edit.setDisplayFormat("dd/MM/yyyy")
@@ -189,22 +194,22 @@ class TaskDialog(QDialog):
         due_row.addWidget(self.due_check)
         due_row.addWidget(self.due_edit)
         due_row.addStretch(1)
-        form.addRow("Prazo", due_row)
+        form.addRow(_("Prazo"), due_row)
 
         self.reminder_combo = QComboBox()
         self._reminder_choices: tuple[tuple[int | None, str], ...] = (
-            (None, "Padrão das Definições"),
-            (0, "No dia"),
-            (1, "1 dia antes"),
-            (2, "2 dias antes"),
-            (3, "3 dias antes"),
-            (7, "1 semana antes"),
+            (None, _("Padrão das Definições")),
+            (0, _("No dia")),
+            (1, _("1 dia antes")),
+            (2, _("2 dias antes")),
+            (3, _("3 dias antes")),
+            (7, _("1 semana antes")),
         )
         for value, text in self._reminder_choices:
             self.reminder_combo.addItem(text, value)
         lead_index = self.reminder_combo.findData(task.reminder_lead_days)
         self.reminder_combo.setCurrentIndex(lead_index if lead_index >= 0 else 0)
-        form.addRow("Aviso", self.reminder_combo)
+        form.addRow(_("Aviso"), self.reminder_combo)
         root.addLayout(form)
 
         self.error_label = label("", "ErrorText")
@@ -213,9 +218,9 @@ class TaskDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        cancel = button("Cancelar")
+        cancel = button(_("Cancelar"))
         cancel.clicked.connect(self.reject)
-        save = button("Guardar tarefa", variant="primary")
+        save = button(_("Guardar tarefa"), variant="primary")
         save.clicked.connect(self._validate)
         actions.addWidget(cancel)
         actions.addWidget(save)
@@ -236,7 +241,7 @@ class TaskDialog(QDialog):
 
     def _validate(self) -> None:
         if not self.title_edit.text().strip():
-            self.error_label.setText("Escreve o título da tarefa para continuar.")
+            self.error_label.setText(_("Escreve o título da tarefa para continuar."))
             self.title_edit.setFocus()
             return
         self.accept()
@@ -256,7 +261,7 @@ class OnboardingDialog(QDialog):
         self.config = config
         self.database = database
         self.filer = filer
-        self.setWindowTitle("Preparar o Organizador")
+        self.setWindowTitle(_("Preparar o Organizador"))
         self.setModal(True)
         self.setMinimumSize(820, 540)
 
@@ -270,26 +275,31 @@ class OnboardingDialog(QDialog):
         statement_layout = QVBoxLayout(statement)
         statement_layout.setContentsMargins(32, 38, 32, 34)
         statement_layout.setSpacing(14)
-        brand = label("Organizador", "Brand")
+        brand = label(_("Organizador"), "Brand")
         statement_layout.addWidget(brand)
-        promise = QLabel("Downloads arrumados\nantes de se perderem.")
+        promise = QLabel(_("Downloads arrumados\nantes de se perderem."))
+        tokens = ui_theme.current()
         promise.setStyleSheet(
-            f"color: {ui_theme.current().sidebar_text_active}; font-size: 27px; font-weight: 700;"
+            f"color: {tokens.sidebar_text_active}; font-size: 27px; font-weight: 700;"
         )
         promise.setWordWrap(True)
         statement_layout.addWidget(promise)
         explanation = QLabel(
-            "Os ficheiros elegíveis passam primeiro por uma Caixa de Entrada segura. "
-            "Tu confirmas a disciplina e nada é substituído."
+            _(
+                "Os ficheiros elegíveis passam primeiro por uma Caixa de Entrada segura. "
+                "Tu confirmas a disciplina e nada é substituído."
+            )
         )
         explanation.setStyleSheet(
-            f"color: {ui_theme.current().onboarding_text}; font-size: 14px; line-height: 1.4;"
+            f"color: {tokens.onboarding_text}; font-size: 14px; line-height: 1.4;"
         )
         explanation.setWordWrap(True)
         statement_layout.addWidget(explanation)
         statement_layout.addStretch(1)
-        privacy = QLabel("Tudo fica neste computador. Nenhum documento é enviado para a internet.")
-        privacy.setStyleSheet(f"color: {ui_theme.current().onboarding_muted}; font-size: 12px;")
+        privacy = QLabel(
+            _("Tudo fica neste computador. Nenhum documento é enviado para a internet.")
+        )
+        privacy.setStyleSheet(f"color: {tokens.onboarding_muted}; font-size: 12px;")
         privacy.setWordWrap(True)
         statement_layout.addWidget(privacy)
         outer.addWidget(statement)
@@ -299,9 +309,9 @@ class OnboardingDialog(QDialog):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(38, 34, 38, 30)
         content_layout.setSpacing(18)
-        content_layout.addWidget(label("Escolhe o teu ponto de partida", "PageTitle"))
+        content_layout.addWidget(label(_("Escolhe o teu ponto de partida"), "PageTitle"))
         subtitle = label(
-            "Podes alterar estas opções depois. Começa por criar uma disciplina.",
+            _("Podes alterar estas opções depois. Começa por criar uma disciplina."),
             "PageSubtitle",
         )
         subtitle.setWordWrap(True)
@@ -313,24 +323,24 @@ class OnboardingDialog(QDialog):
 
         folder_row = QHBoxLayout()
         self.root_edit = QLineEdit(str(config.university_root))
-        choose = button("Escolher…")
+        choose = button(_("Escolher…"))
         choose.clicked.connect(self._choose_folder)
         folder_row.addWidget(self.root_edit, 1)
         folder_row.addWidget(choose)
-        form.addRow("Pasta Universidade", folder_row)
+        form.addRow(_("Pasta Universidade"), folder_row)
 
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Ex.: Cálculo I")
+        self.name_edit.setPlaceholderText(_("Ex.: Cálculo I"))
         self.code_edit = QLineEdit()
-        self.code_edit.setPlaceholderText("Ex.: MAT101 (opcional)")
+        self.code_edit.setPlaceholderText(_("Ex.: MAT101 (opcional)"))
         self.keywords_edit = QLineEdit()
-        self.keywords_edit.setPlaceholderText("Ex.: cálculo, derivadas, integrais")
-        form.addRow("Primeira disciplina", self.name_edit)
-        form.addRow("Código", self.code_edit)
-        form.addRow("Palavras-chave", self.keywords_edit)
+        self.keywords_edit.setPlaceholderText(_("Ex.: cálculo, derivadas, integrais"))
+        form.addRow(_("Primeira disciplina"), self.name_edit)
+        form.addRow(_("Código"), self.code_edit)
+        form.addRow(_("Palavras-chave"), self.keywords_edit)
         content_layout.addLayout(form)
 
-        self.watch_check = QCheckBox("Começar a vigiar Downloads depois da configuração")
+        self.watch_check = QCheckBox(_("Começar a vigiar Downloads depois da configuração"))
         self.watch_check.setChecked(config.watch_enabled)
         content_layout.addWidget(self.watch_check)
         self.error_label = label("", "ErrorText")
@@ -340,7 +350,7 @@ class OnboardingDialog(QDialog):
 
         action_row = QHBoxLayout()
         action_row.addStretch(1)
-        finish = button("Criar a minha organização", variant="primary")
+        finish = button(_("Criar a minha organização"), variant="primary")
         finish.setMinimumWidth(210)
         finish.clicked.connect(self._finish)
         action_row.addWidget(finish)
@@ -353,9 +363,11 @@ class OnboardingDialog(QDialog):
 
         answer = QMessageBox.question(
             self,
-            "Sair da configuração?",
-            "Sem uma disciplina, a app não começa a mover downloads. "
-            "Podes voltar a configurar depois.",
+            _("Sair da configuração?"),
+            _(
+                "Sem uma disciplina, a app não começa a mover downloads. "
+                "Podes voltar a configurar depois."
+            ),
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
             QMessageBox.StandardButton.Cancel,
         )
@@ -364,7 +376,7 @@ class OnboardingDialog(QDialog):
 
     def _choose_folder(self) -> None:
         selected = QFileDialog.getExistingDirectory(
-            self, "Escolher pasta Universidade", self.root_edit.text()
+            self, _("Escolher pasta Universidade"), self.root_edit.text()
         )
         if selected:
             self.root_edit.setText(selected)
@@ -373,8 +385,12 @@ class OnboardingDialog(QDialog):
         name = self.name_edit.text().strip()
         root = Path(self.root_edit.text().strip()).expanduser()
         if not name:
-            self.error_label.setText("Escreve o nome da primeira disciplina.")
+            self.error_label.setText(_("Escreve o nome da primeira disciplina."))
             self.name_edit.setFocus()
+            return
+        if not str(root).strip():
+            self.error_label.setText(_("Escolhe uma pasta para a Universidade."))
+            self.root_edit.setFocus()
             return
         if not str(root).strip():
             self.error_label.setText("Escolhe uma pasta para a Universidade.")
@@ -428,17 +444,26 @@ class BulkFilingDialog(QDialog):
         self.subjects = tuple(subjects)
         self.name_template = name_template
         count = len(self.items)
-        self.setWindowTitle("Organizar seleção")
+        self.setWindowTitle(_("Organizar seleção"))
         self.setModal(True)
         self.setMinimumWidth(600)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 26, 28, 24)
         root.setSpacing(14)
-        root.addWidget(label(f"Organizar {count} ficheiro{'s' if count != 1 else ''}", "PageTitle"))
+        root.addWidget(
+            label(
+                _("Organizar {count} ficheiro").format(count=count)
+                if count == 1
+                else _("Organizar {count} ficheiros").format(count=count),
+                "PageTitle",
+            )
+        )
         subtitle = label(
-            "Todos vão para a mesma disciplina e tipo. Cada ficheiro mantém o seu "
-            "próprio histórico; só a última organização pode ser desfeita.",
+            _(
+                "Todos vão para a mesma disciplina e tipo. Cada ficheiro mantém o seu "
+                "próprio histórico; só a última organização pode ser desfeita."
+            ),
             "PageSubtitle",
         )
         subtitle.setWordWrap(True)
@@ -452,16 +477,16 @@ class BulkFilingDialog(QDialog):
         for subject in self.subjects:
             self.subject_combo.addItem(subject.name, subject.id)
         self.subject_combo.currentIndexChanged.connect(self._update_preview)
-        form.addRow("Disciplina", self.subject_combo)
+        form.addRow(_("Disciplina"), self.subject_combo)
 
         self.type_combo = QComboBox()
         for kind in FILE_KINDS:
             self.type_combo.addItem(kind, kind)
         self.type_combo.setCurrentIndex(self.type_combo.findData("Slides"))
         self.type_combo.currentIndexChanged.connect(self._update_preview)
-        form.addRow("Tipo", self.type_combo)
+        form.addRow(_("Tipo"), self.type_combo)
 
-        self.task_check = QCheckBox("Criar tarefa para cada ficheiro")
+        self.task_check = QCheckBox(_("Criar tarefa para cada ficheiro"))
         self.due_edit = QDateEdit()
         self.due_edit.setCalendarPopup(True)
         self.due_edit.setDisplayFormat("dd/MM/yyyy")
@@ -470,10 +495,10 @@ class BulkFilingDialog(QDialog):
         fallback = date.today() + timedelta(days=7)
         self.due_edit.setDate(QDate(fallback.year, fallback.month, fallback.day))
         form.addRow(self.task_check)
-        form.addRow("Prazo das tarefas", self.due_edit)
+        form.addRow(_("Prazo das tarefas"), self.due_edit)
         root.addLayout(form)
 
-        root.addWidget(label("Nomes finais", "RowTitle"))
+        root.addWidget(label(_("Nomes finais"), "RowTitle"))
         self.preview_label = label("", "Muted")
         self.preview_label.setWordWrap(True)
         self.preview_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -485,9 +510,14 @@ class BulkFilingDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        cancel = button("Cancelar")
+        cancel = button(_("Cancelar"))
         cancel.clicked.connect(self.reject)
-        accept = button(f"Organizar {count} ficheiro{'s' if count != 1 else ''}", variant="primary")
+        accept = button(
+            _("Organizar {count} ficheiro").format(count=count)
+            if count == 1
+            else _("Organizar {count} ficheiros").format(count=count),
+            variant="primary",
+        )
         accept.clicked.connect(self.accept)
         actions.addWidget(cancel)
         actions.addWidget(accept)
@@ -548,7 +578,7 @@ class SubjectFilesDialog(QDialog):
         self.subject = subject
         self.documents = tuple(documents)
         self.folder_path = folder_path
-        self.setWindowTitle(f"Ficheiros de {subject.name}")
+        self.setWindowTitle(_("Ficheiros de {name}").format(name=subject.name))
         self.setModal(True)
         self.setMinimumSize(620, 540)
 
@@ -561,7 +591,11 @@ class SubjectFilesDialog(QDialog):
         total_bytes = sum(document.size for document in self.documents)
         root.addWidget(
             label(
-                f"{count} ficheiro{'s' if count != 1 else ''} · {format_size(total_bytes)}",
+                _("{count} ficheiro · {size}").format(count=count, size=format_size(total_bytes))
+                if count == 1
+                else _("{count} ficheiros · {size}").format(
+                    count=count, size=format_size(total_bytes)
+                ),
                 "PageSubtitle",
             )
         )
@@ -581,7 +615,7 @@ class SubjectFilesDialog(QDialog):
         list_layout.setSpacing(8)
         if not self.documents:
             empty = label(
-                "Ainda não há ficheiros organizados nesta disciplina.",
+                _("Ainda não há ficheiros organizados nesta disciplina."),
                 "Muted",
             )
             empty.setWordWrap(True)
@@ -594,11 +628,11 @@ class SubjectFilesDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        folder_button = button("Abrir pasta", variant="quiet")
+        folder_button = button(_("Abrir pasta"), variant="quiet")
         folder_button.clicked.connect(
             lambda checked=False: self.open_requested.emit(self.folder_path)
         )
-        close = button("Fechar")
+        close = button(_("Fechar"))
         close.clicked.connect(self.reject)
         actions.addWidget(folder_button)
         actions.addWidget(close)
@@ -617,13 +651,16 @@ class SubjectFilesDialog(QDialog):
         copy.addWidget(name)
         copy.addWidget(
             label(
-                f"{document.kind} · {format_size(document.size)} · "
-                f"organizado {document.filed_at.strftime('%d/%m/%Y')}",
+                _("{kind} · {size} · organizado {date}").format(
+                    kind=document.kind,
+                    size=format_size(document.size),
+                    date=document.filed_at.strftime("%d/%m/%Y"),
+                ),
                 "Muted",
             )
         )
         row_layout.addLayout(copy, 1)
-        open_button = button("Abrir", variant="quiet")
+        open_button = button(_("Abrir"), variant="quiet")
         open_button.clicked.connect(
             lambda checked=False, path=document.current_path: self.open_requested.emit(path)
         )
