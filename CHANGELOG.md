@@ -2,6 +2,16 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.6.0 - 2026-09-02
+
+### Added
+
+- Automatic updates: the packaged app checks GitHub for a newer release on
+  launch (toggleable in Definições). When one exists, a tray notification and
+  an "Instalar atualização" menu item appear; one click downloads, verifies
+  the SHA-256, swaps the app folder and relaunches. The previous version is
+  kept as a rollback folder until the new one starts successfully.
+
 ## 0.5.0 - 2026-09-02
 
 ### Added

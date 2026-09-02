@@ -107,6 +107,7 @@ class AppConfig:
     filename_template: str = DEFAULT_FILENAME_TEMPLATE
     theme: str = DEFAULT_THEME
     language: str = DEFAULT_LANGUAGE
+    check_updates_on_launch: bool = True
     initialized: bool = False
 
     @property
@@ -239,6 +240,7 @@ class AppConfig:
                 filename_template=_str_setting(raw, "filename_template", DEFAULT_FILENAME_TEMPLATE),
                 theme=_str_setting(raw, "theme", DEFAULT_THEME),
                 language=_str_setting(raw, "language", DEFAULT_LANGUAGE),
+                check_updates_on_launch=_bool_setting(raw, "check_updates_on_launch", True),
                 initialized=_bool_setting(raw, "initialized", False),
             )
             config.validate()

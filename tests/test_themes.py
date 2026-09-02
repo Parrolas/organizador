@@ -100,6 +100,7 @@ def test_theme_round_trips_through_settings(
         "reminder_lead_days": 2,
         "theme": "claro",
         "language": "pt",
+        "check_updates_on_launch": True,
         "watch_enabled": True,
         "launch_at_login": False,
     }

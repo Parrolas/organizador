@@ -81,7 +81,16 @@ aplicação nunca usa a base de dados como cópia dos documentos.
 
 ## Atualização e reversão
 
-Antes de atualizar:
+A app verifica automaticamente se existe uma versão nova no arranque (podes
+desativar isto nas Definições). Quando existe, aparece "Instalar atualização"
+no menu do tabuleiro; um clique transfere, verifica o SHA-256 publicado,
+substitui a pasta da aplicação e reinicia. Os teus dados ficam sempre em
+`%LOCALAPPDATA%\Organizador` e nunca são tocados pela atualização.
+
+A versão anterior é mantida numa pasta `Organizador.old` até o novo arranque
+correr com sucesso, servindo de reversão imediata se algo correr mal.
+
+Antes de atualizar manualmente:
 
 1. Usa **Sair** no ícone da área de notificação.
 2. Faz uma cópia de segurança de `%LOCALAPPDATA%\Organizador`.

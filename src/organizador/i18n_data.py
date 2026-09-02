@@ -546,6 +546,37 @@ EN_STRINGS: dict[str, str] = {
     "{subject}  ·  {kind}  ·  {size}": "{subject}  ·  {kind}  ·  {size}",
     "{subject} · {kind} · adotado sem mover": "{subject} · {kind} · adopted without moving",
     "{title} {when}.": "{title} {when}.",
+    "Procurar atualizações…": "Check for updates…",
+    "Instalar atualização {version}": "Install update {version}",
+    "Atualização disponível": "Update available",
+    "Organizador {version} está disponível. Escolhe “Instalar atualização” no menu do tabuleiro.": (
+        "Organizador {version} is available. Choose “Install update” in the tray menu."
+    ),
+    "A transferência da atualização falhou: {error}": "The update download failed: {error}",
+    "Não foi possível verificar a atualização: {error}": ("Could not verify the update: {error}"),
+    "A verificação da atualização falhou; o ficheiro foi descartado.": (
+        "The update verification failed; the file was discarded."
+    ),
+    "A atualização descarregada está corrompida.": "The downloaded update is corrupted.",
+    "A atualização não contém a aplicação completa.": (
+        "The update does not contain the complete application."
+    ),
+    "A instalar atualização…": "Installing update…",
+    "A transferir e a verificar Organizador {version}.": (
+        "Downloading and verifying Organizador {version}."
+    ),
+    "A reiniciar para aplicar a atualização…": "Restarting to apply the update…",
+    "Atualização falhou": "Update failed",
+    "Não foi possível instalar a atualização.": "Could not install the update.",
+    "A atualização só se aplica à versão instalada.": (
+        "Updates only apply to the installed version."
+    ),
+    "Sem atualizações nesta instalação": "No updates for this installation",
+    "A app está a correr em modo de desenvolvimento; as atualizações aplicam-se apenas à versão instalada.": (
+        "The app is running in development mode; updates only apply to the installed version."
+    ),
+    "Procurar atualizações automaticamente": "Check for updates automatically",
+    "Atualização pronta": "Update ready",
 }
 
 ES_STRINGS: dict[str, str] = {
@@ -1106,6 +1137,41 @@ ES_STRINGS: dict[str, str] = {
     "{subject}  ·  {kind}  ·  {size}": "{subject}  ·  {kind}  ·  {size}",
     "{subject} · {kind} · adotado sem mover": "{subject} · {kind} · adoptado sin mover",
     "{title} {when}.": "{title} {when}.",
+    "Procurar atualizações…": "Buscar actualizaciones…",
+    "Instalar atualização {version}": "Instalar actualización {version}",
+    "Atualização disponível": "Actualización disponible",
+    "Organizador {version} está disponível. Escolhe “Instalar atualização” no menu do tabuleiro.": (
+        "Organizador {version} está disponible. Elige «Instalar actualización» en el menú de la bandeja."
+    ),
+    "A transferência da atualização falhou: {error}": (
+        "La descarga de la actualización falló: {error}"
+    ),
+    "Não foi possível verificar a atualização: {error}": (
+        "No se pudo verificar la actualización: {error}"
+    ),
+    "A verificação da atualização falhou; o ficheiro foi descartado.": (
+        "La verificación de la actualización falló; el archivo fue descartado."
+    ),
+    "A atualização descarregada está corrompida.": "La actualización descargada está corrupta.",
+    "A atualização não contém a aplicação completa.": (
+        "La actualización no contiene la aplicación completa."
+    ),
+    "A instalar atualização…": "Instalando actualización…",
+    "A transferir e a verificar Organizador {version}.": (
+        "Descargando y verificando Organizador {version}."
+    ),
+    "A reiniciar para aplicar a atualização…": "Reiniciando para aplicar la actualización…",
+    "Atualização falhou": "Actualización fallida",
+    "Não foi possível instalar a atualização.": "No se pudo instalar la actualización.",
+    "A atualização só se aplica à versão instalada.": (
+        "Las actualizaciones solo se aplican a la versión instalada."
+    ),
+    "Sem atualizações nesta instalação": "Sin actualizaciones en esta instalación",
+    "A app está a correr em modo de desenvolvimento; as atualizações aplicam-se apenas à versão instalada.": (
+        "La app se ejecuta en modo de desarrollo; las actualizaciones solo se aplican a la versión instalada."
+    ),
+    "Procurar atualizações automaticamente": "Buscar actualizaciones automáticamente",
+    "Atualização pronta": "Actualización lista",
 }
 
 FR_STRINGS: dict[str, str] = {
@@ -1677,4 +1743,41 @@ FR_STRINGS: dict[str, str] = {
     "{subject}  ·  {kind}  ·  {size}": "{subject}  ·  {kind}  ·  {size}",
     "{subject} · {kind} · adotado sem mover": "{subject} · {kind} · adopté sans déplacement",
     "{title} {when}.": "{title} {when}.",
+    "Procurar atualizações…": "Rechercher des mises à jour…",
+    "Instalar atualização {version}": "Installer la mise à jour {version}",
+    "Atualização disponível": "Mise à jour disponible",
+    "Organizador {version} está disponível. Escolhe “Instalar atualização” no menu do tabuleiro.": (
+        "Organizador {version} est disponible. Choisis « Installer la mise à jour » "
+        "dans le menu de la zone de notification."
+    ),
+    "A transferência da atualização falhou: {error}": (
+        "Le téléchargement de la mise à jour a échoué : {error}"
+    ),
+    "Não foi possível verificar a atualização: {error}": (
+        "Impossible de vérifier la mise à jour : {error}"
+    ),
+    "A verificação da atualização falhou; o ficheiro foi descartado.": (
+        "La vérification de la mise à jour a échoué ; le fichier a été écarté."
+    ),
+    "A atualização descarregada está corrompida.": ("La mise à jour téléchargée est corrompue."),
+    "A atualização não contém a aplicação completa.": (
+        "La mise à jour ne contient pas l'application complète."
+    ),
+    "A instalar atualização…": "Installation de la mise à jour…",
+    "A transferir e a verificar Organizador {version}.": (
+        "Téléchargement et vérification d'Organizador {version}."
+    ),
+    "A reiniciar para aplicar a atualização…": "Redémarrage pour appliquer la mise à jour…",
+    "Atualização falhou": "Échec de la mise à jour",
+    "Não foi possível instalar a atualização.": "Impossible d'installer la mise à jour.",
+    "A atualização só se aplica à versão instalada.": (
+        "Les mises à jour ne s'appliquent qu'à la version installée."
+    ),
+    "Sem atualizações nesta instalação": "Aucune mise à jour pour cette installation",
+    "A app está a correr em modo de desenvolvimento; as atualizações aplicam-se apenas à versão instalada.": (
+        "L'application tourne en mode développement ; les mises à jour ne s'appliquent "
+        "qu'à la version installée."
+    ),
+    "Procurar atualizações automaticamente": "Rechercher les mises à jour automatiquement",
+    "Atualização pronta": "Mise à jour prête",
 }

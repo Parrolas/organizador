@@ -404,6 +404,7 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
         "reminder_lead_days": 2,
         "theme": "escuro",
         "language": "pt",
+        "check_updates_on_launch": True,
         "watch_enabled": True,
         "launch_at_login": True,
     }

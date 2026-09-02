@@ -17,6 +17,8 @@ class TrayIcon(QObject):
     pause_requested = Signal(bool)
     undo_requested = Signal()
     settings_requested = Signal()
+    check_updates_requested = Signal()
+    install_update_requested = Signal()
     quit_requested = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -30,6 +32,9 @@ class TrayIcon(QObject):
         self.pause_action = menu.addAction(_("Pausar vigilância"))
         self.pause_action.setCheckable(True)
         self.undo_action = menu.addAction(_("Desfazer última organização"))
+        self.update_action = menu.addAction(_("Procurar atualizações…"))
+        self.install_update_action = menu.addAction("")
+        self.install_update_action.setVisible(False)
         self.settings_action = menu.addAction(_("Definições"))
         menu.addSeparator()
         self.quit_action = menu.addAction(_("Sair"))
@@ -39,6 +44,8 @@ class TrayIcon(QObject):
         self.inbox_action.triggered.connect(self.inbox_requested)
         self.pause_action.toggled.connect(self.pause_requested)
         self.undo_action.triggered.connect(self.undo_requested)
+        self.update_action.triggered.connect(self.check_updates_requested)
+        self.install_update_action.triggered.connect(self.install_update_requested)
         self.settings_action.triggered.connect(self.settings_requested)
         self.quit_action.triggered.connect(self.quit_requested)
         self.tray.activated.connect(self._activated)
@@ -79,6 +86,15 @@ class TrayIcon(QObject):
         self.pause_action.setChecked(paused)
         self.pause_action.setText(_("Retomar vigilância") if paused else _("Pausar vigilância"))
         self.pause_action.blockSignals(False)
+
+    def set_pending_update(self, version: str | None) -> None:
+        """Show or hide the version-labelled install action."""
+
+        if version:
+            self.install_update_action.setText(
+                _("Instalar atualização {version}").format(version=version)
+            )
+        self.install_update_action.setVisible(version is not None)
 
     def notify(self, title: str, message: str) -> None:
         """Display a native tray notification."""

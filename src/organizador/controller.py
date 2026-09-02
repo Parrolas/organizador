@@ -5,8 +5,10 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import shutil
 import sqlite3
 import subprocess
+import threading
 from collections import deque
 from contextlib import suppress
 from datetime import date
@@ -15,6 +17,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
+from organizador import updater
 from organizador.classifier import guess_filing
 from organizador.config import AppConfig, parse_extensions
 from organizador.db import Database
@@ -51,6 +54,7 @@ from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
 from organizador.ui.theme import apply_theme, get_theme
 from organizador.ui.tray import TrayIcon
+from organizador.updater import UpdateInfo
 from organizador.watcher import DownloadWatcher
 
 LOGGER = logging.getLogger(__name__)
@@ -72,6 +76,8 @@ class AppController(QObject):
     download_ready = Signal(int, object)
     index_completed = Signal(int, str)
     import_completed = Signal(int)
+    update_check_finished = Signal(object)
+    update_install_finished = Signal(object)
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
@@ -95,6 +101,8 @@ class AppController(QObject):
         self._manual_import_deferred = 0
         self._manual_import_errors: list[str] = []
         self._watcher_generation = 0
+        self._pending_update: UpdateInfo | None = None
+        self._update_installing = False
 
         self.main_window = MainWindow(self.database, config)
         self.prompt = FilingPrompt(config.prompt_timeout_seconds)
@@ -138,6 +146,9 @@ class AppController(QObject):
                 self._restart_watcher()
                 self.indexer.submit_pending()
                 self.reminder_timer.start()
+                if self.config.check_updates_on_launch:
+                    self._begin_update_check(automatic=True)
+                self._cleanup_previous_version()
 
         self._refresh()
         if background and configured and not smoke_test:
@@ -244,7 +255,11 @@ class AppController(QObject):
         self.tray.pause_requested.connect(self._set_paused)
         self.tray.undo_requested.connect(self._undo)
         self.tray.settings_requested.connect(lambda: self.show_main("definicoes"))
+        self.tray.check_updates_requested.connect(lambda: self._begin_update_check(automatic=False))
+        self.tray.install_update_requested.connect(self._install_pending_update)
         self.tray.quit_requested.connect(self.shutdown)
+        self.update_check_finished.connect(self._on_update_check_finished)
+        self.update_install_finished.connect(self._on_update_install_finished)
         self.main_window.hidden_to_tray.connect(self._hidden_to_tray)
 
         self.main_window.home_page.open_path.connect(self._open_path)
@@ -941,6 +956,7 @@ class AppController(QObject):
             self.config.filename_template = str(values["filename_template"])
             self.config.theme = str(values["theme"])
             self.config.language = str(values["language"])
+            self.config.check_updates_on_launch = bool(values["check_updates_on_launch"])
             self.config.watch_enabled = bool(values["watch_enabled"])
             desired_startup = bool(values["launch_at_login"])
             self.config.launch_at_login = desired_startup
@@ -988,6 +1004,7 @@ class AppController(QObject):
         self.config.filename_template = previous.filename_template
         self.config.theme = previous.theme
         self.config.language = previous.language
+        self.config.check_updates_on_launch = previous.check_updates_on_launch
         self.config.initialized = previous.initialized
 
     def _set_paused(self, paused: bool) -> None:
@@ -1004,6 +1021,110 @@ class AppController(QObject):
         self.main_window.refresh_all(watching=watching, paused=paused)
         self.tray.update_inbox_count(self.database.count_inbox_items())
         self.tray.set_paused(paused)
+
+    def _cleanup_previous_version(self) -> None:
+        """Delete the rollback folder left by a successful update."""
+
+        app_dir = updater.app_directory()
+        if app_dir is None:
+            return
+        threading.Thread(
+            target=updater.cleanup_previous_version,
+            args=(app_dir,),
+            name="update-cleanup",
+            daemon=True,
+        ).start()
+
+    def _begin_update_check(self, *, automatic: bool) -> None:
+        """Check for a newer release in a background thread."""
+
+        if self._update_installing:
+            return
+        if not updater.is_frozen():
+            if not automatic:
+                self.tray.notify(
+                    _("Sem atualizações nesta instalação"),
+                    _(
+                        "A app está a correr em modo de desenvolvimento; "
+                        "as atualizações aplicam-se apenas à versão instalada."
+                    ),
+                )
+            return
+
+        def run() -> None:
+            info = updater.fetch_latest_release()
+            self.update_check_finished.emit(info)
+
+        threading.Thread(target=run, name="update-check", daemon=True).start()
+
+    def _on_update_check_finished(self, result: object) -> None:
+        info = result if isinstance(result, UpdateInfo) else None
+        self._pending_update = info
+        if info is None:
+            return
+        version = ".".join(str(part) for part in info.version)
+        self.tray.set_pending_update(version)
+        self.tray.notify(
+            _("Atualização disponível"),
+            _(
+                "Organizador {version} está disponível. Escolhe "
+                "“Instalar atualização” no menu do tabuleiro."
+            ).format(version=version),
+        )
+
+    def _install_pending_update(self) -> None:
+        info = self._pending_update
+        if info is None or self._update_installing:
+            return
+        app_dir = updater.app_directory()
+        if app_dir is None:
+            return
+        self._update_installing = True
+        version = ".".join(str(part) for part in info.version)
+        self.tray.set_pending_update(None)
+        self.tray.notify(
+            _("A instalar atualização…"),
+            _("A transferir e a verificar Organizador {version}.").format(version=version),
+        )
+
+        def run() -> None:
+            try:
+                staging = updater.staging_directory(app_dir)
+                zip_path = updater.download_and_verify(
+                    info.zip_url, info.sha256_url, updater.download_temp_directory()
+                )
+                staging = updater.extract_to_staging(zip_path, staging)
+                script = updater.write_swap_script(app_dir, staging)
+            except Exception as exc:
+                LOGGER.exception("Update installation failed")
+                shutil.rmtree(updater.staging_directory(app_dir), ignore_errors=True)
+                message = (
+                    str(exc)
+                    if isinstance(exc, updater.UpdaterError)
+                    else _("Não foi possível instalar a atualização.")
+                )
+                self.update_install_finished.emit(message)
+                return
+            self.update_install_finished.emit(script)
+
+        threading.Thread(target=run, name="update-install", daemon=True).start()
+
+    def _on_update_install_finished(self, result: object) -> None:
+        self._update_installing = False
+        if isinstance(result, Path) and result.is_file():
+            self.tray.notify(
+                _("Atualização pronta"),
+                _("A reiniciar para aplicar a atualização…"),
+            )
+            self.shutdown()
+            updater.launch_swap(result)
+            return
+        message = (
+            str(result)
+            if isinstance(result, str) and result
+            else _("Não foi possível instalar a atualização.")
+        )
+        self.tray.notify(_("Atualização falhou"), message)
 
     def _check_deadlines(self) -> None:
         today = date.today()

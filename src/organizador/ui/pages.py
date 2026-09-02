@@ -67,6 +67,7 @@ class SettingsPayload(TypedDict):
     filename_template: str
     theme: str
     language: str
+    check_updates_on_launch: bool
     watch_enabled: bool
     launch_at_login: bool
 
@@ -1200,12 +1201,13 @@ class SettingsPage(QWidget):
         panel = QFrame()
         panel.setObjectName("Panel")
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(22, 20, 22, 22)
-        panel_layout.setSpacing(18)
+        panel_layout.setContentsMargins(22, 24, 22, 26)
+        panel_layout.setSpacing(22)
         panel_layout.addWidget(label(_("Pastas e vigilância"), "SectionTitle"))
         form = QFormLayout()
-        form.setVerticalSpacing(14)
-        form.setHorizontalSpacing(22)
+        form.setVerticalSpacing(24)
+        form.setHorizontalSpacing(26)
+        form.setContentsMargins(0, 6, 0, 0)
 
         self.root_edit = QLineEdit()
         root_row = QHBoxLayout()
@@ -1256,13 +1258,16 @@ class SettingsPage(QWidget):
             self.language_combo.addItem(name, code)
         form.addRow(_("Idioma"), self.language_combo)
         language_note = label(_("O idioma novo é aplicado ao reiniciar a app."), "Muted")
+        language_note.setContentsMargins(0, 8, 0, 0)
         form.addRow("", language_note)
         panel_layout.addLayout(form)
 
         self.watch_check = QCheckBox(_("Vigiar novos ficheiros em Downloads"))
         self.startup_check = QCheckBox(_("Iniciar o Organizador quando entro no Windows"))
+        self.check_updates_check = QCheckBox(_("Procurar atualizações automaticamente"))
         panel_layout.addWidget(self.watch_check)
         panel_layout.addWidget(self.startup_check)
+        panel_layout.addWidget(self.check_updates_check)
         note = label(
             _(
                 "Alterar a pasta Universidade afeta os próximos ficheiros; "
@@ -1272,7 +1277,11 @@ class SettingsPage(QWidget):
         )
         note.setWordWrap(True)
         panel_layout.addWidget(note)
-        layout.addWidget(panel)
+
+        body_area, _container, body_layout = _scroll_list()
+        body_layout.setSpacing(18)
+        body_layout.addWidget(panel)
+        layout.addWidget(body_area, 1)
 
         action_row = QHBoxLayout()
         self.status_label = label("", "SuccessText")
@@ -1314,6 +1323,7 @@ class SettingsPage(QWidget):
         self.language_combo.setCurrentIndex(language_index if language_index >= 0 else 0)
         self.watch_check.setChecked(config.watch_enabled)
         self.startup_check.setChecked(config.launch_at_login)
+        self.check_updates_check.setChecked(config.check_updates_on_launch)
 
     def set_status(self, message: str, *, error: bool = False) -> None:
         """Show settings persistence feedback."""
@@ -1339,6 +1349,7 @@ class SettingsPage(QWidget):
             "reminder_lead_days": self.reminder_spin.value(),
             "theme": str(self.theme_combo.currentData()),
             "language": str(self.language_combo.currentData()),
+            "check_updates_on_launch": self.check_updates_check.isChecked(),
             "watch_enabled": self.watch_check.isChecked(),
             "launch_at_login": self.startup_check.isChecked(),
         }
