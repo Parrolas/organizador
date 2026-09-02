@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from organizador import __version__
-from organizador.config import AppConfig
+from organizador.config import THEME_IDS, AppConfig
 from organizador.db import Database
 from organizador.models import (
     FiledDocument,
@@ -40,19 +40,8 @@ from organizador.models import (
     Subject,
 )
 from organizador.reconcile import DISMISSIBLE_FINDING_REASONS, visible_findings
+from organizador.ui import theme as ui_theme
 from organizador.ui.dialogs import TaskDialog
-from organizador.ui.theme import (
-    CAL_MARK_DONE,
-    CAL_MARK_OVERDUE,
-    CAL_MARK_TODAY,
-    CAL_MARK_UPCOMING,
-    DANGER,
-    DANGER_SOFT,
-    MUTED,
-    TEAL,
-    WARNING,
-    WARNING_SOFT,
-)
 from organizador.ui.widgets import (
     EmptyState,
     PageHeading,
@@ -75,6 +64,7 @@ class SettingsPayload(TypedDict):
     prompt_timeout_seconds: int
     reminder_lead_days: int
     filename_template: str
+    theme: str
     watch_enabled: bool
     launch_at_login: bool
 
@@ -698,7 +688,7 @@ class SearchPage(QWidget):
             row_layout.addLayout(top)
             snippet = QLabel(result.snippet.replace("\n", " "))
             snippet.setWordWrap(True)
-            snippet.setStyleSheet(f"color: {MUTED}; line-height: 1.35;")
+            snippet.setStyleSheet(f"color: {ui_theme.current().muted}; line-height: 1.35;")
             snippet.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             row_layout.addWidget(snippet)
             self.results_layout.addWidget(row)
@@ -849,23 +839,24 @@ class TasksPage(QWidget):
             if task.due_date is not None:
                 by_date.setdefault(task.due_date, []).append(task)
         today = date.today()
+        current = ui_theme.current()
         for due_date, day_tasks in by_date.items():
             format_ = QTextCharFormat()
             open_tasks = [task for task in day_tasks if not task.completed]
             if open_tasks:
                 format_.setFontWeight(QFont.Weight.Bold)
                 if due_date < today:
-                    format_.setForeground(QColor(DANGER))
-                    format_.setBackground(QColor(CAL_MARK_OVERDUE))
+                    format_.setForeground(QColor(current.danger))
+                    format_.setBackground(QColor(current.cal_mark_overdue))
                 elif due_date == today:
-                    format_.setForeground(QColor(WARNING))
-                    format_.setBackground(QColor(CAL_MARK_TODAY))
+                    format_.setForeground(QColor(current.warning))
+                    format_.setBackground(QColor(current.cal_mark_today))
                 else:
-                    format_.setForeground(QColor(TEAL))
-                    format_.setBackground(QColor(CAL_MARK_UPCOMING))
+                    format_.setForeground(QColor(current.teal))
+                    format_.setBackground(QColor(current.cal_mark_upcoming))
             else:
-                format_.setForeground(QColor(MUTED))
-                format_.setBackground(QColor(CAL_MARK_DONE))
+                format_.setForeground(QColor(current.muted))
+                format_.setBackground(QColor(current.cal_mark_done))
             self.calendar.setDateTextFormat(
                 QDate(due_date.year, due_date.month, due_date.day), format_
             )
@@ -891,11 +882,12 @@ class TasksPage(QWidget):
     def _row(self, task: StudyTask) -> QFrame:
         row = QFrame()
         row.setObjectName("ListRow")
+        tokens = ui_theme.current()
         if not task.completed and task.due_date:
             if task.due_date < date.today():
-                row.setStyleSheet(f"QFrame#ListRow {{ background: {DANGER_SOFT}; }}")
+                row.setStyleSheet(f"QFrame#ListRow {{ background: {tokens.danger_soft}; }}")
             elif task.due_date == date.today():
-                row.setStyleSheet(f"QFrame#ListRow {{ background: {WARNING_SOFT}; }}")
+                row.setStyleSheet(f"QFrame#ListRow {{ background: {tokens.warning_soft}; }}")
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(15, 11, 11, 11)
         row_layout.setSpacing(12)
@@ -910,7 +902,9 @@ class TasksPage(QWidget):
         copy.setSpacing(2)
         title = label(task.title, "RowTitle")
         if task.completed:
-            title.setStyleSheet(f"color: {MUTED}; text-decoration: line-through;")
+            title.setStyleSheet(
+                f"color: {ui_theme.current().muted}; text-decoration: line-through;"
+            )
         copy.addWidget(title)
         subject = task.subject_name or "Geral"
         due = self._due_copy(task)
@@ -1177,6 +1171,10 @@ class SettingsPage(QWidget):
         self.reminder_spin.setSuffix(" dias")
         self.reminder_spin.setToolTip("Com quantos dias de antecedência avisar prazos")
         form.addRow("Avisar prazos antes", self.reminder_spin)
+        self.theme_combo = QComboBox()
+        for theme_id in THEME_IDS:
+            self.theme_combo.addItem(ui_theme.get_theme(theme_id).display_name, theme_id)
+        form.addRow("Tema", self.theme_combo)
         panel_layout.addLayout(form)
 
         self.watch_check = QCheckBox("Vigiar novos ficheiros em Downloads")
@@ -1224,6 +1222,8 @@ class SettingsPage(QWidget):
         self.minimum_size.setValue(max(0, config.minimum_file_size))
         self.timeout_spin.setValue(config.prompt_timeout_seconds)
         self.reminder_spin.setValue(config.reminder_lead_days)
+        theme_index = self.theme_combo.findData(config.theme)
+        self.theme_combo.setCurrentIndex(theme_index if theme_index >= 0 else 0)
         self.watch_check.setChecked(config.watch_enabled)
         self.startup_check.setChecked(config.launch_at_login)
 
@@ -1249,6 +1249,7 @@ class SettingsPage(QWidget):
             "minimum_file_size": self.minimum_size.value(),
             "prompt_timeout_seconds": self.timeout_spin.value(),
             "reminder_lead_days": self.reminder_spin.value(),
+            "theme": str(self.theme_combo.currentData()),
             "watch_enabled": self.watch_check.isChecked(),
             "launch_at_login": self.startup_check.isChecked(),
         }

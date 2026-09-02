@@ -5,7 +5,9 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
-from organizador.ui.theme import INK, TEAL
+# The app icon is deliberately theme-independent: one recognizable mark everywhere.
+ICON_INK = "#08111D"
+ICON_ACCENT = "#49CFC0"
 
 
 def app_icon(size: int = 64) -> QIcon:
@@ -18,7 +20,7 @@ def app_icon(size: int = 64) -> QIcon:
 
     tile = QRectF(size * 0.05, size * 0.05, size * 0.9, size * 0.9)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(INK))
+    painter.setBrush(QColor(ICON_INK))
     painter.drawRoundedRect(tile, size * 0.19, size * 0.19)
 
     page = QPainterPath()
@@ -31,7 +33,7 @@ def app_icon(size: int = 64) -> QIcon:
     painter.setBrush(QColor("#FFFFFF"))
     painter.drawPath(page)
 
-    pen = QPen(QColor(TEAL), max(2, int(size * 0.055)))
+    pen = QPen(QColor(ICON_ACCENT), max(2, int(size * 0.055)))
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     painter.setPen(pen)
     for ratio in (0.43, 0.56, 0.69):

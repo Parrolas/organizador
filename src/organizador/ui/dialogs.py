@@ -35,7 +35,7 @@ from organizador.config import AppConfig
 from organizador.db import Database
 from organizador.filer import FilingService, render_final_name
 from organizador.models import FILE_KINDS, FiledDocument, InboxItem, StudyTask, Subject
-from organizador.ui.theme import TEAL
+from organizador.ui import theme as ui_theme
 from organizador.ui.widgets import button, format_size, label
 
 
@@ -45,7 +45,7 @@ class SubjectDialog(QDialog):
     def __init__(self, subject: Subject | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.subject = subject
-        self.color = subject.color if subject else TEAL
+        self.color = subject.color if subject else ui_theme.current().teal
         self.setWindowTitle("Editar disciplina" if subject else "Nova disciplina")
         self.setModal(True)
         self.setMinimumWidth(520)
@@ -120,7 +120,9 @@ class SubjectDialog(QDialog):
             for value in channels
         )
         luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-        foreground = "#08111D" if luminance > 0.18 else "#FFFFFF"
+        dark_ink = QColor(8, 17, 29).name()
+        white = QColor(Qt.GlobalColor.white).name()
+        foreground = dark_ink if luminance > 0.18 else white
         self.color_button.setText(self.color.upper())
         self.color_button.setStyleSheet(
             f"QPushButton {{ background: {self.color}; color: {foreground}; "
@@ -271,19 +273,23 @@ class OnboardingDialog(QDialog):
         brand = label("Organizador", "Brand")
         statement_layout.addWidget(brand)
         promise = QLabel("Downloads arrumados\nantes de se perderem.")
-        promise.setStyleSheet("color: white; font-size: 27px; font-weight: 700;")
+        promise.setStyleSheet(
+            f"color: {ui_theme.current().sidebar_text_active}; font-size: 27px; font-weight: 700;"
+        )
         promise.setWordWrap(True)
         statement_layout.addWidget(promise)
         explanation = QLabel(
             "Os ficheiros elegíveis passam primeiro por uma Caixa de Entrada segura. "
             "Tu confirmas a disciplina e nada é substituído."
         )
-        explanation.setStyleSheet("color: #C6D4DF; font-size: 14px; line-height: 1.4;")
+        explanation.setStyleSheet(
+            f"color: {ui_theme.current().onboarding_text}; font-size: 14px; line-height: 1.4;"
+        )
         explanation.setWordWrap(True)
         statement_layout.addWidget(explanation)
         statement_layout.addStretch(1)
         privacy = QLabel("Tudo fica neste computador. Nenhum documento é enviado para a internet.")
-        privacy.setStyleSheet("color: #9EB2C2; font-size: 12px;")
+        privacy.setStyleSheet(f"color: {ui_theme.current().onboarding_muted}; font-size: 12px;")
         privacy.setWordWrap(True)
         statement_layout.addWidget(privacy)
         outer.addWidget(statement)
@@ -390,7 +396,9 @@ class OnboardingDialog(QDialog):
                 if item.strip()
             )
             folder = self.filer.subject_folder_name(name, code)
-            created_subject = self.database.add_subject(name, code, TEAL, keywords, folder)
+            created_subject = self.database.add_subject(
+                name, code, ui_theme.current().teal, keywords, folder
+            )
             self.filer.ensure_subject_structure(created_subject)
             self.config.save()
         except (ValueError, OSError, sqlite3.IntegrityError) as exc:

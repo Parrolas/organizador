@@ -38,7 +38,7 @@ from organizador.ui.dialogs import (
 from organizador.ui.main_window import MainWindow
 from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
-from organizador.ui.theme import CANVAS, apply_theme
+from organizador.ui.theme import apply_theme, get_theme
 from organizador.ui.widgets import EmptyState
 
 
@@ -48,7 +48,7 @@ def test_main_window_builds_and_refreshes_all_pages(
     database: Database,
     subject: Subject,
 ) -> None:
-    apply_theme(qt_app)
+    apply_theme(qt_app, get_theme("escuro"))
     window = MainWindow(database, app_config)
 
     window.refresh_all(watching=True, paused=False)
@@ -57,7 +57,10 @@ def test_main_window_builds_and_refreshes_all_pages(
 
     assert window.stack.currentWidget() is window.subjects_page
     assert window.status_label.text() == "A vigiar Downloads"
-    assert qt_app.palette().color(QPalette.ColorRole.Window).name() == CANVAS.casefold()
+    assert (
+        qt_app.palette().color(QPalette.ColorRole.Window).name()
+        == get_theme("escuro").canvas.casefold()
+    )
     visible_copy = [item.text() for item in window.subjects_page.findChildren(QLabel)]
     assert any(subject.name in text for text in visible_copy)
     settings_copy = [item.text() for item in window.settings_page.findChildren(QLabel)]
@@ -326,15 +329,15 @@ def test_filing_prompt_selects_classifier_suggestion(
 def test_subject_colour_button_keeps_readable_text(qt_app: QApplication) -> None:
     dialog = SubjectDialog()
 
-    assert "color: #08111D" in dialog.color_button.styleSheet()
+    assert "color: #08111d" in dialog.color_button.styleSheet()
     dialog.color = "#08111D"
     dialog._update_color_button()
-    assert "color: #FFFFFF" in dialog.color_button.styleSheet()
+    assert "color: #ffffff" in dialog.color_button.styleSheet().casefold()
     dialog.close()
 
 
 def test_empty_state_reserves_height_for_wrapped_body(qt_app: QApplication) -> None:
-    apply_theme(qt_app)
+    apply_theme(qt_app, get_theme("escuro"))
     empty = EmptyState(
         "Tudo no lugar",
         "Quando terminares um download elegível, ele aparece aqui e num pequeno popup.",
@@ -399,6 +402,7 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
         "minimum_file_size": 1024,
         "prompt_timeout_seconds": 45,
         "reminder_lead_days": 2,
+        "theme": "escuro",
         "watch_enabled": True,
         "launch_at_login": True,
     }

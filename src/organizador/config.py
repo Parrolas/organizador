@@ -52,6 +52,10 @@ NAME_TEMPLATE_TOKENS: tuple[str, ...] = (
     "{dia}",
 )
 DEFAULT_FILENAME_TEMPLATE = "{nome_original}"
+THEME_IDS: tuple[str, ...] = ("escuro", "claro", "oceano", "sepia", "contraste")
+DEFAULT_THEME = "escuro"
+LANGUAGE_IDS: tuple[str, ...] = ("pt", "en", "es", "fr")
+DEFAULT_LANGUAGE = "pt"
 
 
 def _known_folder(value_name: str, fallback: Path) -> Path:
@@ -101,6 +105,8 @@ class AppConfig:
     prompt_timeout_seconds: int = 45
     reminder_lead_days: int = 2
     filename_template: str = DEFAULT_FILENAME_TEMPLATE
+    theme: str = DEFAULT_THEME
+    language: str = DEFAULT_LANGUAGE
     initialized: bool = False
 
     @property
@@ -161,6 +167,10 @@ class AppConfig:
         if not 0 <= self.reminder_lead_days <= 30:
             raise ValueError("O aviso de prazos deve estar entre 0 e 30 dias.")
         _validate_name_template(self.filename_template)
+        if self.theme not in THEME_IDS:
+            raise ValueError(f"O tema escolhido não existe: {self.theme}")
+        if self.language not in LANGUAGE_IDS:
+            raise ValueError(f"O idioma escolhido não existe: {self.language}")
 
     def accepts(self, path: Path) -> bool:
         """Return whether a file has an eligible, non-temporary suffix."""
@@ -227,6 +237,8 @@ class AppConfig:
                 prompt_timeout_seconds=_int_setting(raw, "prompt_timeout_seconds", 45),
                 reminder_lead_days=_int_setting(raw, "reminder_lead_days", 2),
                 filename_template=_str_setting(raw, "filename_template", DEFAULT_FILENAME_TEMPLATE),
+                theme=_str_setting(raw, "theme", DEFAULT_THEME),
+                language=_str_setting(raw, "language", DEFAULT_LANGUAGE),
                 initialized=_bool_setting(raw, "initialized", False),
             )
             config.validate()

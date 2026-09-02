@@ -48,6 +48,7 @@ from organizador.ui.dialogs import (
 from organizador.ui.main_window import MainWindow
 from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
+from organizador.ui.theme import apply_theme, get_theme
 from organizador.ui.tray import TrayIcon
 from organizador.watcher import DownloadWatcher
 
@@ -886,6 +887,7 @@ class AppController(QObject):
             self.config.prompt_timeout_seconds = int(values["prompt_timeout_seconds"])
             self.config.reminder_lead_days = int(values["reminder_lead_days"])
             self.config.filename_template = str(values["filename_template"])
+            self.config.theme = str(values["theme"])
             self.config.watch_enabled = bool(values["watch_enabled"])
             desired_startup = bool(values["launch_at_login"])
             self.config.launch_at_login = desired_startup
@@ -904,6 +906,9 @@ class AppController(QObject):
             self.main_window.settings_page.set_status(str(exc), error=True)
             return
         self.prompt.set_timeout(self.config.prompt_timeout_seconds)
+        application = QApplication.instance()
+        if isinstance(application, QApplication):
+            apply_theme(application, get_theme(self.config.theme))
         self._restart_watcher()
         self.main_window.settings_page.load_config(self.config)
         self.main_window.settings_page.set_status("Definições guardadas.")
@@ -928,6 +933,7 @@ class AppController(QObject):
         self.config.prompt_timeout_seconds = previous.prompt_timeout_seconds
         self.config.reminder_lead_days = previous.reminder_lead_days
         self.config.filename_template = previous.filename_template
+        self.config.theme = previous.theme
         self.config.initialized = previous.initialized
 
     def _set_paused(self, paused: bool) -> None:

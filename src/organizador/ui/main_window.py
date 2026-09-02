@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from organizador.config import AppConfig
 from organizador.db import Database
+from organizador.ui import theme as ui_theme
 from organizador.ui.pages import (
     HomePage,
     InboxPage,
@@ -117,9 +118,10 @@ class MainWindow(QMainWindow):
         status_row.setSpacing(8)
         self.status_dot = QFrame()
         self.status_dot.setFixedSize(8, 8)
-        self.status_dot.setStyleSheet("background: #35C08A; border-radius: 4px;")
+        tokens = ui_theme.current()
+        self.status_dot.setStyleSheet(f"background: {tokens.status_ok}; border-radius: 4px;")
         self.status_label = QLabel("A iniciar…")
-        self.status_label.setStyleSheet("color: #AFC0CF; font-size: 12px;")
+        self.status_label.setStyleSheet(f"color: {tokens.status_text}; font-size: 12px;")
         status_row.addWidget(self.status_dot)
         status_row.addWidget(self.status_label, 1)
         sidebar_layout.addLayout(status_row)
@@ -171,13 +173,13 @@ class MainWindow(QMainWindow):
 
         if paused:
             self.status_label.setText("Vigilância em pausa")
-            color = "#E6A53A"
+            color = ui_theme.current().status_warn
         elif watching:
             self.status_label.setText("A vigiar Downloads")
-            color = "#35C08A"
+            color = ui_theme.current().status_ok
         else:
             self.status_label.setText("Vigilância desligada")
-            color = "#8EA1B1"
+            color = ui_theme.current().status_off
         self.status_dot.setStyleSheet(f"background: {color}; border-radius: 4px;")
 
     def show_from_tray(self, page: str = "inicio") -> None:

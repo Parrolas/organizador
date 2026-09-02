@@ -17,7 +17,7 @@ from organizador.controller import AppController
 from organizador.db import NewerDatabaseError
 from organizador.logging_setup import configure_logging, log_uncaught_exception
 from organizador.ui.icons import app_icon
-from organizador.ui.theme import apply_theme
+from organizador.ui.theme import apply_theme, get_theme
 
 LOGGER = logging.getLogger(__name__)
 
@@ -97,7 +97,6 @@ def main(argv: list[str] | None = None) -> int:
     application.setOrganizationName(APP_NAME)
     application.setQuitOnLastWindowClosed(False)
     application.setWindowIcon(app_icon())
-    apply_theme(application)
 
     if logging_error is not None:
         QMessageBox.critical(
@@ -116,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
             "Não foi possível ler as definições guardadas. "
             f"A app abriu com valores seguros para poderes corrigi-las.\n\n{config_error}",
         )
+    apply_theme(application, get_theme(config.theme))
     instance = SingleInstance(config.data_dir)
     if not arguments.smoke_test and not instance.acquire():
         return 0
