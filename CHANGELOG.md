@@ -2,6 +2,17 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.5.0 - 2026-09-02
+
+### Added
+
+- Five switchable themes in Definições: Escuro (the original), Claro (light),
+  Oceano (deep blue), Sépia (warm paper) and Alto contraste (accessibility).
+  The theme applies immediately on save.
+- Interface languages: Português (Portugal), English, Español and Français,
+  selectable in Definições and applied after a restart. Missing translations
+  fall back to Portuguese.
+
 ## 0.4.0 - 2026-09-01
 
 ### Added
