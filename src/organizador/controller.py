@@ -39,7 +39,12 @@ from organizador.reconcile import (
 from organizador.reconcile import apply as apply_reconciliation
 from organizador.reconcile import scan as scan_reconciliation
 from organizador.startup import set_launch_at_login
-from organizador.ui.dialogs import BulkFilingDialog, OnboardingDialog, SubjectDialog
+from organizador.ui.dialogs import (
+    BulkFilingDialog,
+    OnboardingDialog,
+    SubjectDialog,
+    SubjectFilesDialog,
+)
 from organizador.ui.main_window import MainWindow
 from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
@@ -258,6 +263,7 @@ class AppController(QObject):
         self.main_window.subjects_page.edit_requested.connect(self._edit_subject)
         self.main_window.subjects_page.archive_requested.connect(self._archive_subject)
         self.main_window.subjects_page.restore_requested.connect(self._restore_subject)
+        self.main_window.subjects_page.view_files_requested.connect(self._view_subject_files)
         self.main_window.subjects_page.open_folder.connect(self._open_path)
         self.main_window.settings_page.save_requested.connect(self._save_settings)
 
@@ -779,6 +785,20 @@ class AppController(QObject):
             QMessageBox.warning(self.main_window, "Não foi possível restaurar", str(exc))
             return
         self._refresh()
+
+    def _view_subject_files(self, subject_id: int) -> None:
+        subject = self.database.get_subject(subject_id)
+        if subject is None:
+            return
+        documents = self.database.list_subject_files(subject_id)
+        dialog = SubjectFilesDialog(
+            subject,
+            documents,
+            self.config.university_root / subject.folder_name,
+            self.main_window,
+        )
+        dialog.open_requested.connect(self._open_path)
+        dialog.exec()
 
     def _organise_selection(self, inbox_ids: object) -> None:
         if not isinstance(inbox_ids, (tuple, list)):

@@ -7,7 +7,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
-from PySide6.QtGui import QCursor, QGuiApplication, QPalette
+from PySide6.QtCore import QDate
+from PySide6.QtGui import QCursor, QFont, QGuiApplication, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -28,7 +29,12 @@ from organizador.models import FindingReason, Subject
 from organizador.paths import IncompleteMoveError
 from organizador.reconcile import findings, visible_findings
 from organizador.reconcile import scan as scan_reconciliation
-from organizador.ui.dialogs import OnboardingDialog, SubjectDialog, TaskDialog
+from organizador.ui.dialogs import (
+    OnboardingDialog,
+    SubjectDialog,
+    SubjectFilesDialog,
+    TaskDialog,
+)
 from organizador.ui.main_window import MainWindow
 from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
@@ -768,3 +774,163 @@ def test_filing_prompt_prefills_from_the_name_template(
 
     prompt.timer.stop()
     prompt.hide()
+
+
+def test_tasks_page_calendar_marks_days_by_deadline_state(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    today = date.today()
+    overdue = database.add_task("Atrasada", subject.id, today.replace(day=1))
+    today_task = database.add_task("Hoje", subject.id, today)
+    future = database.add_task("Futura", subject.id, today.replace(day=27))
+    completed = database.add_task("Feita", subject.id, today.replace(day=12))
+    database.set_task_completed(completed.id, True)
+    window = MainWindow(database, app_config)
+    page = window.tasks_page
+    open_formats = {
+        day: page.calendar.dateTextFormat(QDate(day.year, day.month, day.day))
+        for day in (overdue.due_date, today_task.due_date, future.due_date)
+    }
+
+    assert open_formats[overdue.due_date].fontWeight() == QFont.Weight.Bold
+    assert open_formats[today_task.due_date].fontWeight() == QFont.Weight.Bold
+    assert open_formats[future.due_date].fontWeight() == QFont.Weight.Bold
+    assert open_formats[overdue.due_date].foreground().color().name() == "#ff818b"
+    assert open_formats[today_task.due_date].foreground().color().name() == "#f1bb68"
+    assert open_formats[future.due_date].foreground().color().name() == "#49cfc0"
+    assert open_formats[overdue.due_date].background().color().name() == "#4a262e"
+    assert open_formats[today_task.due_date].background().color().name() == "#4a3520"
+    assert open_formats[future.due_date].background().color().name() == "#1e4d46"
+    completed_format = page.calendar.dateTextFormat(
+        QDate(completed.due_date.year, completed.due_date.month, completed.due_date.day)
+    )
+    assert completed_format.fontWeight() != QFont.Weight.Bold
+    assert completed_format.foreground().color().name() == "#9baabd"
+    assert completed_format.background().color().name() == "#222f3e"
+    window.allow_close = True
+    window.close()
+
+
+def test_tasks_page_calendar_click_filters_and_toggle_clears(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    today = date.today()
+    database.add_task("Um", subject.id, today)
+    database.add_task("Dois", subject.id, today)
+    database.add_task("Outro dia", subject.id, today.replace(day=15))
+    window = MainWindow(database, app_config)
+    page = window.tasks_page
+
+    page.calendar.clicked.emit(QDate(today.year, today.month, today.day))
+
+    assert page._selected_date == today
+    assert not page.clear_filter_button.isHidden()
+    page.refresh()
+    titles = [label_.text() for label_ in page.findChildren(QLabel)]
+    assert "Um" in titles
+    assert "Dois" in titles
+    assert "Outro dia" not in titles
+
+    page.calendar.clicked.emit(QDate(today.year, today.month, today.day))
+
+    assert page._selected_date is None
+    window.allow_close = True
+    window.close()
+
+
+def test_tasks_page_calendar_activation_prefills_the_deadline(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    chosen = date.today().replace(day=20)
+    window = MainWindow(database, app_config)
+    page = window.tasks_page
+    page.due_check.setChecked(False)
+
+    page.calendar.activated.emit(QDate(chosen.year, chosen.month, chosen.day))
+
+    assert page.due_check.isChecked()
+    assert page.due_edit.date() == QDate(chosen.year, chosen.month, chosen.day)
+    window.allow_close = True
+    window.close()
+
+
+def test_subjects_page_shows_counts_and_opens_files_overview(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    filer: FilingService,
+) -> None:
+    download = app_config.downloads_dir / "revolucao.pdf"
+    download.write_bytes(b"material historico" * 12)
+    item = filer.ingest(download)
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Slides", download.name)
+    database.add_subject("Sem ficheiros", "", "#123456", (), "SEM - Sem ficheiros")
+    window = MainWindow(database, app_config)
+    page = window.subjects_page
+    row_labels = [text.text() for text in page.findChildren(QLabel)]
+    assert any("1 ficheiro ·" in text for text in row_labels)
+    assert any("Ainda sem ficheiros organizados" in text for text in row_labels)
+
+    requests: list[int] = []
+    page.view_files_requested.connect(requests.append)
+    view_button = next(
+        control for control in page.findChildren(QPushButton) if control.text() == "Ver ficheiros"
+    )
+    view_button.click()
+    assert requests == [subject.id]
+
+    folder_path = app_config.university_root / subject.folder_name
+    dialog = SubjectFilesDialog(subject, [document], folder_path)
+    opened: list[object] = []
+    dialog.open_requested.connect(opened.append)
+    dialog_labels = [text.text() for text in dialog.findChildren(QLabel)]
+    assert document.current_path.name in dialog_labels
+    assert any("1 ficheiro ·" in text for text in dialog_labels)
+    assert any("Slides 1" in text for text in dialog_labels)
+    dialog_buttons = dialog.findChildren(QPushButton)
+    next(control for control in dialog_buttons if control.text() == "Abrir").click()
+    next(control for control in dialog_buttons if control.text() == "Abrir pasta").click()
+    assert opened == [document.current_path, folder_path]
+
+    empty_dialog = SubjectFilesDialog(subject, [], folder_path)
+    empty_labels = [text.text() for text in empty_dialog.findChildren(QLabel)]
+    assert any("Ainda não há ficheiros organizados" in text for text in empty_labels)
+    window.allow_close = True
+    window.close()
+
+
+def test_controller_view_subject_files_opens_dialog_without_touching_files(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database, qt_app
+    controller = AppController(app_config)
+    shown: list[list[object]] = []
+
+    def capture_exec(dialog: object) -> QDialog.DialogCode:
+        documents = getattr(dialog, "documents", ())
+        shown.append(list(documents))
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(SubjectFilesDialog, "exec", capture_exec)
+    controller._view_subject_files(subject.id)
+
+    assert shown == [[]]
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()

@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 from PySide6.QtCore import QDate, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QTextCharFormat
 from PySide6.QtWidgets import (
+    QCalendarWidget,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -39,7 +41,18 @@ from organizador.models import (
 )
 from organizador.reconcile import DISMISSIBLE_FINDING_REASONS, visible_findings
 from organizador.ui.dialogs import TaskDialog
-from organizador.ui.theme import DANGER_SOFT, MUTED, WARNING_SOFT
+from organizador.ui.theme import (
+    CAL_MARK_DONE,
+    CAL_MARK_OVERDUE,
+    CAL_MARK_TODAY,
+    CAL_MARK_UPCOMING,
+    DANGER,
+    DANGER_SOFT,
+    MUTED,
+    TEAL,
+    WARNING,
+    WARNING_SOFT,
+)
 from organizador.ui.widgets import (
     EmptyState,
     PageHeading,
@@ -711,6 +724,7 @@ class TasksPage(QWidget):
     def __init__(self, database: Database, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.database = database
+        self._selected_date: date | None = None
         layout = _page_layout(self)
         layout.addWidget(
             PageHeading(
@@ -746,8 +760,36 @@ class TasksPage(QWidget):
         layout.addWidget(form_panel)
         self.error_label = label("", "ErrorText")
         layout.addWidget(self.error_label)
+
+        body = QHBoxLayout()
+        body.setSpacing(14)
+        calendar_panel = QFrame()
+        calendar_panel.setObjectName("Panel")
+        calendar_layout = QVBoxLayout(calendar_panel)
+        calendar_layout.setContentsMargins(12, 10, 12, 12)
+        self.calendar = QCalendarWidget()
+        self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        self.calendar.setMinimumWidth(360)
+        self.calendar.setMaximumWidth(440)
+        self.calendar.clicked.connect(self._on_date_clicked)
+        self.calendar.activated.connect(self._on_date_activated)
+        calendar_layout.addWidget(self.calendar)
+        body.addWidget(calendar_panel)
+
+        right = QVBoxLayout()
+        right.setSpacing(8)
+        self.filter_row = QHBoxLayout()
+        self.filter_label = label("", "Muted")
+        self.clear_filter_button = button("Ver todas", variant="quiet")
+        self.clear_filter_button.clicked.connect(self._clear_date_filter)
+        self.filter_row.addWidget(self.filter_label)
+        self.filter_row.addStretch(1)
+        self.filter_row.addWidget(self.clear_filter_button)
+        right.addLayout(self.filter_row)
         area, _, self.tasks_layout = _scroll_list()
-        layout.addWidget(area, 1)
+        right.addWidget(area, 1)
+        body.addLayout(right, 1)
+        layout.addLayout(body, 1)
         self.refresh()
 
     def refresh(self) -> None:
@@ -765,18 +807,86 @@ class TasksPage(QWidget):
 
         clear_layout(self.tasks_layout)
         tasks = self.database.list_tasks()
-        if not tasks:
-            self.tasks_layout.addWidget(
-                EmptyState(
-                    "Sem tarefas pendentes",
-                    "Adiciona a próxima entrega acima ou cria-a ao organizar um documento.",
-                )
+        self._apply_calendar_marks(tasks)
+        if self._selected_date is not None:
+            visible = [task for task in tasks if task.due_date == self._selected_date]
+            self.filter_label.setText(
+                f"A mostrar tarefas de {self._selected_date.strftime('%d/%m/%Y')}"
             )
+            self.clear_filter_button.show()
+        else:
+            visible = tasks
+            self.filter_label.clear()
+            self.clear_filter_button.hide()
+        if not visible:
+            if self._selected_date is not None:
+                self.tasks_layout.addWidget(
+                    EmptyState(
+                        "Sem tarefas neste dia",
+                        "Elimina o filtro para ver todas as tarefas "
+                        "ou adiciona uma tarefa para este dia.",
+                    )
+                )
+            else:
+                self.tasks_layout.addWidget(
+                    EmptyState(
+                        "Sem tarefas pendentes",
+                        "Adiciona a próxima entrega acima ou cria-a ao organizar um documento.",
+                    )
+                )
             self.tasks_layout.addStretch(1)
             return
-        for task in tasks:
+        for task in visible:
             self.tasks_layout.addWidget(self._row(task))
         self.tasks_layout.addStretch(1)
+
+    def _apply_calendar_marks(self, tasks: list[StudyTask]) -> None:
+        """Colour calendar days by the state of their deadlines."""
+
+        self.calendar.setDateTextFormat(QDate(), QTextCharFormat())
+        by_date: dict[date, list[StudyTask]] = {}
+        for task in tasks:
+            if task.due_date is not None:
+                by_date.setdefault(task.due_date, []).append(task)
+        today = date.today()
+        for due_date, day_tasks in by_date.items():
+            format_ = QTextCharFormat()
+            open_tasks = [task for task in day_tasks if not task.completed]
+            if open_tasks:
+                format_.setFontWeight(QFont.Weight.Bold)
+                if due_date < today:
+                    format_.setForeground(QColor(DANGER))
+                    format_.setBackground(QColor(CAL_MARK_OVERDUE))
+                elif due_date == today:
+                    format_.setForeground(QColor(WARNING))
+                    format_.setBackground(QColor(CAL_MARK_TODAY))
+                else:
+                    format_.setForeground(QColor(TEAL))
+                    format_.setBackground(QColor(CAL_MARK_UPCOMING))
+            else:
+                format_.setForeground(QColor(MUTED))
+                format_.setBackground(QColor(CAL_MARK_DONE))
+            self.calendar.setDateTextFormat(
+                QDate(due_date.year, due_date.month, due_date.day), format_
+            )
+
+    def _on_date_clicked(self, clicked: QDate) -> None:
+        chosen = cast(date, clicked.toPython())
+        if self._selected_date == chosen:
+            self._clear_date_filter()
+            return
+        self._selected_date = chosen
+        self.refresh()
+
+    def _on_date_activated(self, chosen: QDate) -> None:
+        picked = cast(date, chosen.toPython())
+        self.due_check.setChecked(True)
+        self.due_edit.setDate(QDate(picked.year, picked.month, picked.day))
+        self.title_edit.setFocus()
+
+    def _clear_date_filter(self) -> None:
+        self._selected_date = None
+        self.refresh()
 
     def _row(self, task: StudyTask) -> QFrame:
         row = QFrame()
@@ -878,6 +988,7 @@ class SubjectsPage(QWidget):
     edit_requested = Signal(int)
     archive_requested = Signal(int)
     restore_requested = Signal(int)
+    view_files_requested = Signal(int)
     open_folder = Signal(object)
 
     def __init__(
@@ -916,6 +1027,7 @@ class SubjectsPage(QWidget):
         """Render active subjects, and archived ones when the toggle is on."""
 
         subjects = self.database.list_subjects(active_only=not self.show_archived)
+        summaries = self.database.count_files_by_subject()
         active_count = self.database.count_subjects()
         archived_count = len(self.database.list_subjects(active_only=False)) - active_count
         plural = active_count != 1
@@ -935,10 +1047,10 @@ class SubjectsPage(QWidget):
             self.subjects_layout.addStretch(1)
             return
         for subject in subjects:
-            self.subjects_layout.addWidget(self._row(subject))
+            self.subjects_layout.addWidget(self._row(subject, summaries))
         self.subjects_layout.addStretch(1)
 
-    def _row(self, subject: Subject) -> QFrame:
+    def _row(self, subject: Subject, summaries: dict[int, tuple[int, int]]) -> QFrame:
         row = QFrame()
         row.setObjectName("ListRow")
         row_layout = QHBoxLayout(row)
@@ -961,15 +1073,30 @@ class SubjectsPage(QWidget):
         folder_copy.setToolTip(str(subject_path))
         folder_copy.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         copy.addWidget(folder_copy)
+        file_count, total_bytes = summaries.get(subject.id, (0, 0))
+        if file_count:
+            copy.addWidget(
+                label(
+                    f"{file_count} ficheiro{'s' if file_count != 1 else ''} · "
+                    f"{format_size(total_bytes)}",
+                    "Muted",
+                )
+            )
+        else:
+            copy.addWidget(label("Ainda sem ficheiros organizados", "Muted"))
         if not subject.active:
             copy.addWidget(label("Arquivada", "Muted"))
         row_layout.addLayout(copy, 1)
+        view_files = button("Ver ficheiros")
+        view_files.setToolTip("Mostrar os ficheiros organizados nesta disciplina")
+        view_files.clicked.connect(lambda: self.view_files_requested.emit(subject.id))
         open_button = button("Abrir pasta", variant="quiet")
         open_button.clicked.connect(
             lambda: self.open_folder.emit(self.config.university_root / subject.folder_name)
         )
         edit = button("Editar")
         edit.clicked.connect(lambda: self.edit_requested.emit(subject.id))
+        row_layout.addWidget(view_files)
         row_layout.addWidget(open_button)
         row_layout.addWidget(edit)
         if subject.active:

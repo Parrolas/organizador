@@ -1217,6 +1217,34 @@ class Database:
             ).fetchall()
         return [self._file(row) for row in rows]
 
+    def count_files_by_subject(self) -> dict[int, tuple[int, int]]:
+        """Return the active file count and total bytes for each subject."""
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT subject_id, COUNT(*) AS total, COALESCE(SUM(size), 0) AS bytes
+                FROM files
+                WHERE catalog_state = 'active'
+                GROUP BY subject_id
+                """
+            ).fetchall()
+        return {int(row["subject_id"]): (int(row["total"]), int(row["bytes"])) for row in rows}
+
+    def list_subject_files(self, subject_id: int) -> list[FiledDocument]:
+        """List a subject's active documents, grouped by kind and newest first."""
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM files
+                WHERE subject_id = ? AND catalog_state = 'active'
+                ORDER BY kind, filed_at DESC
+                """,
+                (subject_id,),
+            ).fetchall()
+        return [self._file(row) for row in rows]
+
     def increment_metric(self, kind: str, amount: int = 1) -> None:
         """Add to a lifetime safety counter used by the activity summary."""
 

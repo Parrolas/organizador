@@ -6,6 +6,13 @@ All notable changes to Organizador are recorded here.
 
 ### Added
 
+- A calendar on the Tarefas e prazos page: days with deadlines are marked
+  (red overdue, amber today, teal upcoming, muted completed), clicking a day
+  filters the task list, and double-clicking a day prefills the new-task
+  deadline.
+- Each Disciplinas row now shows how many files it organises and their total
+  size, with a "Ver ficheiros" overview listing every file with per-kind
+  counts and safe open actions.
 - Bulk filing: select several inbox files and organise them with one decision,
   previewing every final name before confirming. Each file keeps its own journal;
   failed files stay pending and only the latest filing can be undone.

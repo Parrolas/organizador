@@ -22,6 +22,10 @@ WARNING_SOFT = "#352A18"
 DANGER = "#FF818B"
 DANGER_SOFT = "#331D25"
 SUCCESS = "#75D5A6"
+CAL_MARK_OVERDUE = "#4A262E"
+CAL_MARK_TODAY = "#4A3520"
+CAL_MARK_UPCOMING = "#1E4D46"
+CAL_MARK_DONE = "#222F3E"
 
 
 STYLESHEET = f"""
@@ -240,6 +244,16 @@ QCalendarWidget QToolButton {{
     color: {TEXT};
     background: transparent;
     border-color: transparent;
+}}
+QCalendarWidget QWidget#qt_calendar_navigationbar {{
+    background: transparent;
+}}
+QCalendarWidget QToolButton:hover {{
+    color: {TEXT};
+    background: {INK_HOVER};
+}}
+QCalendarWidget QAbstractItemView {{
+    font-size: 14px;
 }}
 QScrollArea {{
     border: 0;

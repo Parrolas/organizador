@@ -566,3 +566,63 @@ def test_archived_subject_has_no_active_conflicts_and_restores_cleanly(
     restored = database.set_subject_active(subject.id, True)
     assert restored.active
     assert database.count_subjects() == 2
+
+
+def test_subject_file_summaries_and_listings_ignore_dropped_records(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    slides_id = _file_record(database, subject, tmp_path / "slides")
+    other = database.add_subject("História", "HIS1", "#111111", (), "HIS1 - História")
+
+    exercise_inbox = tmp_path / "exercicios" / "ficha.txt"
+    exercise_inbox.parent.mkdir(parents=True)
+    exercise_inbox.write_text("lista de problemas longa", encoding="utf-8")
+    item = database.add_inbox_item(
+        exercise_inbox,
+        tmp_path / "downloads" / "ficha.txt",
+        exercise_inbox.name,
+        exercise_inbox.stat().st_size,
+    )
+    exercise_destination = tmp_path / "subject" / "ficha.txt"
+    exercise_destination.parent.mkdir(parents=True)
+    exercise_inbox.replace(exercise_destination)
+    exercise_id = database.record_filing(item.id, subject.id, "Exercícios", exercise_destination).id
+
+    adopted_path = tmp_path / "adopted.txt"
+    adopted_path.write_text("adotado", encoding="utf-8")
+    candidate = ExistingDownload.capture(adopted_path)
+    assert candidate is not None
+    adopted = database.adopt_subject_file(candidate, subject.id, "Outros")
+
+    his_inbox = tmp_path / "his" / "aula.txt"
+    his_inbox.parent.mkdir(parents=True)
+    his_inbox.write_text("revolução industrial", encoding="utf-8")
+    his_item = database.add_inbox_item(
+        his_inbox,
+        tmp_path / "downloads" / "aula.txt",
+        his_inbox.name,
+        his_inbox.stat().st_size,
+    )
+    his_destination = tmp_path / "his" / "organizada.txt"
+    his_inbox.replace(his_destination)
+    other_document = database.record_filing(his_item.id, other.id, "Slides", his_destination)
+
+    dropped_id = _file_record(database, subject, tmp_path / "dropped")
+    dropped_document = database.get_file(dropped_id)
+    assert dropped_document is not None
+    dropped_document.current_path.unlink()
+    assert database.drop_file_record(
+        dropped_id,
+        expected_path=dropped_document.current_path,
+        expected_origin=dropped_document.origin,
+        expected_record_token=dropped_document.record_token,
+        verify_missing=lambda: True,
+    )
+
+    files = database.list_subject_files(subject.id)
+    summaries = database.count_files_by_subject()
+
+    assert [document.id for document in files] == [exercise_id, adopted.id, slides_id]
+    assert summaries[subject.id] == (3, sum(document.size for document in files))
+    assert summaries[other.id] == (1, other_document.size)
+    assert dropped_id not in {document.id for document in files}

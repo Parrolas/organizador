@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -33,9 +34,9 @@ from PySide6.QtWidgets import (
 from organizador.config import AppConfig
 from organizador.db import Database
 from organizador.filer import FilingService, render_final_name
-from organizador.models import FILE_KINDS, InboxItem, StudyTask, Subject
+from organizador.models import FILE_KINDS, FiledDocument, InboxItem, StudyTask, Subject
 from organizador.ui.theme import TEAL
-from organizador.ui.widgets import button, label
+from organizador.ui.widgets import button, format_size, label
 
 
 class SubjectDialog(QDialog):
@@ -521,3 +522,102 @@ class BulkFilingDialog(QDialog):
         if subject_id is None or kind is None:  # pragma: no cover - combo is always populated
             raise RuntimeError("A seleção de disciplina e tipo é obrigatória.")
         return int(subject_id), str(kind), self.task_check.isChecked(), due
+
+
+class SubjectFilesDialog(QDialog):
+    """Read-only overview of one subject's organised files."""
+
+    open_requested = Signal(object)
+
+    def __init__(
+        self,
+        subject: Subject,
+        documents: Sequence[FiledDocument],
+        folder_path: Path,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.subject = subject
+        self.documents = tuple(documents)
+        self.folder_path = folder_path
+        self.setWindowTitle(f"Ficheiros de {subject.name}")
+        self.setModal(True)
+        self.setMinimumSize(620, 540)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 22)
+        root.setSpacing(12)
+        title = subject.name + (f"  ·  {subject.code}" if subject.code else "")
+        root.addWidget(label(title, "PageTitle"))
+        count = len(self.documents)
+        total_bytes = sum(document.size for document in self.documents)
+        root.addWidget(
+            label(
+                f"{count} ficheiro{'s' if count != 1 else ''} · {format_size(total_bytes)}",
+                "PageSubtitle",
+            )
+        )
+        kind_parts = [
+            f"{kind} {sum(1 for document in self.documents if document.kind == kind)}"
+            for kind in FILE_KINDS
+            if any(document.kind == kind for document in self.documents)
+        ]
+        if kind_parts:
+            root.addWidget(label(" · ".join(kind_parts), "Muted"))
+
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        content = QWidget()
+        list_layout = QVBoxLayout(content)
+        list_layout.setContentsMargins(0, 0, 4, 0)
+        list_layout.setSpacing(8)
+        if not self.documents:
+            empty = label(
+                "Ainda não há ficheiros organizados nesta disciplina.",
+                "Muted",
+            )
+            empty.setWordWrap(True)
+            list_layout.addWidget(empty)
+        for document in self.documents:
+            list_layout.addWidget(self._row(document))
+        list_layout.addStretch(1)
+        area.setWidget(content)
+        root.addWidget(area, 1)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        folder_button = button("Abrir pasta", variant="quiet")
+        folder_button.clicked.connect(
+            lambda checked=False: self.open_requested.emit(self.folder_path)
+        )
+        close = button("Fechar")
+        close.clicked.connect(self.reject)
+        actions.addWidget(folder_button)
+        actions.addWidget(close)
+        root.addLayout(actions)
+
+    def _row(self, document: FiledDocument) -> QFrame:
+        row = QFrame()
+        row.setObjectName("ListRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(14, 10, 10, 10)
+        row_layout.setSpacing(12)
+        copy = QVBoxLayout()
+        copy.setSpacing(2)
+        name = label(document.current_path.name, "RowTitle")
+        name.setWordWrap(True)
+        copy.addWidget(name)
+        copy.addWidget(
+            label(
+                f"{document.kind} · {format_size(document.size)} · "
+                f"organizado {document.filed_at.strftime('%d/%m/%Y')}",
+                "Muted",
+            )
+        )
+        row_layout.addLayout(copy, 1)
+        open_button = button("Abrir", variant="quiet")
+        open_button.clicked.connect(
+            lambda checked=False, path=document.current_path: self.open_requested.emit(path)
+        )
+        row_layout.addWidget(open_button)
+        return row
