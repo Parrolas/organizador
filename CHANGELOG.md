@@ -2,6 +2,14 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.6.1 - 2026-09-03
+
+### Added
+
+- The packaged app registers itself in the per-user Start Menu, so it appears
+  in Windows search (Win+S) and the apps list and can be launched with a click.
+  The shortcut self-heals after updates or folder moves.
+
 ## 0.6.0 - 2026-09-02
 
 ### Added

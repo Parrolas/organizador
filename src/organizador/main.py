@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import logging
 import sys
@@ -81,12 +82,26 @@ def load_config_safely(data_dir: Path) -> tuple[AppConfig, Exception | None]:
         return AppConfig(data_dir=data_dir), exc
 
 
+def _set_app_user_model_id() -> None:
+    """Give the packaged app a stable identity for tray notifications."""
+
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            ctypes.c_wchar_p("Parrolas.Organizador")
+        )
+    except Exception:  # pragma: no cover - cosmetic Windows integration
+        LOGGER.warning("Could not set the application user model id", exc_info=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Create Qt, enforce one instance and run the application."""
 
     arguments = build_parser().parse_args(argv)
     target_data_dir = arguments.data_dir or default_data_dir()
     sys.excepthook = log_uncaught_exception
+    _set_app_user_model_id()
     try:
         configure_logging(target_data_dir)
     except Exception as exc:

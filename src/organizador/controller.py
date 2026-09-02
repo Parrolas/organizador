@@ -42,7 +42,7 @@ from organizador.reconcile import (
 )
 from organizador.reconcile import apply as apply_reconciliation
 from organizador.reconcile import scan as scan_reconciliation
-from organizador.startup import set_launch_at_login
+from organizador.startup import ensure_start_menu_shortcut, set_launch_at_login
 from organizador.ui.dialogs import (
     BulkFilingDialog,
     OnboardingDialog,
@@ -149,6 +149,11 @@ class AppController(QObject):
                 if self.config.check_updates_on_launch:
                     self._begin_update_check(automatic=True)
                 self._cleanup_previous_version()
+                threading.Thread(
+                    target=ensure_start_menu_shortcut,
+                    name="start-menu-shortcut",
+                    daemon=True,
+                ).start()
 
         self._refresh()
         if background and configured and not smoke_test:

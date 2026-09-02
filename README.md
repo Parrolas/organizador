@@ -59,6 +59,10 @@ aplicação usa `Documentos\Universidade`, cria `_Caixa de Entrada` dentro dessa
 pasta e vigia a pasta Downloads conhecida pelo Windows. Tudo pode ser alterado
 em **Definições**.
 
+A aplicação instala-se sozinha no menu Iniciar: basta procurar
+"Organizador" na pesquisa do Windows (Win+S) e clicar no resultado para a
+abrir.
+
 ## Área de notificação
 
 Fechar a janela principal não termina a aplicação: esconde-a na área de
