@@ -11,7 +11,7 @@ import pytest
 
 from organizador.config import AppConfig
 from organizador.logging_setup import configure_logging, log_uncaught_exception
-from organizador.main import load_config_safely
+from organizador.main import build_parser, load_config_safely, split_update_arguments
 
 
 def test_configure_logging_is_idempotent_for_same_path(tmp_path: Path) -> None:
@@ -84,3 +84,24 @@ def test_unexpected_settings_failure_uses_safe_defaults(
     assert config == AppConfig(data_dir=tmp_path)
     assert isinstance(error, RuntimeError)
     assert "unexpected settings failure" in caplog.text
+
+
+def test_split_update_arguments_requires_paired_values(tmp_path: Path) -> None:
+    manifest = tmp_path / "transaction.json"
+
+    assert split_update_arguments(None, None) is None
+    assert split_update_arguments(manifest, "token") == (manifest, "token")
+    with pytest.raises(ValueError):
+        split_update_arguments(None, "token")
+    with pytest.raises(ValueError):
+        split_update_arguments(manifest, None)
+
+
+def test_build_parser_accepts_hidden_update_arguments() -> None:
+    parsed = build_parser().parse_args(
+        ["--update-manifest", "state/transaction.json", "--update-token", "secret"]
+    )
+
+    assert parsed.update_manifest == Path("state/transaction.json")
+    assert parsed.update_token == "secret"
+    assert build_parser().parse_args([]).update_manifest is None

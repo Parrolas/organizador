@@ -5,17 +5,18 @@ from __future__ import annotations
 import copy
 import logging
 import os
-import shutil
 import sqlite3
 import subprocess
 import threading
+import time
 from collections import deque
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSystemTrayIcon
 
 from organizador import updater
 from organizador.classifier import guess_filing
@@ -42,6 +43,7 @@ from organizador.reconcile import (
 )
 from organizador.reconcile import apply as apply_reconciliation
 from organizador.reconcile import scan as scan_reconciliation
+from organizador.recovery import RecoveryBundle, RecoveryCoordinator
 from organizador.startup import ensure_start_menu_shortcut, set_launch_at_login
 from organizador.ui.dialogs import (
     BulkFilingDialog,
@@ -54,10 +56,22 @@ from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
 from organizador.ui.theme import apply_theme, get_theme
 from organizador.ui.tray import TrayIcon
-from organizador.updater import UpdateInfo
+from organizador.updater import UpdateCheckResult, UpdateInfo, UpdateTransaction
 from organizador.watcher import DownloadWatcher
 
 LOGGER = logging.getLogger(__name__)
+
+
+class _UpdateInstallAborted(Exception):
+    """The update worker stopped early because the application is shutting down."""
+
+
+@dataclass(frozen=True, slots=True)
+class StartupState:
+    """Whether onboarding completed and background services may start."""
+
+    configured: bool
+    services_ready: bool
 
 
 def _deadline_copy(delta_days: int) -> str:
@@ -76,16 +90,18 @@ class AppController(QObject):
     download_ready = Signal(int, object)
     index_completed = Signal(int, str)
     import_completed = Signal(int)
-    update_check_finished = Signal(object)
+    update_check_finished = Signal(object, bool)
     update_install_finished = Signal(object)
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, database: Database | None = None) -> None:
         super().__init__()
         self.config = config
         self.config.data_dir.mkdir(parents=True, exist_ok=True)
         configure_logging(self.config.data_dir)
-        self.database = Database(config.database_path)
-        self.database.initialize()
+        if database is None:
+            database = Database(config.database_path)
+            database.initialize()
+        self.database = database
         self.filer = FilingService(config, self.database)
         self.indexer = DocumentIndexer(
             self.database,
@@ -103,6 +119,10 @@ class AppController(QObject):
         self._watcher_generation = 0
         self._pending_update: UpdateInfo | None = None
         self._update_installing = False
+        self._update_checking = False
+        self._update_transaction: UpdateTransaction | None = None
+        self._update_restart_armed = False
+        self._abort_update_install = False
 
         self.main_window = MainWindow(self.database, config)
         self.prompt = FilingPrompt(config.prompt_timeout_seconds)
@@ -115,6 +135,12 @@ class AppController(QObject):
 
     def start(self, *, background: bool = False, smoke_test: bool = False) -> None:
         """Run first-time setup, start services and reveal the appropriate surface."""
+
+        state = self.prepare(smoke_test=smoke_test)
+        self.activate(state, background=background, smoke_test=smoke_test)
+
+    def prepare(self, *, smoke_test: bool = False) -> StartupState:
+        """Show the tray and run onboarding plus reconciliation without services."""
 
         application = QApplication.instance()
         if not isinstance(application, QApplication):  # pragma: no cover - invariant
@@ -130,6 +156,7 @@ class AppController(QObject):
             onboarding = OnboardingDialog(self.config, self.database, self.filer, self.main_window)
             configured = onboarding.exec() == QDialog.DialogCode.Accepted
 
+        services_ready = False
         if configured:
             try:
                 self.config.ensure_directories()
@@ -143,23 +170,37 @@ class AppController(QObject):
                 )
             else:
                 self._reconcile_startup()
-                self._restart_watcher()
-                self.indexer.submit_pending()
-                self.reminder_timer.start()
-                if self.config.check_updates_on_launch:
-                    self._begin_update_check(automatic=True)
-                self._cleanup_previous_version()
-                threading.Thread(
-                    target=ensure_start_menu_shortcut,
-                    name="start-menu-shortcut",
-                    daemon=True,
-                ).start()
+                services_ready = True
+        return StartupState(configured=configured, services_ready=services_ready)
+
+    def activate(
+        self,
+        state: StartupState,
+        *,
+        background: bool = False,
+        smoke_test: bool = False,
+    ) -> None:
+        """Start background services and reveal the appropriate surface."""
+
+        if state.services_ready:
+            self._restart_watcher()
+            self.indexer.submit_pending()
+            self.reminder_timer.start()
+            if self.config.check_updates_on_launch:
+                self._begin_update_check(automatic=True)
+            self._handle_legacy_rollback_bridge()
+            self._show_pending_update_result()
+            threading.Thread(
+                target=ensure_start_menu_shortcut,
+                name="start-menu-shortcut",
+                daemon=True,
+            ).start()
 
         self._refresh()
-        if background and configured and not smoke_test:
+        if background and state.configured and not smoke_test:
             self.main_window.hide()
         else:
-            self.main_window.show_from_tray("inicio" if configured else "disciplinas")
+            self.main_window.show_from_tray("inicio" if state.configured else "disciplinas")
 
     def _reconcile_startup(self) -> None:
         """Repair safe inbox states before background services inspect the folders."""
@@ -232,6 +273,11 @@ class AppController(QObject):
     def shutdown(self) -> None:
         """Stop worker threads before terminating Qt."""
 
+        if self._update_installing and not self._update_restart_armed:
+            # The helper is not supervising yet; ask the worker to abort cleanly
+            # between steps. When the helper already launched, shutdown proceeds
+            # and the helper completes the update after this process exits.
+            self._abort_update_install = True
         self.reminder_timer.stop()
         self._watcher_generation += 1
         if self.watcher is not None:
@@ -1027,23 +1073,113 @@ class AppController(QObject):
         self.tray.update_inbox_count(self.database.count_inbox_items())
         self.tray.set_paused(paused)
 
-    def _cleanup_previous_version(self) -> None:
-        """Delete the rollback folder left by a successful update."""
+    def _handle_legacy_rollback_bridge(self) -> None:
+        """Retain a pre-v0.6.2 rollback folder until a later healthy launch."""
 
         app_dir = updater.app_directory()
         if app_dir is None:
             return
-        threading.Thread(
-            target=updater.cleanup_previous_version,
-            args=(app_dir,),
-            name="update-cleanup",
-            daemon=True,
-        ).start()
+        legacy = app_dir.parent / "Organizador.old"
+        if not legacy.is_dir():
+            return
+        marker = self.config.data_dir / "updates" / "legacy-rollback-retained"
+        try:
+            if marker.is_file():
+                marker.unlink()
+                threading.Thread(
+                    target=updater.cleanup_previous_version,
+                    args=(app_dir,),
+                    name="update-cleanup",
+                    daemon=True,
+                ).start()
+            else:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text("retained\n", encoding="utf-8")
+                LOGGER.info("Retaining legacy rollback folder %s until a later launch", legacy)
+        except OSError:
+            LOGGER.exception("Could not handle the legacy rollback folder %s", legacy)
+
+    def _update_result_version(self, result: updater.UpdateResult) -> str:
+        """Return a best-effort version label for a persisted update result."""
+
+        transaction_id = result.transaction_id
+        if len(transaction_id) != 32 or not transaction_id.isalnum():
+            return ""
+        manifest_path = (
+            updater.updates_directory(self.config.data_dir) / transaction_id / "transaction.json"
+        )
+        try:
+            transaction = updater.read_update_transaction(manifest_path)
+        except (OSError, updater.UpdaterError, ValueError):
+            return ""
+        return ".".join(str(part) for part in transaction.version)
+
+    def _show_pending_update_result(self) -> None:
+        """Display persisted update outcomes once, then mark them seen."""
+
+        try:
+            results = updater.scan_unseen_update_results(self.config.data_dir)
+        except OSError:
+            LOGGER.exception("Could not scan persisted update results")
+            return
+        for result in results:
+            version = self._update_result_version(result)
+            if result.status is updater.UpdateResultStatus.SUCCEEDED:
+                title = _("Atualização instalada")
+                if version:
+                    message = _("Atualização {version} instalada com sucesso.").format(
+                        version=version
+                    )
+                else:
+                    message = _("Atualização instalada com sucesso.")
+                icon = QSystemTrayIcon.MessageIcon.Information
+                box = QMessageBox.Icon.Information
+            elif result.status is updater.UpdateResultStatus.ROLLED_BACK:
+                title = _("Atualização revertida")
+                if version:
+                    message = _(
+                        "A atualização {version} falhou e a versão anterior foi restaurada."
+                    ).format(version=version)
+                else:
+                    message = _("A atualização falhou e a versão anterior foi restaurada.")
+                icon = QSystemTrayIcon.MessageIcon.Warning
+                box = QMessageBox.Icon.Warning
+            else:
+                title = _("Atualização falhou")
+                message = _("A atualização falhou e a reposição automática não foi concluída.")
+                if (
+                    result.status is updater.UpdateResultStatus.FAILED_AFTER_COMMIT
+                    and result.rollback_dir.is_dir()
+                ):
+                    message += " " + _("A versão anterior foi mantida em: {path}.").format(
+                        path=result.rollback_dir
+                    )
+                icon = QSystemTrayIcon.MessageIcon.Critical
+                box = QMessageBox.Icon.Critical
+            if self.tray.available:
+                self.tray.notify(title, message, icon=icon)
+            elif box is QMessageBox.Icon.Information:
+                QMessageBox.information(self.main_window, title, message)
+            elif box is QMessageBox.Icon.Warning:
+                QMessageBox.warning(self.main_window, title, message)
+            else:
+                QMessageBox.critical(self.main_window, title, message)
+            try:
+                updater.mark_scanned_update_result_seen(self.config.data_dir, result.transaction_id)
+            except (OSError, ValueError, updater.UpdaterError):
+                LOGGER.exception("Could not mark update result %s as seen", result.transaction_id)
+
+    def _pending_version_text(self) -> str | None:
+        """Return the pending update version label, if one is stored."""
+
+        if self._pending_update is None:
+            return None
+        return ".".join(str(part) for part in self._pending_update.version)
 
     def _begin_update_check(self, *, automatic: bool) -> None:
         """Check for a newer release in a background thread."""
 
-        if self._update_installing:
+        if self._update_installing or self._update_checking:
             return
         if not updater.is_frozen():
             if not automatic:
@@ -1055,20 +1191,54 @@ class AppController(QObject):
                     ),
                 )
             return
+        self._update_checking = True
+        self.tray.set_update_state(checking=True, version=self._pending_version_text())
 
         def run() -> None:
-            info = updater.fetch_latest_release()
-            self.update_check_finished.emit(info)
+            try:
+                result: UpdateCheckResult = updater.check_latest_release()
+            except Exception as exc:
+                LOGGER.exception("Update check failed")
+                result = UpdateCheckResult(
+                    updater.UpdateCheckStatus.ERROR, error=str(exc) or type(exc).__name__
+                )
+            self.update_check_finished.emit(result, automatic)
 
         threading.Thread(target=run, name="update-check", daemon=True).start()
 
-    def _on_update_check_finished(self, result: object) -> None:
-        info = result if isinstance(result, UpdateInfo) else None
-        self._pending_update = info
-        if info is None:
+    def _on_update_check_finished(self, result: object, automatic: bool) -> None:
+        self._update_checking = False
+        if not isinstance(result, UpdateCheckResult):
+            LOGGER.error("Ignoring malformed update check result")
+            self.tray.set_update_state(version=self._pending_version_text())
             return
+        if result.status is updater.UpdateCheckStatus.ERROR:
+            self.tray.set_update_state(version=self._pending_version_text())
+            if automatic:
+                LOGGER.warning("Automatic update check failed: %s", result.error)
+                return
+            self.tray.notify(
+                _("Não foi possível procurar atualizações."),
+                result.error or _("Não foi possível instalar a atualização."),
+                icon=QSystemTrayIcon.MessageIcon.Warning,
+            )
+            return
+        if result.status is updater.UpdateCheckStatus.NO_UPDATE:
+            self._pending_update = None
+            self.tray.set_update_state(version=None)
+            if not automatic:
+                self.tray.notify(
+                    _("Sem atualizações"),
+                    _("O Organizador está atualizado."),
+                )
+            return
+        info = result.update
+        if info is None:  # pragma: no cover - guarded by the result type
+            self.tray.set_update_state(version=self._pending_version_text())
+            return
+        self._pending_update = info
         version = ".".join(str(part) for part in info.version)
-        self.tray.set_pending_update(version)
+        self.tray.set_update_state(version=version)
         self.tray.notify(
             _("Atualização disponível"),
             _(
@@ -1083,26 +1253,57 @@ class AppController(QObject):
             return
         app_dir = updater.app_directory()
         if app_dir is None:
+            self.tray.notify(
+                _("Atualização falhou"),
+                _("A atualização só se aplica à versão instalada."),
+                icon=QSystemTrayIcon.MessageIcon.Warning,
+            )
             return
         self._update_installing = True
+        self._abort_update_install = False
         version = ".".join(str(part) for part in info.version)
-        self.tray.set_pending_update(None)
+        self.tray.set_update_state(installing=True, version=version)
         self.tray.notify(
             _("A instalar atualização…"),
             _("A transferir e a verificar Organizador {version}.").format(version=version),
         )
 
         def run() -> None:
+            transaction: UpdateTransaction | None = None
             try:
-                staging = updater.staging_directory(app_dir)
-                zip_path = updater.download_and_verify(
-                    info.zip_url, info.sha256_url, updater.download_temp_directory()
+                transaction = updater.create_update_transaction(
+                    app_dir,
+                    info.version,
+                    data_dir=self.config.data_dir,
+                    old_pid=os.getpid(),
                 )
-                staging = updater.extract_to_staging(zip_path, staging)
-                script = updater.write_swap_script(app_dir, staging)
+                if self._abort_update_install:
+                    raise _UpdateInstallAborted
+                zip_path = updater.download_and_verify(
+                    info.zip_url, info.sha256_url, transaction.download_dir
+                )
+                if self._abort_update_install:
+                    raise _UpdateInstallAborted
+                staging = updater.extract_to_staging(zip_path, transaction.staging_dir)
+                if self._abort_update_install:
+                    raise _UpdateInstallAborted
+                staged_version = updater.read_staged_release_version(staging)
+                if staged_version is not None and staged_version != info.version:
+                    raise updater.UpdaterError(
+                        _("A atualização transferida não corresponde à versão {version}.").format(
+                            version=version
+                        )
+                    )
+                updater.write_update_helper(transaction)
+            except _UpdateInstallAborted:
+                if transaction is not None:
+                    updater.abort_update_transaction(transaction)
+                self.update_install_finished.emit(None)
+                return
             except Exception as exc:
                 LOGGER.exception("Update installation failed")
-                shutil.rmtree(updater.staging_directory(app_dir), ignore_errors=True)
+                if transaction is not None:
+                    updater.abort_update_transaction(transaction)
                 message = (
                     str(exc)
                     if isinstance(exc, updater.UpdaterError)
@@ -1110,26 +1311,194 @@ class AppController(QObject):
                 )
                 self.update_install_finished.emit(message)
                 return
-            self.update_install_finished.emit(script)
+            self.update_install_finished.emit(transaction)
 
         threading.Thread(target=run, name="update-install", daemon=True).start()
 
     def _on_update_install_finished(self, result: object) -> None:
-        self._update_installing = False
-        if isinstance(result, Path) and result.is_file():
-            self.tray.notify(
-                _("Atualização pronta"),
-                _("A reiniciar para aplicar a atualização…"),
-            )
-            self.shutdown()
-            updater.launch_swap(result)
+        if result is None:
+            # The worker aborted during shutdown; stay quiet and exit with the app.
+            self._update_installing = False
+            self._update_transaction = None
             return
+        if isinstance(result, UpdateTransaction):
+            transaction = result
+            self._update_transaction = transaction
+            try:
+                updater.launch_update_helper(transaction, wait_ready=False)
+            except Exception as exc:
+                LOGGER.exception("Could not launch the update helper")
+                updater.abort_update_transaction(transaction)
+                self._update_installing = False
+                self._update_transaction = None
+                message = (
+                    str(exc)
+                    if isinstance(exc, updater.UpdaterError)
+                    else _("Não foi possível instalar a atualização.")
+                )
+                self.tray.set_update_state(version=self._pending_version_text())
+                self.tray.notify(
+                    _("Atualização falhou"),
+                    message,
+                    icon=QSystemTrayIcon.MessageIcon.Warning,
+                )
+                return
+            self._update_restart_armed = True
+            self.tray.set_update_state(
+                installing=True,
+                version=".".join(str(part) for part in transaction.version),
+            )
+            deadline = time.monotonic() + transaction.ready_timeout_seconds
+            self._wait_for_helper_ready(transaction, deadline)
+            return
+        self._update_installing = False
         message = (
             str(result)
             if isinstance(result, str) and result
             else _("Não foi possível instalar a atualização.")
         )
-        self.tray.notify(_("Atualização falhou"), message)
+        self.tray.set_update_state(version=self._pending_version_text())
+        self.tray.notify(
+            _("Atualização falhou"),
+            message,
+            icon=QSystemTrayIcon.MessageIcon.Warning,
+        )
+
+    def _wait_for_helper_ready(self, transaction: UpdateTransaction, deadline: float) -> None:
+        """Restart once the helper supervises, or abort the handoff on timeout."""
+
+        if updater.helper_ready_received(transaction):
+            self.tray.notify(
+                _("Atualização pronta"),
+                _("A reiniciar para aplicar a atualização…"),
+            )
+            self.shutdown()
+            return
+        if time.monotonic() >= deadline:
+            LOGGER.error("Update helper did not become ready; aborting the handoff")
+            updater.abort_update_transaction(transaction)
+            self._update_installing = False
+            self._update_restart_armed = False
+            self._update_transaction = None
+            self.tray.set_update_state(version=self._pending_version_text())
+            self.tray.notify(
+                _("Atualização falhou"),
+                _("Não foi possível iniciar o assistente de atualização."),
+                icon=QSystemTrayIcon.MessageIcon.Warning,
+            )
+            return
+        QTimer.singleShot(150, lambda: self._wait_for_helper_ready(transaction, deadline))
+
+    def run_update_handshake(
+        self,
+        transaction: UpdateTransaction,
+        recovery_bundle: RecoveryBundle | None,
+        coordinator: RecoveryCoordinator,
+        state: StartupState,
+        *,
+        background: bool,
+        commit_timeout_seconds: float = 60.0,
+    ) -> None:
+        """Drive the ready/commit/healthy protocol from the running event loop."""
+
+        try:
+            updater.validate_update_target(
+                transaction.manifest_path,
+                transaction.token,
+                data_dir=self.config.data_dir,
+            )
+        except updater.UpdaterError as exc:
+            LOGGER.error("Update target validation failed: %s", exc)
+            QMessageBox.critical(
+                self.main_window,
+                _("Atualização inválida"),
+                _("A atualização não corresponde a esta instalação. Nenhum ficheiro foi alterado."),
+            )
+            QApplication.exit(1)
+            return
+        updater.mark_update_ready(transaction.manifest_path, transaction.token)
+        self._poll_update_commit(
+            transaction,
+            recovery_bundle,
+            coordinator,
+            state,
+            background=background,
+            deadline=time.monotonic() + commit_timeout_seconds,
+        )
+
+    def _poll_update_commit(
+        self,
+        transaction: UpdateTransaction,
+        recovery_bundle: RecoveryBundle | None,
+        coordinator: RecoveryCoordinator,
+        state: StartupState,
+        *,
+        background: bool,
+        deadline: float,
+    ) -> None:
+        """Activate after the helper commits, or continue alone when it never does."""
+
+        if updater.update_commit_received(transaction) or time.monotonic() >= deadline:
+            if not updater.update_commit_received(transaction):
+                LOGGER.warning("Update commit marker never arrived; continuing startup alone")
+            self._commit_update_handshake(
+                transaction, recovery_bundle, coordinator, state, background=background
+            )
+            return
+        QTimer.singleShot(
+            100,
+            lambda: self._poll_update_commit(
+                transaction,
+                recovery_bundle,
+                coordinator,
+                state,
+                background=background,
+                deadline=deadline,
+            ),
+        )
+
+    def _commit_update_handshake(
+        self,
+        transaction: UpdateTransaction,
+        recovery_bundle: RecoveryBundle | None,
+        coordinator: RecoveryCoordinator,
+        state: StartupState,
+        *,
+        background: bool,
+    ) -> None:
+        """Close data rollback, activate services, then acknowledge health."""
+
+        if recovery_bundle is not None:
+            try:
+                coordinator.mark_healthy(recovery_bundle)
+            except Exception:
+                LOGGER.exception("Could not mark the migrated data healthy")
+                QMessageBox.critical(
+                    self.main_window,
+                    _("Não foi possível concluir a atualização"),
+                    _(
+                        "Os dados migrados não puderam ser validados. "
+                        "A versão anterior foi mantida para recuperação manual."
+                    ),
+                )
+                QApplication.exit(1)
+                return
+        try:
+            self.activate(state, background=background)
+        except Exception:
+            LOGGER.exception("Updated application failed to activate after commit")
+            QMessageBox.critical(
+                self.main_window,
+                _("Não foi possível concluir a atualização"),
+                _(
+                    "A nova versão não conseguiu arrancar. "
+                    "A versão anterior foi mantida para recuperação manual."
+                ),
+            )
+            QApplication.exit(1)
+            return
+        with suppress(Exception):
+            updater.mark_update_healthy(transaction.manifest_path, transaction.token)
 
     def _check_deadlines(self) -> None:
         today = date.today()

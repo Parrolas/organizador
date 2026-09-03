@@ -6,7 +6,8 @@ import json
 import logging
 import sqlite3
 from collections.abc import Callable, Collection, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -34,6 +35,65 @@ METRIC_OPERATIONS_RECOVERED = "operations_recovered"
 
 class NewerDatabaseError(RuntimeError):
     """The database was created or migrated by a newer application version."""
+
+
+class DatabaseHealthError(RuntimeError):
+    """A database failed an explicit SQLite health check."""
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaInspection:
+    """Read-only summary of the schema state relevant to migrations."""
+
+    database_exists: bool
+    user_version: int | None
+    missing_additions: tuple[str, ...] = ()
+
+    @property
+    def requires_migration(self) -> bool:
+        """Return whether this application can and should update the schema."""
+
+        return bool(
+            self.database_exists
+            and self.user_version is not None
+            and (
+                self.user_version < SCHEMA_VERSION
+                or (self.user_version == SCHEMA_VERSION and self.missing_additions)
+            )
+        )
+
+    @property
+    def is_current(self) -> bool:
+        """Return whether the schema is complete for this application version."""
+
+        return (
+            self.database_exists
+            and self.user_version == SCHEMA_VERSION
+            and not self.missing_additions
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseHealth:
+    """Result of opening a database read-only and running ``quick_check``."""
+
+    database_exists: bool
+    quick_check: tuple[str, ...]
+    error: str | None = None
+
+    @property
+    def healthy(self) -> bool:
+        """Return whether SQLite reported a structurally healthy database."""
+
+        return self.database_exists and self.error is None and self.quick_check == ("ok",)
+
+    def require_healthy(self) -> None:
+        """Raise a stable application error when the health check failed."""
+
+        if self.healthy:
+            return
+        detail = self.error or "; ".join(self.quick_check) or "database is missing"
+        raise DatabaseHealthError(f"SQLite database is not healthy: {detail}")
 
 
 SCHEMA = """
@@ -133,6 +193,29 @@ CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(completed, due_date);
 CREATE INDEX IF NOT EXISTS idx_events_undo ON events(undone_at, created_at DESC);
 """
 
+_EXPECTED_TABLES = (
+    "subjects",
+    "inbox",
+    "files",
+    "events",
+    "tasks",
+    "reviewed_findings",
+    "activity_counters",
+    "document_pages",
+)
+_EXPECTED_INDEXES = (
+    "idx_inbox_active_path",
+    "idx_inbox_status_detected",
+    "idx_files_filed_at",
+    "idx_tasks_due_date",
+    "idx_events_undo",
+)
+_ADDITIVE_COLUMNS = {
+    "events": ("subject_id", "kind"),
+    "files": ("origin", "record_token", "catalog_state"),
+    "tasks": ("reminder_lead_days", "last_notified_on"),
+}
+
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="microseconds")
@@ -165,31 +248,149 @@ class Database:
         finally:
             connection.close()
 
+    def inspect_schema(self) -> SchemaInspection:
+        """Inspect migration state without creating or writing the database."""
+
+        if not self.path.is_file():
+            return SchemaInspection(database_exists=False, user_version=None)
+        with self._connect_read_only() as connection:
+            version_row = connection.execute("PRAGMA user_version").fetchone()
+            user_version = int(version_row[0]) if version_row is not None else 0
+            rows = connection.execute(
+                "SELECT type, name, sql FROM sqlite_master WHERE type IN ('table', 'index')"
+            ).fetchall()
+            objects = {(str(row["type"]), str(row["name"])): row["sql"] for row in rows}
+            missing: list[str] = []
+            for table in _EXPECTED_TABLES:
+                if ("table", table) not in objects:
+                    missing.append(f"table:{table}")
+            for index in _EXPECTED_INDEXES:
+                if ("index", index) not in objects:
+                    missing.append(f"index:{index}")
+            active_index_sql = objects.get(("index", "idx_inbox_active_path"))
+            if (
+                active_index_sql is not None
+                and "'returning'" not in str(active_index_sql).casefold()
+            ):
+                missing.append("index:idx_inbox_active_path:returning")
+            for table, expected_columns in _ADDITIVE_COLUMNS.items():
+                if ("table", table) not in objects:
+                    continue
+                columns = {
+                    str(row["name"])
+                    for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                missing.extend(
+                    f"{table}.{column}" for column in expected_columns if column not in columns
+                )
+        return SchemaInspection(
+            database_exists=True,
+            user_version=user_version,
+            missing_additions=tuple(sorted(missing)),
+        )
+
+    def validate_health(self) -> DatabaseHealth:
+        """Run SQLite ``quick_check`` read-only without creating a missing file."""
+
+        if not self.path.is_file():
+            return DatabaseHealth(
+                database_exists=False,
+                quick_check=(),
+                error="database does not exist",
+            )
+        try:
+            with self._connect_read_only() as connection:
+                rows = connection.execute("PRAGMA quick_check").fetchall()
+        except (OSError, sqlite3.Error) as exc:
+            return DatabaseHealth(
+                database_exists=True,
+                quick_check=(),
+                error=str(exc),
+            )
+        return DatabaseHealth(
+            database_exists=True,
+            quick_check=tuple(str(row[0]) for row in rows),
+        )
+
+    def backup_to(self, destination: Path) -> DatabaseHealth:
+        """Create and validate a standalone snapshot, including committed WAL data."""
+
+        if not self.path.is_file():
+            raise FileNotFoundError(self.path)
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with (
+                self._connect_read_only() as source,
+                closing(sqlite3.connect(destination, timeout=10.0)) as target,
+            ):
+                source.backup(target)
+                target.commit()
+                target.execute("PRAGMA journal_mode = DELETE")
+            health = Database(destination).validate_health()
+            health.require_healthy()
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            Path(f"{destination}-wal").unlink(missing_ok=True)
+            Path(f"{destination}-shm").unlink(missing_ok=True)
+            raise
+        return health
+
+    @contextmanager
+    def _connect_read_only(self) -> Iterator[sqlite3.Connection]:
+        uri = f"{self.path.resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True, timeout=10.0)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 10000")
+        try:
+            yield connection
+        finally:
+            connection.close()
+
     def initialize(self) -> None:
         """Create the database and all current schema objects."""
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
             version_row = connection.execute("PRAGMA user_version").fetchone()
             previous_version = int(version_row[0]) if version_row is not None else 0
             if previous_version > SCHEMA_VERSION:
                 raise NewerDatabaseError(
                     f"A base de dados pertence a uma versão mais recente ({previous_version})."
                 )
-            connection.executescript(SCHEMA)
-            if previous_version < 2:
-                self._prepare_office_reindex(connection)
-            if previous_version < 3:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._execute_schema(connection)
+                if previous_version < 2:
+                    self._prepare_office_reindex(connection)
+                # Additive reconciliation is deliberately version-independent.
+                # It repairs interrupted/same-version additions without a bump.
                 self._prepare_operation_journal(connection)
-            if previous_version < 4:
                 self._prepare_reconciliation_actions(connection)
-            # Additive-only column reconciliation runs unconditionally: older
-            # binaries ignore unknown columns, so no SCHEMA_VERSION bump and
-            # no downgrade lockout (the lesson from the v5 incident).
-            self._prepare_task_reminders(connection)
-            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            connection.commit()
+                self._prepare_task_reminders(connection)
+                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    @staticmethod
+    def _execute_schema(connection: sqlite3.Connection) -> None:
+        """Execute the schema without ``executescript``'s implicit commit."""
+
+        pending = ""
+        for line in SCHEMA.splitlines(keepends=True):
+            pending += line
+            if not sqlite3.complete_statement(pending):
+                continue
+            statement = pending.strip()
+            pending = ""
+            if statement:
+                connection.execute(statement)
+        if pending.strip():  # pragma: no cover - guarded by the static schema constant
+            raise RuntimeError("The SQLite schema contains an incomplete statement.")
 
     @staticmethod
     def _prepare_office_reindex(connection: sqlite3.Connection) -> None:
@@ -223,13 +424,17 @@ class Database:
             )
         if "kind" not in columns:
             connection.execute("ALTER TABLE events ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
-        connection.execute("DROP INDEX IF EXISTS idx_inbox_active_path")
-        connection.execute(
-            """
-            CREATE UNIQUE INDEX idx_inbox_active_path
-            ON inbox(path) WHERE status IN ('pending', 'error', 'filing', 'returning')
-            """
-        )
+        index_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_inbox_active_path'"
+        ).fetchone()
+        if index_row is None or "'returning'" not in str(index_row["sql"]).casefold():
+            connection.execute("DROP INDEX IF EXISTS idx_inbox_active_path")
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX idx_inbox_active_path
+                ON inbox(path) WHERE status IN ('pending', 'error', 'filing', 'returning')
+                """
+            )
 
     @staticmethod
     def _prepare_reconciliation_actions(connection: sqlite3.Connection) -> None:

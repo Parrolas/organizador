@@ -12,13 +12,16 @@ jobs:
   windows-release:
     name: Build Windows release
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       QT_QPA_PLATFORM: offscreen
 
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v7
+        with:
+          # The legacy update E2E needs the previous release tag's sources.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -55,7 +58,7 @@ jobs:
         shell: pwsh
         run: .\scripts\build.ps1
 
-      - name: Publish immutable release assets
+      - name: Publish prerelease assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,5 +70,44 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             throw "Release v$Version already exists; published assets are immutable"
           }
-          gh release create "v$Version" $Archive $Checksum --verify-tag --generate-notes --title "Organizador v$Version"
-          if ($LASTEXITCODE -ne 0) { throw "GitHub release publication failed" }
+          gh release create "v$Version" $Archive $Checksum --verify-tag --generate-notes --title "Organizador v$Version" --prerelease
+          if ($LASTEXITCODE -ne 0) { throw "GitHub prerelease publication failed" }
+
+      - name: Download the exact public prerelease assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $Version = (& .\.venv\Scripts\python.exe -c "from organizador import __version__; print(__version__)").Trim()
+          New-Item -ItemType Directory -Path e2e-public -Force | Out-Null
+          gh release download "v$Version" --dir e2e-public --pattern "Organizador-$Version-windows-x64.zip*"
+          if ($LASTEXITCODE -ne 0) { throw "Public prerelease download failed" }
+          $LocalHash = ((Get-Content -LiteralPath "dist\releases\Organizador-$Version-windows-x64.zip.sha256" -Raw).Trim() -split '\s+')[0]
+          $PublicHash = ((Get-Content -LiteralPath "e2e-public\Organizador-$Version-windows-x64.zip.sha256" -Raw).Trim() -split '\s+')[0]
+          if ($LocalHash -ne $PublicHash) { throw "Public prerelease bytes differ from the tested candidate" }
+          $ActualHash = (Get-FileHash -LiteralPath "e2e-public\Organizador-$Version-windows-x64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($ActualHash -ne $PublicHash.ToLowerInvariant()) { throw "Public prerelease checksum mismatch" }
+
+      - name: Legacy update end-to-end gate
+        shell: pwsh
+        run: |
+          $Version = (& .\.venv\Scripts\python.exe -c "from organizador import __version__; print(__version__)").Trim()
+          .\scripts\run_update_release_e2e.ps1 -CandidateZip "e2e-public\Organizador-$Version-windows-x64.zip" -CandidateVersion $Version
+        # On failure the prerelease stays unpublished to /releases/latest (manual
+        # bridge policy): old installations are never offered an unsafe update.
+
+      - name: Upload E2E evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-e2e-evidence
+          path: |
+            update-e2e-evidence-*.log
+            e2e-public/
+
+      # Manual bridge policy (v0.6.2): the exact v0.6.1 updater was proven to
+      # silently no-op on non-ASCII install paths (its .cmd helper misreads
+      # UTF-8 paths), so v0.6.2 stays a prerelease and is NEVER auto-promoted:
+      # /releases/latest keeps returning v0.6.1 and no installed app is offered
+      # an update it cannot apply. Promote manually only once the installed
+      # base runs an updater that is proven Unicode-safe end to end.

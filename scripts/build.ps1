@@ -91,6 +91,14 @@ foreach ($Notice in $RequiredNotices) {
     }
 }
 
+$ManifestEncoding = New-Object System.Text.UTF8Encoding($false)
+$ManifestJson = (@{ format = 1; version = $Version; executable = "Organizador.exe"; internal_directory = "_internal" } | ConvertTo-Json -Compress) + "`n"
+[System.IO.File]::WriteAllText((Join-Path $Distribution "update-manifest.json"), $ManifestJson, $ManifestEncoding)
+$ManifestCheck = Get-Content -LiteralPath (Join-Path $Distribution "update-manifest.json") -Raw | ConvertFrom-Json
+if ($ManifestCheck.version -ne $Version) {
+    throw "O manifesto da atualização não coincide com a versão"
+}
+
 $ReleaseDirectory = Join-Path $Root "dist\releases"
 New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
 $ArchiveName = "Organizador-$Version-windows-x64.zip"

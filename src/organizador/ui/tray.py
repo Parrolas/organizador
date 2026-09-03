@@ -90,16 +90,41 @@ class TrayIcon(QObject):
     def set_pending_update(self, version: str | None) -> None:
         """Show or hide the version-labelled install action."""
 
+        self.set_update_state(version=version)
+
+    def set_update_state(
+        self,
+        *,
+        checking: bool = False,
+        installing: bool = False,
+        version: str | None = None,
+    ) -> None:
+        """Reflect the updater state across the check/install menu actions."""
+
+        busy = checking or installing
+        self.update_action.setEnabled(not busy)
+        self.update_action.setText(
+            _("A procurar atualizações…") if checking else _("Procurar atualizações…")
+        )
         if version:
             self.install_update_action.setText(
-                _("Instalar atualização {version}").format(version=version)
+                _("A instalar atualização {version}…").format(version=version)
+                if installing
+                else _("Instalar atualização {version}").format(version=version)
             )
         self.install_update_action.setVisible(version is not None)
+        self.install_update_action.setEnabled(version is not None and not installing)
 
-    def notify(self, title: str, message: str) -> None:
+    def notify(
+        self,
+        title: str,
+        message: str,
+        *,
+        icon: QSystemTrayIcon.MessageIcon = QSystemTrayIcon.MessageIcon.Information,
+    ) -> None:
         """Display a native tray notification."""
 
-        self.tray.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 4500)
+        self.tray.showMessage(title, message, icon, 4500)
 
     def _activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in {

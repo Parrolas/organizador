@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import date
 from pathlib import Path
 
@@ -626,3 +627,126 @@ def test_subject_file_summaries_and_listings_ignore_dropped_records(
     assert summaries[subject.id] == (3, sum(document.size for document in files))
     assert summaries[other.id] == (1, other_document.size)
     assert dropped_id not in {document.id for document in files}
+
+
+def test_schema_inspection_does_not_create_a_missing_database(tmp_path: Path) -> None:
+    path = tmp_path / "missing" / "organizador.db"
+
+    inspection = Database(path).inspect_schema()
+    health = Database(path).validate_health()
+
+    assert not inspection.database_exists
+    assert inspection.user_version is None
+    assert not inspection.requires_migration
+    assert not health.healthy
+    assert not path.exists()
+    assert not path.parent.exists()
+
+
+def test_schema_inspection_detects_same_version_additive_drift(database: Database) -> None:
+    with database.connect() as connection:
+        connection.execute("ALTER TABLE tasks DROP COLUMN reminder_lead_days")
+        connection.execute("ALTER TABLE tasks DROP COLUMN last_notified_on")
+        connection.commit()
+
+    inspection = database.inspect_schema()
+
+    assert inspection.user_version == 5
+    assert inspection.requires_migration
+    assert set(inspection.missing_additions) >= {
+        "tasks.reminder_lead_days",
+        "tasks.last_notified_on",
+    }
+
+    database.initialize()
+
+    assert database.inspect_schema().is_current
+
+
+def test_schema_migration_rolls_back_schema_and_version_together(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with database.connect() as connection:
+        connection.execute("PRAGMA user_version = 4")
+        connection.commit()
+
+    def fail_after_schema_write(connection: sqlite3.Connection) -> None:
+        connection.execute("ALTER TABLE tasks ADD COLUMN migration_probe TEXT")
+        raise RuntimeError("injected migration failure")
+
+    monkeypatch.setattr(
+        Database,
+        "_prepare_task_reminders",
+        staticmethod(fail_after_schema_write),
+    )
+
+    with pytest.raises(RuntimeError, match="injected migration failure"):
+        database.initialize()
+
+    with database.connect() as connection:
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+    assert version == 4
+    assert "migration_probe" not in columns
+
+
+def test_backup_includes_committed_rows_still_resident_in_wal(
+    database: Database, tmp_path: Path
+) -> None:
+    snapshot = tmp_path / "snapshot.sqlite3"
+    with database.connect() as writer:
+        writer.execute("PRAGMA wal_autocheckpoint = 0")
+        writer.execute(
+            """
+            INSERT INTO subjects(name, code, folder_name, created_at)
+            VALUES ('WAL subject', 'WAL', 'WAL subject', '2026-09-03T00:00:00+00:00')
+            """
+        )
+        writer.commit()
+        assert Path(f"{database.path}-wal").is_file()
+
+        health = database.backup_to(snapshot)
+
+    assert health.healthy
+    with sqlite3.connect(snapshot) as connection:
+        count = int(
+            connection.execute("SELECT COUNT(*) FROM subjects WHERE code = 'WAL'").fetchone()[0]
+        )
+    assert count == 1
+    assert not Path(f"{snapshot}-wal").exists()
+    assert not Path(f"{snapshot}-shm").exists()
+
+
+def test_backup_excludes_uncommitted_rows(database: Database, tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot.sqlite3"
+    with database.connect() as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(
+            """
+            INSERT INTO subjects(name, code, folder_name, created_at)
+            VALUES ('Uncommitted', 'NOPE', 'Uncommitted', '2026-09-03T00:00:00+00:00')
+            """
+        )
+
+        database.backup_to(snapshot)
+
+        writer.rollback()
+    with sqlite3.connect(snapshot) as connection:
+        count = int(
+            connection.execute("SELECT COUNT(*) FROM subjects WHERE code = 'NOPE'").fetchone()[0]
+        )
+    assert count == 0
+
+
+def test_database_health_reports_corruption_without_writing(tmp_path: Path) -> None:
+    path = tmp_path / "corrupt.db"
+    contents = b"this is not sqlite"
+    path.write_bytes(contents)
+
+    health = Database(path).validate_health()
+
+    assert not health.healthy
+    assert health.error
+    assert path.read_bytes() == contents

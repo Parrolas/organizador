@@ -577,6 +577,90 @@ EN_STRINGS: dict[str, str] = {
     ),
     "Procurar atualizações automaticamente": "Check for updates automatically",
     "Atualização pronta": "Update ready",
+    "A atualização extraída excede o limite permitido.": (
+        "The extracted update exceeds the allowed limit."
+    ),
+    "Já existe uma instalação de atualização em curso: {owner}.": (
+        "An update installation is already in progress: {owner}."
+    ),
+    "A atualização contém caminhos duplicados.": "The update contains duplicate paths.",
+    "A atualização contém caminhos incompatíveis.": "The update contains conflicting paths.",
+    "A atualização contém demasiados ficheiros.": "The update contains too many files.",
+    "A atualização contém um caminho de ficheiro inseguro.": (
+        "The update contains an unsafe file path."
+    ),
+    "A atualização contém um ficheiro encriptado não suportado.": (
+        "The update contains an unsupported encrypted file."
+    ),
+    "A atualização contém um tipo de ficheiro não permitido.": (
+        "The update contains a disallowed file type."
+    ),
+    "A pasta não contém uma instalação completa do Organizador.": (
+        "The folder does not contain a complete Organizador installation."
+    ),
+    "Não foi possível iniciar o assistente de atualização.": (
+        "Could not start the update assistant."
+    ),
+    "O ficheiro da atualização excede o limite permitido.": (
+        "The update file exceeds the allowed limit."
+    ),
+    "O tamanho de um ficheiro da atualização é inválido.": ("An update file has an invalid size."),
+    "Um ficheiro da atualização excede o limite permitido.": (
+        "An update file exceeds the allowed limit."
+    ),
+    "A procurar atualizações…": "Checking for updates…",
+    "A instalar atualização {version}…": "Installing update {version}…",
+    "Sem atualizações": "No updates",
+    "O Organizador está atualizado.": "Organizador is up to date.",
+    "Não foi possível procurar atualizações.": "Could not check for updates.",
+    "A atualização transferida não corresponde à versão {version}.": (
+        "The downloaded update does not match version {version}."
+    ),
+    "Atualização instalada": "Update installed",
+    "Atualização {version} instalada com sucesso.": "Update {version} installed successfully.",
+    "Atualização instalada com sucesso.": "Update installed successfully.",
+    "Atualização revertida": "Update rolled back",
+    "A atualização {version} falhou e a versão anterior foi restaurada.": (
+        "Update {version} failed and the previous version was restored."
+    ),
+    "A atualização falhou e a versão anterior foi restaurada.": (
+        "The update failed and the previous version was restored."
+    ),
+    "A atualização falhou e a reposição automática não foi concluída.": (
+        "The update failed and automatic restoration did not complete."
+    ),
+    "A versão anterior foi mantida em: {path}.": "The previous version was kept at: {path}.",
+    "Atualização inválida": "Invalid update",
+    "A atualização não corresponde a esta instalação. Nenhum ficheiro foi alterado.": (
+        "The update does not match this installation. No files were changed."
+    ),
+    "A atualização não pôde ser validada. Nenhum ficheiro foi alterado.": (
+        "The update could not be validated. No files were changed."
+    ),
+    "Não foi possível concluir a atualização": "Could not complete the update",
+    "Não foi possível recuperar os dados": "Could not recover the data",
+    "Não foi possível atualizar os dados": "Could not update the data",
+    "Os argumentos da atualização estão incompletos. Nenhum ficheiro foi alterado.": (
+        "The update arguments are incomplete. No files were changed."
+    ),
+    "Existe uma cópia de segurança de migração que não pôde ser restaurada automaticamente. Nenhum ficheiro foi alterado.\n\n{error}": (
+        "There is a migration backup that could not be restored automatically. "
+        "No files were changed.\n\n{error}"
+    ),
+    "A aplicação não conseguiu preparar o catálogo local. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "The application could not prepare the local catalogue. "
+        "Restoring the backup was attempted.\n\n{error}"
+    ),
+    "Os dados migrados não puderam ser validados. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "The migrated data could not be validated. Restoring the backup was attempted.\n\n{error}"
+    ),
+    "Os dados migrados não puderam ser validados. A versão anterior foi mantida para recuperação manual.": (
+        "The migrated data could not be validated. "
+        "The previous version was kept for manual recovery."
+    ),
+    "A nova versão não conseguiu arrancar. A versão anterior foi mantida para recuperação manual.": (
+        "The new version failed to start. The previous version was kept for manual recovery."
+    ),
 }
 
 ES_STRINGS: dict[str, str] = {
@@ -1172,6 +1256,98 @@ ES_STRINGS: dict[str, str] = {
     ),
     "Procurar atualizações automaticamente": "Buscar actualizaciones automáticamente",
     "Atualização pronta": "Actualización lista",
+    "A atualização extraída excede o limite permitido.": (
+        "La actualización extraída supera el límite permitido."
+    ),
+    "Já existe uma instalação de atualização em curso: {owner}.": (
+        "Ya hay una instalación de actualización en curso: {owner}."
+    ),
+    "A atualização contém caminhos duplicados.": "La actualización contiene rutas duplicadas.",
+    "A atualização contém caminhos incompatíveis.": (
+        "La actualización contiene rutas incompatibles."
+    ),
+    "A atualização contém demasiados ficheiros.": "La actualización contiene demasiados archivos.",
+    "A atualização contém um caminho de ficheiro inseguro.": (
+        "La actualización contiene una ruta de archivo insegura."
+    ),
+    "A atualização contém um ficheiro encriptado não suportado.": (
+        "La actualización contiene un archivo cifrado no compatible."
+    ),
+    "A atualização contém um tipo de ficheiro não permitido.": (
+        "La actualización contiene un tipo de archivo no permitido."
+    ),
+    "A pasta não contém uma instalação completa do Organizador.": (
+        "La carpeta no contiene una instalación completa de Organizador."
+    ),
+    "Não foi possível iniciar o assistente de atualização.": (
+        "No se pudo iniciar el asistente de actualización."
+    ),
+    "O ficheiro da atualização excede o limite permitido.": (
+        "El archivo de la actualización supera el límite permitido."
+    ),
+    "O tamanho de um ficheiro da atualização é inválido.": (
+        "El tamaño de un archivo de la actualización no es válido."
+    ),
+    "Um ficheiro da atualização excede o limite permitido.": (
+        "Un archivo de la actualización supera el límite permitido."
+    ),
+    "A procurar atualizações…": "Buscando actualizaciones…",
+    "A instalar atualização {version}…": "Instalando actualización {version}…",
+    "Sem atualizações": "Sin actualizaciones",
+    "O Organizador está atualizado.": "Organizador está actualizado.",
+    "Não foi possível procurar atualizações.": "No se pudo buscar actualizaciones.",
+    "A atualização transferida não corresponde à versão {version}.": (
+        "La actualización descargada no corresponde a la versión {version}."
+    ),
+    "Atualização instalada": "Actualización instalada",
+    "Atualização {version} instalada com sucesso.": (
+        "Actualización {version} instalada correctamente."
+    ),
+    "Atualização instalada com sucesso.": "Actualización instalada correctamente.",
+    "Atualização revertida": "Actualización revertida",
+    "A atualização {version} falhou e a versão anterior foi restaurada.": (
+        "La actualización {version} falló y se restauró la versión anterior."
+    ),
+    "A atualização falhou e a versão anterior foi restaurada.": (
+        "La actualización falló y se restauró la versión anterior."
+    ),
+    "A atualização falhou e a reposição automática não foi concluída.": (
+        "La actualización falló y la restauración automática no se completó."
+    ),
+    "A versão anterior foi mantida em: {path}.": "La versión anterior se conservó en: {path}.",
+    "Atualização inválida": "Actualización no válida",
+    "A atualização não corresponde a esta instalação. Nenhum ficheiro foi alterado.": (
+        "La actualización no corresponde a esta instalación. No se modificó ningún archivo."
+    ),
+    "A atualização não pôde ser validada. Nenhum ficheiro foi alterado.": (
+        "La actualización no pudo validarse. No se modificó ningún archivo."
+    ),
+    "Não foi possível concluir a atualização": "No se pudo completar la actualización",
+    "Não foi possível recuperar os dados": "No se pudieron recuperar los datos",
+    "Não foi possível atualizar os dados": "No se pudieron actualizar los datos",
+    "Os argumentos da atualização estão incompletos. Nenhum ficheiro foi alterado.": (
+        "Los argumentos de la actualización están incompletos. No se modificó ningún archivo."
+    ),
+    "Existe uma cópia de segurança de migração que não pôde ser restaurada automaticamente. Nenhum ficheiro foi alterado.\n\n{error}": (
+        "Hay una copia de seguridad de migración que no pudo restaurarse automáticamente. "
+        "No se modificó ningún archivo.\n\n{error}"
+    ),
+    "A aplicação não conseguiu preparar o catálogo local. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "La aplicación no pudo preparar el catálogo local. "
+        "Se intentó restaurar la copia de seguridad.\n\n{error}"
+    ),
+    "Os dados migrados não puderam ser validados. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "Los datos migrados no pudieron validarse. "
+        "Se intentó restaurar la copia de seguridad.\n\n{error}"
+    ),
+    "Os dados migrados não puderam ser validados. A versão anterior foi mantida para recuperação manual.": (
+        "Los datos migrados no pudieron validarse. "
+        "La versión anterior se conservó para una recuperación manual."
+    ),
+    "A nova versão não conseguiu arrancar. A versão anterior foi mantida para recuperação manual.": (
+        "La nueva versión no pudo iniciarse. "
+        "La versión anterior se conservó para una recuperación manual."
+    ),
 }
 
 FR_STRINGS: dict[str, str] = {
@@ -1780,4 +1956,98 @@ FR_STRINGS: dict[str, str] = {
     ),
     "Procurar atualizações automaticamente": "Rechercher les mises à jour automatiquement",
     "Atualização pronta": "Mise à jour prête",
+    "A atualização extraída excede o limite permitido.": (
+        "La mise à jour extraite dépasse la limite autorisée."
+    ),
+    "Já existe uma instalação de atualização em curso: {owner}.": (
+        "Une installation de mise à jour est déjà en cours : {owner}."
+    ),
+    "A atualização contém caminhos duplicados.": "La mise à jour contient des chemins dupliqués.",
+    "A atualização contém caminhos incompatíveis.": (
+        "La mise à jour contient des chemins incompatibles."
+    ),
+    "A atualização contém demasiados ficheiros.": "La mise à jour contient trop de fichiers.",
+    "A atualização contém um caminho de ficheiro inseguro.": (
+        "La mise à jour contient un chemin de fichier dangereux."
+    ),
+    "A atualização contém um ficheiro encriptado não suportado.": (
+        "La mise à jour contient un fichier chiffré non pris en charge."
+    ),
+    "A atualização contém um tipo de ficheiro não permitido.": (
+        "La mise à jour contient un type de fichier interdit."
+    ),
+    "A pasta não contém uma instalação completa do Organizador.": (
+        "Le dossier ne contient pas une installation complète d'Organizador."
+    ),
+    "Não foi possível iniciar o assistente de atualização.": (
+        "Impossible de démarrer l'assistant de mise à jour."
+    ),
+    "O ficheiro da atualização excede o limite permitido.": (
+        "Le fichier de mise à jour dépasse la limite autorisée."
+    ),
+    "O tamanho de um ficheiro da atualização é inválido.": (
+        "La taille d'un fichier de la mise à jour est invalide."
+    ),
+    "Um ficheiro da atualização excede o limite permitido.": (
+        "Un fichier de la mise à jour dépasse la limite autorisée."
+    ),
+    "A procurar atualizações…": "Recherche de mises à jour…",
+    "A instalar atualização {version}…": "Installation de la mise à jour {version}…",
+    "Sem atualizações": "Aucune mise à jour",
+    "O Organizador está atualizado.": "Organizador est à jour.",
+    "Não foi possível procurar atualizações.": "Impossible de rechercher des mises à jour.",
+    "A atualização transferida não corresponde à versão {version}.": (
+        "La mise à jour téléchargée ne correspond pas à la version {version}."
+    ),
+    "Atualização instalada": "Mise à jour installée",
+    "Atualização {version} instalada com sucesso.": (
+        "Mise à jour {version} installée avec succès."
+    ),
+    "Atualização instalada com sucesso.": "Mise à jour installée avec succès.",
+    "Atualização revertida": "Mise à jour annulée",
+    "A atualização {version} falhou e a versão anterior foi restaurada.": (
+        "La mise à jour {version} a échoué et la version précédente a été restaurée."
+    ),
+    "A atualização falhou e a versão anterior foi restaurada.": (
+        "La mise à jour a échoué et la version précédente a été restaurée."
+    ),
+    "A atualização falhou e a reposição automática não foi concluída.": (
+        "La mise à jour a échoué et la restauration automatique n'a pas abouti."
+    ),
+    "A versão anterior foi mantida em: {path}.": (
+        "La version précédente a été conservée ici : {path}."
+    ),
+    "Atualização inválida": "Mise à jour invalide",
+    "A atualização não corresponde a esta instalação. Nenhum ficheiro foi alterado.": (
+        "La mise à jour ne correspond pas à cette installation. Aucun fichier n'a été modifié."
+    ),
+    "A atualização não pôde ser validada. Nenhum ficheiro foi alterado.": (
+        "La mise à jour n'a pas pu être validée. Aucun fichier n'a été modifié."
+    ),
+    "Não foi possível concluir a atualização": "Impossible de terminer la mise à jour",
+    "Não foi possível recuperar os dados": "Impossible de récupérer les données",
+    "Não foi possível atualizar os dados": "Impossible de mettre à jour les données",
+    "Os argumentos da atualização estão incompletos. Nenhum ficheiro foi alterado.": (
+        "Les arguments de la mise à jour sont incomplets. Aucun fichier n'a été modifié."
+    ),
+    "Existe uma cópia de segurança de migração que não pôde ser restaurada automaticamente. Nenhum ficheiro foi alterado.\n\n{error}": (
+        "Il existe une sauvegarde de migration qui n'a pas pu être restaurée automatiquement. "
+        "Aucun fichier n'a été modifié.\n\n{error}"
+    ),
+    "A aplicação não conseguiu preparar o catálogo local. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "L'application n'a pas pu préparer le catalogue local. "
+        "La restauration de la sauvegarde a été tentée.\n\n{error}"
+    ),
+    "Os dados migrados não puderam ser validados. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "Les données migrées n'ont pas pu être validées. "
+        "La restauration de la sauvegarde a été tentée.\n\n{error}"
+    ),
+    "Os dados migrados não puderam ser validados. A versão anterior foi mantida para recuperação manual.": (
+        "Les données migrées n'ont pas pu être validées. "
+        "La version précédente a été conservée pour une récupération manuelle."
+    ),
+    "A nova versão não conseguiu arrancar. A versão anterior foi mantida para recuperação manual.": (
+        "La nouvelle version n'a pas pu démarrer. "
+        "La version précédente a été conservée pour une récupération manuelle."
+    ),
 }

@@ -129,6 +129,12 @@ class AppConfig:
         return self.data_dir / "organizador.log"
 
     @property
+    def updates_dir(self) -> Path:
+        """Directory holding update transaction state and results (never serialized)."""
+
+        return self.data_dir / "updates"
+
+    @property
     def inbox_dir(self) -> Path:
         """Folder holding downloaded files awaiting classification."""
 

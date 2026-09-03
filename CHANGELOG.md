@@ -2,6 +2,34 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.6.2 - 2026-09-04
+
+### Added
+
+- Transactional updates: each install attempt gets a unique staging/rollback
+  workspace, an installation lock, and a PID-aware PowerShell helper that waits
+  for the old process, verifies every move, and only commits after the new
+  version signals readiness and health. Failures before commit restore the
+  previous version automatically; the outcome is shown once after relaunch.
+- Pre-migration safety: the database is inspected read-only before any write,
+  snapshotted with SQLite's online backup API (WAL-safe) together with the
+  exact settings bytes, and restored automatically only if the new version
+  never reaches its health point. At most two healthy snapshots are retained.
+- Clearer update feedback: manual checks report "up to date" or the failure
+  reason, transient errors keep the pending update, and failed preparations
+  restore the install action for retry.
+- The packaged `update-manifest.json` pins the exact release version validated
+  before every swap, and the updater no longer requires the app folder to be
+  named `Organizador`.
+
+### Notes
+
+- v0.6.2 is published as a prerelease and is not offered as an automatic
+  update: the exact v0.6.1 updater was proven to silently skip the swap on
+  install paths with non-ASCII characters (its helper misreads UTF-8 paths),
+  so v0.6.1 installations must update to v0.6.2 manually, once. From v0.6.2
+  onward, updates use the transactional helper verified end to end.
+
 ## 0.6.1 - 2026-09-03
 
 ### Added

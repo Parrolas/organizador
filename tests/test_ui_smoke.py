@@ -17,9 +17,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSystemTrayIcon,
 )
 
-from organizador import __version__
+from organizador import __version__, updater
 from organizador.classifier import guess_filing
 from organizador.config import AppConfig
 from organizador.controller import AppController
@@ -39,6 +40,7 @@ from organizador.ui.main_window import MainWindow
 from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
 from organizador.ui.theme import apply_theme, get_theme
+from organizador.ui.tray import TrayIcon
 from organizador.ui.widgets import EmptyState
 
 
@@ -940,3 +942,316 @@ def test_controller_view_subject_files_opens_dialog_without_touching_files(
     controller.tray.hide()
     controller.main_window.allow_close = True
     controller.main_window.close()
+
+
+def _update_info(version: tuple[int, int, int] = (0, 6, 2)) -> updater.UpdateInfo:
+    return updater.UpdateInfo(
+        version=version,
+        tag_name=f"v{version[0]}.{version[1]}.{version[2]}",
+        zip_url="https://example.invalid/organizador.zip",
+        sha256_url="https://example.invalid/organizador.zip.sha256",
+    )
+
+
+def _watched_controller(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[AppController, list[tuple[tuple[object, ...], dict[str, object]]]]:
+    controller = AppController(app_config)
+    notices: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        controller.tray,
+        "notify",
+        lambda *args, **kwargs: notices.append((args, kwargs)),
+    )
+    monkeypatch.setattr(TrayIcon, "available", property(lambda self: True))
+    qt_app.processEvents()
+    return controller, notices
+
+
+def _close_controller(qt_app: QApplication, controller: AppController) -> None:
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
+    qt_app.processEvents()
+
+
+def test_begin_update_check_skips_while_installing(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._update_installing = True
+
+        controller._begin_update_check(automatic=False)
+
+        assert controller._update_checking is False
+        assert notices == []
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_begin_update_check_reports_dev_mode_without_freezing(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._begin_update_check(automatic=False)
+
+        assert controller._update_checking is False
+        assert notices and notices[0][0][0] == "Sem atualizações nesta instalação"
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_update_check_no_update_clears_pending_and_reports(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._pending_update = _update_info()
+
+        controller._on_update_check_finished(
+            updater.UpdateCheckResult(updater.UpdateCheckStatus.NO_UPDATE), False
+        )
+
+        assert controller._pending_update is None
+        assert controller._update_checking is False
+        assert not controller.tray.install_update_action.isVisible()
+        assert notices and notices[0][0][0] == "Sem atualizações"
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_update_check_error_keeps_pending_and_warns_only_manual(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        pending = _update_info()
+        controller._pending_update = pending
+
+        controller._on_update_check_finished(
+            updater.UpdateCheckResult(updater.UpdateCheckStatus.ERROR, error="boom"), False
+        )
+
+        assert controller._pending_update is pending
+        assert controller.tray.install_update_action.isVisible()
+        assert notices and notices[0][0][0] == "Não foi possível procurar atualizações."
+        assert notices[0][1].get("icon") == QSystemTrayIcon.MessageIcon.Warning
+
+        controller._on_update_check_finished(
+            updater.UpdateCheckResult(updater.UpdateCheckStatus.ERROR, error="boom"), True
+        )
+
+        assert len(notices) == 1
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_update_check_available_sets_pending_install_action(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        info = _update_info()
+
+        controller._on_update_check_finished(
+            updater.UpdateCheckResult(updater.UpdateCheckStatus.UPDATE_AVAILABLE, update=info),
+            True,
+        )
+
+        assert controller._pending_update is info
+        assert controller.tray.install_update_action.isVisible()
+        assert "0.6.2" in controller.tray.install_update_action.text()
+        assert notices and notices[0][0][0] == "Atualização disponível"
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_update_install_finished_failure_restores_install_action(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._pending_update = _update_info()
+        controller._update_installing = True
+
+        controller._on_update_install_finished("boom")
+
+        assert controller._update_installing is False
+        assert controller.tray.install_update_action.isVisible()
+        assert "0.6.2" in controller.tray.install_update_action.text()
+        assert notices and notices[0][0][0] == "Atualização falhou"
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_update_install_finished_abort_stays_quiet(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._update_installing = True
+
+        controller._on_update_install_finished(None)
+
+        assert controller._update_installing is False
+        assert notices == []
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_update_install_finished_transaction_launches_helper_before_shutdown(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    app = tmp_path / "Prog App"
+    (app / "_internal").mkdir(parents=True)
+    (app / "Organizador.exe").write_bytes(b"old")
+    transaction = updater.create_update_transaction(app, "0.6.2", data_dir=app_config.data_dir)
+    updater.write_update_helper(transaction)
+    launched: dict[str, object] = {}
+    shutdowns: list[bool] = []
+
+    class _Process:
+        pass
+
+    def fake_launch_helper(
+        launched_transaction: updater.UpdateTransaction, *, wait_ready: bool = True
+    ) -> _Process:
+        launched["transaction"] = launched_transaction
+        launched["wait_ready"] = wait_ready
+        return _Process()
+
+    monkeypatch.setattr(updater, "launch_update_helper", fake_launch_helper)
+    monkeypatch.setattr(updater, "helper_ready_received", lambda _transaction: True)
+    monkeypatch.setattr(controller, "shutdown", lambda: shutdowns.append(True))
+    try:
+        controller._update_installing = True
+
+        controller._on_update_install_finished(transaction)
+        qt_app.processEvents()
+
+        assert launched["transaction"] is transaction
+        assert launched["wait_ready"] is False
+        assert controller._update_restart_armed is True
+        assert shutdowns == [True]
+    finally:
+        updater.abort_update_transaction(transaction)
+        _close_controller(qt_app, controller)
+
+
+def test_legacy_rollback_bridge_retains_then_cleans(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    app = tmp_path / "Legacy App"
+    (app / "_internal").mkdir(parents=True)
+    (app / "Organizador.exe").write_bytes(b"current")
+    old = tmp_path / "Organizador.old"
+    (old / "_internal").mkdir(parents=True)
+    (old / "Organizador.exe").write_bytes(b"previous")
+    monkeypatch.setattr(updater, "app_directory", lambda: app)
+    try:
+        controller._handle_legacy_rollback_bridge()
+
+        assert old.is_dir()
+        marker = app_config.data_dir / "updates" / "legacy-rollback-retained"
+        assert marker.is_file()
+
+        controller._handle_legacy_rollback_bridge()
+        deadline = time.monotonic() + 5.0
+        while old.exists() and time.monotonic() < deadline:
+            qt_app.processEvents()
+            time.sleep(0.025)
+
+        assert not old.exists()
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def _write_result(
+    app_config: AppConfig,
+    status: updater.UpdateResultStatus,
+    transaction_id: str = "a" * 32,
+) -> None:
+    state_dir = app_config.data_dir / "updates" / transaction_id
+    state_dir.mkdir(parents=True)
+    updater.write_update_result(
+        state_dir / "result.json",
+        updater.UpdateResult(
+            transaction_id=transaction_id,
+            status=status,
+            phase="complete",
+            committed=status is not updater.UpdateResultStatus.ROLLED_BACK,
+            rollback_succeeded=True,
+            error=None,
+            old_pid=1,
+            new_pid=2,
+            started_at="2026-09-03T00:00:00+00:00",
+            finished_at="2026-09-03T00:00:01+00:00",
+            app_dir=state_dir,
+            rollback_dir=state_dir,
+        ),
+    )
+
+
+def test_pending_update_success_result_is_shown_once(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        _write_result(app_config, updater.UpdateResultStatus.SUCCEEDED)
+
+        controller._show_pending_update_result()
+        controller._show_pending_update_result()
+
+        assert len(notices) == 1
+        assert notices[0][0][0] == "Atualização instalada"
+        assert "com sucesso" in notices[0][0][1]
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_pending_update_rollback_result_warns_once(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        _write_result(app_config, updater.UpdateResultStatus.ROLLED_BACK)
+
+        controller._show_pending_update_result()
+        controller._show_pending_update_result()
+
+        assert len(notices) == 1
+        assert notices[0][0][0] == "Atualização revertida"
+        assert notices[0][1].get("icon") == QSystemTrayIcon.MessageIcon.Warning
+    finally:
+        _close_controller(qt_app, controller)

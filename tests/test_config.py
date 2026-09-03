@@ -173,3 +173,16 @@ def test_load_rejects_wrong_types_for_new_settings(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         AppConfig.load(tmp_path)
+
+
+def test_updates_dir_stays_inside_data_dir(app_config: AppConfig) -> None:
+    assert app_config.updates_dir == app_config.data_dir / "updates"
+
+
+def test_updates_dir_is_derived_and_never_serialized(app_config: AppConfig) -> None:
+    app_config.save()
+
+    payload = json.loads(app_config.settings_path.read_text(encoding="utf-8"))
+
+    assert "updates_dir" not in payload
+    assert "updates" not in payload

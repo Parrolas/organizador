@@ -87,11 +87,21 @@ aplicação nunca usa a base de dados como cópia dos documentos.
 
 A app verifica automaticamente se existe uma versão nova no arranque (podes
 desativar isto nas Definições). Quando existe, aparece "Instalar atualização"
-no menu do tabuleiro; um clique transfere, verifica o SHA-256 publicado,
-substitui a pasta da aplicação e reinicia. Os teus dados ficam sempre em
+no menu do tabuleiro; um clique transfere, verifica o SHA-256 publicado e a
+versão do pacote, prepara a atualização numa área isolada e só depois reinicia
+para aplicar. Um assistente dedicado espera que a app antiga termine, troca as
+pastas com verificação de cada passo e só confirma quando a nova versão
+arranca com sucesso. Os teus dados ficam sempre em
 `%LOCALAPPDATA%\Organizador` e nunca são tocados pela atualização.
 
-A versão anterior é mantida numa pasta `Organizador.old` até o novo arranque
+Antes de qualquer migração da base de dados, a app cria uma cópia de
+segurança automática (base de dados e definições) e só a remove depois de um
+arranque saudável. Se a nova versão falhar antes desse ponto, a versão e os
+dados anteriores são repostos automaticamente e o resultado é mostrado uma vez
+no arranque seguinte. Depois do ponto de saúde, nunca há reposição automática
+de dados: a versão anterior é mantida para recuperação manual.
+
+A versão anterior é mantida numa pasta de segurança até o novo arranque
 correr com sucesso, servindo de reversão imediata se algo correr mal.
 
 Antes de atualizar manualmente:
@@ -168,6 +178,13 @@ confirma que a tag coincide com `organizador.__version__`, recria o ambiente a
 partir de `constraints-release.txt`, executa toda a validação e publica o ZIP e
 o SHA-256 numa nova GitHub Release. Uma release já publicada não é substituída
 por uma repetição do workflow.
+
+Antes de publicar, o workflow executa a atualização real com o código exato da
+versão anterior (`scripts\run_update_release_e2e.ps1`) contra os bytes do
+candidato. A release é criada como prerelease e só é promovida a estável
+manualmente, depois de confirmada a transição a partir da base instalada. Uma
+versão anterior com um atualizador inseguro nunca recebe uma atualização
+automática que não consiga aplicar.
 
 ## Licenças
 
