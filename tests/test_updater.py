@@ -744,6 +744,29 @@ def _wait_until(predicate: Callable[[], bool], timeout: float = 10.0) -> None:
         time.sleep(0.025)
 
 
+def _wait_helper(
+    helper: subprocess.Popen[bytes], transaction: updater.UpdateTransaction, timeout: float = 60.0
+) -> int:
+    """Wait for the helper, dumping transaction state when endpoint holds strike."""
+
+    try:
+        result = helper.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if transaction.state_dir.is_dir():
+            state = sorted(path.name for path in transaction.state_dir.iterdir())
+        else:
+            state = ["<state dir missing>"]
+        result_path = transaction.result_path
+        recorded = (
+            result_path.read_text(encoding="utf-8") if result_path.is_file() else "<no result>"
+        )
+        raise AssertionError(
+            f"helper timed out after {timeout}s; state={state}; result={recorded}"
+        ) from None
+    assert result is not None
+    return result
+
+
 def test_real_powershell_helper_waits_exact_pid_and_completes_handshake(
     tmp_path: Path,
     sleeping_executable: Path,
@@ -784,7 +807,7 @@ def test_real_powershell_helper_waits_exact_pid_and_completes_handshake(
             timeout_seconds=30,
         )
         updater.mark_update_healthy(transaction.manifest_path, transaction.token, pid=555)
-        assert helper.wait(timeout=60) == 0
+        assert _wait_helper(helper, transaction) == 0
         result = updater.read_update_result(transaction)
         assert result is not None
         assert result.status is updater.UpdateResultStatus.SUCCEEDED
@@ -823,6 +846,7 @@ def test_real_powershell_helper_rolls_back_when_ready_never_arrives(
     transaction = updater.create_update_transaction(
         app,
         "0.6.2",
+        data_dir=tmp_path / "relaunch-data",
         old_pid=2_147_483_647,
         ready_timeout_seconds=0.35,
         healthy_timeout_seconds=1,
@@ -832,7 +856,7 @@ def test_real_powershell_helper_rolls_back_when_ready_never_arrives(
     updater.write_update_helper(transaction)
     helper = updater.launch_update_helper(transaction, powershell_executable=powershell)
     try:
-        assert helper.wait(timeout=60) == 10
+        assert _wait_helper(helper, transaction) == 10
         result = updater.read_update_result(transaction)
         assert result is not None
         assert result.status is updater.UpdateResultStatus.ROLLED_BACK
@@ -850,16 +874,24 @@ def test_real_powershell_helper_rolls_back_when_ready_never_arrives(
         updater.release_installation_lock(transaction)
 
 
-def test_real_powershell_helper_retains_rollback_after_commit_failure(
+def test_real_powershell_helper_rolls_back_after_commit_failure(
     tmp_path: Path,
     sleeping_executable: Path,
 ) -> None:
     powershell = _powershell_path()
     assert powershell is not None
-    app = _make_app_layout(tmp_path / "post commit % ç" / "App", executable=b"old executable")
+    # The restored previous version is itself runnable here, so the helper's
+    # relaunch can be observed through its argument log. The relaunched
+    # sleeper exits alone after 15 seconds; nothing else in the test needs it.
+    app = _make_app_layout(
+        tmp_path / "post commit % ç" / "App",
+        executable=sleeping_executable.read_bytes(),
+    )
+    data_dir = tmp_path / "relaunch % ç data"
     transaction = updater.create_update_transaction(
         app,
         "0.6.2",
+        data_dir=data_dir,
         old_pid=2_147_483_647,
         ready_timeout_seconds=5,
         healthy_timeout_seconds=0.35,
@@ -879,17 +911,24 @@ def test_real_powershell_helper_retains_rollback_after_commit_failure(
             transaction.token,
             timeout_seconds=5,
         )
-        assert helper.wait(timeout=60) == 20
+        assert _wait_helper(helper, transaction) == 10
         result = updater.read_update_result(transaction)
         assert result is not None
-        assert result.status is updater.UpdateResultStatus.FAILED_AFTER_COMMIT
+        assert result.status is updater.UpdateResultStatus.ROLLED_BACK
         assert result.phase == "wait_healthy"
         assert result.committed is True
-        assert result.rollback_succeeded is None
-        assert transaction.rollback_dir.is_dir()
-        assert transaction.state_dir.is_dir()
-        assert transaction.result_path.is_file()
-        assert (transaction.rollback_dir / "Organizador.exe").read_bytes() == b"old executable"
+        assert result.rollback_succeeded is True
+        assert (app / "Organizador.exe").read_bytes() == sleeping_executable.read_bytes()
+        assert transaction.staging_dir.is_dir()
+        assert not transaction.rollback_dir.exists()
+        assert not transaction.lock_path.exists()
+        args_path = data_dir / "launched-args.txt"
+        _wait_until(args_path.is_file, timeout=30.0)
+        assert args_path.read_text(encoding="utf-8-sig").splitlines() == [
+            "--background",
+            "--data-dir",
+            str(data_dir),
+        ]
     finally:
         if helper.poll() is None:
             helper.terminate()

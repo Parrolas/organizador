@@ -661,6 +661,13 @@ EN_STRINGS: dict[str, str] = {
     "A nova versão não conseguiu arrancar. A versão anterior foi mantida para recuperação manual.": (
         "The new version failed to start. The previous version was kept for manual recovery."
     ),
+    "Não foi possível concluir o arranque": "Could not complete the startup",
+    "A aplicação não conseguiu concluir o arranque. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "The application could not complete startup. Restoring the backup was attempted.\n\n{error}"
+    ),
+    "A nova versão não conseguiu arrancar. Foi tentada a reposição da cópia de segurança.": (
+        "The new version failed to start. Restoring the backup was attempted."
+    ),
 }
 
 ES_STRINGS: dict[str, str] = {
@@ -1347,6 +1354,14 @@ ES_STRINGS: dict[str, str] = {
     "A nova versão não conseguiu arrancar. A versão anterior foi mantida para recuperação manual.": (
         "La nueva versión no pudo iniciarse. "
         "La versión anterior se conservó para una recuperación manual."
+    ),
+    "Não foi possível concluir o arranque": "No se pudo completar el arranque",
+    "A aplicação não conseguiu concluir o arranque. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "La aplicación no pudo completar el arranque. "
+        "Se intentó restaurar la copia de seguridad.\n\n{error}"
+    ),
+    "A nova versão não conseguiu arrancar. Foi tentada a reposição da cópia de segurança.": (
+        "La nueva versión no pudo iniciarse. Se intentó restaurar la copia de seguridad."
     ),
 }
 
@@ -2049,5 +2064,13 @@ FR_STRINGS: dict[str, str] = {
     "A nova versão não conseguiu arrancar. A versão anterior foi mantida para recuperação manual.": (
         "La nouvelle version n'a pas pu démarrer. "
         "La version précédente a été conservée pour une récupération manuelle."
+    ),
+    "Não foi possível concluir o arranque": "Impossible de terminer le démarrage",
+    "A aplicação não conseguiu concluir o arranque. Foi tentada a reposição da cópia de segurança.\n\n{error}": (
+        "L'application n'a pas pu terminer le démarrage. "
+        "La restauration de la sauvegarde a été tentée.\n\n{error}"
+    ),
+    "A nova versão não conseguiu arrancar. Foi tentada a reposição da cópia de segurança.": (
+        "La nouvelle version n'a pas pu démarrer. La restauration de la sauvegarde a été tentée."
     ),
 }

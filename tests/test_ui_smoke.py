@@ -978,6 +978,12 @@ def _close_controller(qt_app: QApplication, controller: AppController) -> None:
     qt_app.processEvents()
 
 
+def _finish_check(
+    controller: AppController, result: updater.UpdateCheckResult, automatic: bool
+) -> None:
+    controller._on_update_check_finished(result, automatic, controller._update_check_generation)
+
+
 def test_begin_update_check_skips_while_installing(
     qt_app: QApplication,
     app_config: AppConfig,
@@ -1019,8 +1025,10 @@ def test_update_check_no_update_clears_pending_and_reports(
     try:
         controller._pending_update = _update_info()
 
-        controller._on_update_check_finished(
-            updater.UpdateCheckResult(updater.UpdateCheckStatus.NO_UPDATE), False
+        _finish_check(
+            controller,
+            updater.UpdateCheckResult(updater.UpdateCheckStatus.NO_UPDATE),
+            False,
         )
 
         assert controller._pending_update is None
@@ -1041,8 +1049,10 @@ def test_update_check_error_keeps_pending_and_warns_only_manual(
         pending = _update_info()
         controller._pending_update = pending
 
-        controller._on_update_check_finished(
-            updater.UpdateCheckResult(updater.UpdateCheckStatus.ERROR, error="boom"), False
+        _finish_check(
+            controller,
+            updater.UpdateCheckResult(updater.UpdateCheckStatus.ERROR, error="boom"),
+            False,
         )
 
         assert controller._pending_update is pending
@@ -1050,8 +1060,10 @@ def test_update_check_error_keeps_pending_and_warns_only_manual(
         assert notices and notices[0][0][0] == "Não foi possível procurar atualizações."
         assert notices[0][1].get("icon") == QSystemTrayIcon.MessageIcon.Warning
 
-        controller._on_update_check_finished(
-            updater.UpdateCheckResult(updater.UpdateCheckStatus.ERROR, error="boom"), True
+        _finish_check(
+            controller,
+            updater.UpdateCheckResult(updater.UpdateCheckStatus.ERROR, error="boom"),
+            True,
         )
 
         assert len(notices) == 1
@@ -1068,7 +1080,8 @@ def test_update_check_available_sets_pending_install_action(
     try:
         info = _update_info()
 
-        controller._on_update_check_finished(
+        _finish_check(
+            controller,
             updater.UpdateCheckResult(updater.UpdateCheckStatus.UPDATE_AVAILABLE, update=info),
             True,
         )
@@ -1254,4 +1267,81 @@ def test_pending_update_rollback_result_warns_once(
         assert notices[0][0][0] == "Atualização revertida"
         assert notices[0][1].get("icon") == QSystemTrayIcon.MessageIcon.Warning
     finally:
+        _close_controller(qt_app, controller)
+
+
+def test_stale_check_result_is_ignored_and_install_waits_for_quiet(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        info = _update_info()
+        controller._pending_update = info
+        controller._update_checking = True
+
+        controller._install_pending_update()
+
+        assert controller._update_installing is False
+        assert notices == []
+
+        controller._update_check_generation = 5
+        controller._on_update_check_finished(
+            updater.UpdateCheckResult(updater.UpdateCheckStatus.NO_UPDATE), False, 3
+        )
+
+        assert controller._pending_update is info
+        assert controller._update_checking is True
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_handshake_activation_failure_restores_pending_migration(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from organizador.controller import StartupState
+    from organizador.recovery import RecoveryCoordinator
+
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        with controller.database.connect() as connection:
+            connection.execute("ALTER TABLE tasks DROP COLUMN reminder_lead_days")
+            connection.commit()
+        coordinator = RecoveryCoordinator(app_config.data_dir)
+        bundle = coordinator.prepare_migration()
+        assert bundle is not None
+
+        app = tmp_path / "Handshake App"
+        (app / "_internal").mkdir(parents=True)
+        (app / "Organizador.exe").write_bytes(b"candidate")
+        transaction = updater.create_update_transaction(app, "0.6.3", data_dir=app_config.data_dir)
+        state = StartupState(configured=True, services_ready=True)
+        exits: list[int] = []
+        monkeypatch.setattr(QApplication, "exit", lambda code=0: exits.append(code))
+        monkeypatch.setattr(
+            QMessageBox, "critical", lambda *args, **kwargs: QMessageBox.StandardButton.Ok
+        )
+
+        def fail_activate(
+            _state: StartupState, *, background: bool = False, smoke_test: bool = False
+        ) -> None:
+            raise RuntimeError("activation exploded")
+
+        monkeypatch.setattr(controller, "activate", fail_activate)
+
+        controller._commit_update_handshake(
+            transaction, bundle, coordinator, state, background=True
+        )
+
+        assert exits == [1]
+        assert not (bundle.path / "healthy").exists()
+        assert coordinator.restore_pending() is None
+        inspection = controller.database.inspect_schema()
+        assert "tasks.reminder_lead_days" in inspection.missing_additions
+    finally:
+        updater.abort_update_transaction(transaction)
         _close_controller(qt_app, controller)

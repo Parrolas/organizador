@@ -95,11 +95,12 @@ arranca com sucesso. Os teus dados ficam sempre em
 `%LOCALAPPDATA%\Organizador` e nunca são tocados pela atualização.
 
 Antes de qualquer migração da base de dados, a app cria uma cópia de
-segurança automática (base de dados e definições) e só a remove depois de um
-arranque saudável. Se a nova versão falhar antes desse ponto, a versão e os
-dados anteriores são repostos automaticamente e o resultado é mostrado uma vez
-no arranque seguinte. Depois do ponto de saúde, nunca há reposição automática
-de dados: a versão anterior é mantida para recuperação manual.
+segurança automática (base de dados e definições) e só a fecha depois de um
+arranque completo. Se a nova versão falhar antes de ficar saudável — incluindo
+depois da troca de pastas — a versão e os dados anteriores são repostos
+automaticamente e o resultado é mostrado uma vez no arranque seguinte. Depois
+de saudável, nunca há reposição automática de dados: a versão anterior é
+mantida para recuperação manual.
 
 A versão anterior é mantida numa pasta de segurança até o novo arranque
 correr com sucesso, servindo de reversão imediata se algo correr mal.

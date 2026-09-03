@@ -280,6 +280,22 @@ def main(argv: list[str] | None = None) -> int:
             )
             return int(application.exec())
 
+    try:
+        controller.start(background=arguments.background, smoke_test=arguments.smoke_test)
+    except Exception as exc:
+        LOGGER.exception("Application failed to start after migration")
+        if bundle is not None:
+            with suppress(Exception):
+                coordinator.restore_pending()
+        QMessageBox.critical(
+            None,
+            _("Não foi possível concluir o arranque"),
+            _(
+                "A aplicação não conseguiu concluir o arranque. "
+                "Foi tentada a reposição da cópia de segurança.\n\n{error}"
+            ).format(error=exc),
+        )
+        return 1
     if bundle is not None:
         try:
             coordinator.mark_healthy(bundle)
@@ -296,7 +312,6 @@ def main(argv: list[str] | None = None) -> int:
                 ).format(error=exc),
             )
             return 1
-    controller.start(background=arguments.background, smoke_test=arguments.smoke_test)
     with suppress(Exception):
         coordinator.prune_healthy_backups()
     if arguments.smoke_test:

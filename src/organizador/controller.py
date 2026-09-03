@@ -90,7 +90,7 @@ class AppController(QObject):
     download_ready = Signal(int, object)
     index_completed = Signal(int, str)
     import_completed = Signal(int)
-    update_check_finished = Signal(object, bool)
+    update_check_finished = Signal(object, bool, int)
     update_install_finished = Signal(object)
 
     def __init__(self, config: AppConfig, database: Database | None = None) -> None:
@@ -120,6 +120,7 @@ class AppController(QObject):
         self._pending_update: UpdateInfo | None = None
         self._update_installing = False
         self._update_checking = False
+        self._update_check_generation = 0
         self._update_transaction: UpdateTransaction | None = None
         self._update_restart_armed = False
         self._abort_update_install = False
@@ -1192,6 +1193,8 @@ class AppController(QObject):
                 )
             return
         self._update_checking = True
+        self._update_check_generation += 1
+        generation = self._update_check_generation
         self.tray.set_update_state(checking=True, version=self._pending_version_text())
 
         def run() -> None:
@@ -1202,11 +1205,14 @@ class AppController(QObject):
                 result = UpdateCheckResult(
                     updater.UpdateCheckStatus.ERROR, error=str(exc) or type(exc).__name__
                 )
-            self.update_check_finished.emit(result, automatic)
+            self.update_check_finished.emit(result, automatic, generation)
 
         threading.Thread(target=run, name="update-check", daemon=True).start()
 
-    def _on_update_check_finished(self, result: object, automatic: bool) -> None:
+    def _on_update_check_finished(self, result: object, automatic: bool, generation: int) -> None:
+        if generation != self._update_check_generation:
+            LOGGER.debug("Ignoring stale update check result")
+            return
         self._update_checking = False
         if not isinstance(result, UpdateCheckResult):
             LOGGER.error("Ignoring malformed update check result")
@@ -1249,7 +1255,7 @@ class AppController(QObject):
 
     def _install_pending_update(self) -> None:
         info = self._pending_update
-        if info is None or self._update_installing:
+        if info is None or self._update_installing or self._update_checking:
             return
         app_dir = updater.app_directory()
         if app_dir is None:
@@ -1466,8 +1472,25 @@ class AppController(QObject):
         *,
         background: bool,
     ) -> None:
-        """Close data rollback, activate services, then acknowledge health."""
+        """Activate services, then close data rollback and acknowledge health."""
 
+        try:
+            self.activate(state, background=background)
+        except Exception:
+            LOGGER.exception("Updated application failed to activate after commit")
+            if recovery_bundle is not None:
+                with suppress(Exception):
+                    coordinator.restore_pending()
+            QMessageBox.critical(
+                self.main_window,
+                _("Não foi possível concluir a atualização"),
+                _(
+                    "A nova versão não conseguiu arrancar. "
+                    "Foi tentada a reposição da cópia de segurança."
+                ),
+            )
+            QApplication.exit(1)
+            return
         if recovery_bundle is not None:
             try:
                 coordinator.mark_healthy(recovery_bundle)
@@ -1483,20 +1506,6 @@ class AppController(QObject):
                 )
                 QApplication.exit(1)
                 return
-        try:
-            self.activate(state, background=background)
-        except Exception:
-            LOGGER.exception("Updated application failed to activate after commit")
-            QMessageBox.critical(
-                self.main_window,
-                _("Não foi possível concluir a atualização"),
-                _(
-                    "A nova versão não conseguiu arrancar. "
-                    "A versão anterior foi mantida para recuperação manual."
-                ),
-            )
-            QApplication.exit(1)
-            return
         with suppress(Exception):
             updater.mark_update_healthy(transaction.manifest_path, transaction.token)
 

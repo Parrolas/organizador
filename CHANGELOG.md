@@ -2,6 +2,18 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.6.3 - 2026-09-04
+
+### Fixed
+
+- Migration recovery now stays open until the application finishes starting:
+  an activation failure restores the pre-migration database automatically,
+  in normal launches and in update handshakes.
+- A new version that never becomes healthy is rolled back automatically,
+  including after the binary swap: the previous version is restored and
+  relaunched, and its startup recovers the pending migration backup.
+- Overlapping update checks can no longer overwrite in-flight install state.
+
 ## 0.6.2 - 2026-09-04
 
 ### Added

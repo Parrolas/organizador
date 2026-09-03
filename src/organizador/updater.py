@@ -1387,6 +1387,32 @@ function Stop-NewProcess {
     }
 }
 
+function Restore-PreviousVersion {
+    Stop-NewProcess
+    if ($script:StagingMoved -and [IO.Directory]::Exists([string]$script:Transaction.app_dir)) {
+        Move-DirectoryWithRetry ([string]$script:Transaction.app_dir) ([string]$script:Transaction.staging_dir)
+    }
+    if ($script:AppMoved -and [IO.Directory]::Exists([string]$script:Transaction.rollback_dir)) {
+        Move-DirectoryWithRetry ([string]$script:Transaction.rollback_dir) ([string]$script:Transaction.app_dir)
+    }
+}
+
+function Start-RestoredApp {
+    # Plain normal launch (no update arguments): the restored application
+    # recovers its own pending migration bundle on startup, if one exists.
+    $restoredExe = Join-Path ([string]$script:Transaction.app_dir) 'Organizador.exe'
+    if (-not [IO.File]::Exists($restoredExe)) { throw 'restored executable is missing' }
+    $relaunchArgs = New-Object Collections.Generic.List[string]
+    [void]$relaunchArgs.Add('--background')
+    if ($null -ne $script:Transaction.data_dir -and -not [string]::IsNullOrEmpty([string]$script:Transaction.data_dir)) {
+        [void]$relaunchArgs.Add('--data-dir')
+        [void]$relaunchArgs.Add([string]$script:Transaction.data_dir)
+    }
+    $quoted = (($relaunchArgs | ForEach-Object { Quote-WindowsArgument $_ }) -join ' ')
+    $restored = Start-Process -FilePath $restoredExe -ArgumentList $quoted -WorkingDirectory ([string]$script:Transaction.app_dir) -PassThru
+    if ($null -eq $restored) { throw 'could not relaunch the restored application' }
+}
+
 function Save-Result([string]$Status, [string]$ErrorMessage, [object]$RollbackSucceeded) {
     $newPid = $null
     if ($null -ne $script:NewProcess) { $newPid = $script:NewProcess.Id }
@@ -1518,23 +1544,25 @@ try {
     $failure = $_.Exception.Message
     $rollbackSucceeded = $null
     $status = 'failed'
-    if ($null -ne $script:Transaction -and -not $script:Committed) {
+    $needsRollback = ($null -ne $script:Transaction) -and ($script:AppMoved -or $script:StagingMoved)
+    if ($needsRollback) {
         try {
-            Stop-NewProcess
-            if ($script:StagingMoved -and [IO.Directory]::Exists([string]$script:Transaction.app_dir)) {
-                Move-DirectoryWithRetry ([string]$script:Transaction.app_dir) ([string]$script:Transaction.staging_dir)
-            }
-            if ($script:AppMoved -and [IO.Directory]::Exists([string]$script:Transaction.rollback_dir)) {
-                Move-DirectoryWithRetry ([string]$script:Transaction.rollback_dir) ([string]$script:Transaction.app_dir)
-            }
+            Restore-PreviousVersion
             $rollbackSucceeded = $true
             if ($script:AppMoved) { $status = 'rolled_back' }
+            try {
+                Start-RestoredApp
+            } catch {
+                $failure = $failure + '; relaunch failed: ' + $_.Exception.Message
+            }
         } catch {
             $rollbackSucceeded = $false
             $failure = $failure + '; rollback failed: ' + $_.Exception.Message
             $status = 'failed'
         }
-    } elseif ($null -ne $script:Transaction) {
+    }
+    if ($status -eq 'failed' -and $script:Committed) {
+        # The swap committed but neither success nor rollback completed.
         $status = 'failed_after_commit'
     }
     if ($null -ne $script:Transaction) {
