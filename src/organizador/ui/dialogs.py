@@ -392,10 +392,6 @@ class OnboardingDialog(QDialog):
             self.error_label.setText(_("Escolhe uma pasta para a Universidade."))
             self.root_edit.setFocus()
             return
-        if not str(root).strip():
-            self.error_label.setText("Escolhe uma pasta para a Universidade.")
-            self.root_edit.setFocus()
-            return
         old_root = self.config.university_root
         old_watch_enabled = self.config.watch_enabled
         old_initialized = self.config.initialized

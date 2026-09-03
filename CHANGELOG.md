@@ -2,6 +2,27 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.6.4 - 2026-09-04
+
+### Fixed
+
+- Filing destinations are resolved and required to stay inside their managed
+  folder, so junctions or symlinks planted below the inbox, subject, or
+  Downloads trees can no longer redirect documents outside the library.
+- Indexing re-checks the on-disk size before extracting: changed files refresh
+  their record and wait for the next pass instead of indexing stale content,
+  and extracted text is capped so one document cannot bloat the search index.
+- Subject codes only match on token boundaries; "MAT" no longer claims
+  "material_de_estudo.pdf" with full confidence.
+- Filing errors, the task checkbox, and the no-deadline label are translated;
+  a scanner test now fails the suite if any interface literal lacks a
+  translation.
+
+### Changed
+
+- Release and CI workflows pin GitHub Actions by commit hash with Dependabot
+  watching for updates.
+
 ## 0.6.3 - 2026-09-04
 
 ### Fixed

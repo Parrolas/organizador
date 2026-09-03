@@ -114,7 +114,7 @@ class FilingPrompt(QWidget):
         card_layout.addLayout(type_row)
 
         task_row = QHBoxLayout()
-        self.task_check = QCheckBox("Criar tarefa")
+        self.task_check = QCheckBox(_("Criar tarefa"))
         self.due_edit = QDateEdit()
         self.due_edit.setCalendarPopup(True)
         self.due_edit.setDisplayFormat("dd/MM/yyyy")

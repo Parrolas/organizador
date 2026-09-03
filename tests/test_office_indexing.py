@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+import os
 from pathlib import Path
+from typing import NoReturn
 
+import pytest
 from docx import Document
 from openpyxl import Workbook
 from pptx import Presentation
@@ -133,15 +135,40 @@ def test_corrupt_office_document_is_marked_handled(
 
 
 def test_oversized_office_document_is_not_loaded(
-    database: Database, subject: Subject, tmp_path: Path
+    database: Database,
+    subject: Subject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = tmp_path / "grande.xlsx"
-    path.write_bytes(b"not parsed because the recorded size is over the limit")
+    path.write_bytes(b"not parsed because the on-disk size is over the limit")
     document = _record_file(database, subject, path)
-    oversized = replace(document, size=MAX_INDEX_BYTES + 1)
+    database.refresh_file_size(
+        document.id,
+        MAX_INDEX_BYTES + 1,
+        expected_path=path,
+        expected_record_token=document.record_token,
+    )
+    document = database.get_file(document.id)
+    assert document is not None
+    real_stat = Path.stat
+
+    def fake_stat(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        details = real_stat(self, follow_symlinks=follow_symlinks)
+        if self == path:
+            values = list(details)
+            values[6] = MAX_INDEX_BYTES + 1
+            return os.stat_result(values)
+        return details
+
+    def fail_on_parse(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("oversized documents must not be parsed")
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    monkeypatch.setattr("organizador.extractors.load_workbook", fail_on_parse)
     indexer = DocumentIndexer(database)
 
-    indexer.index_document(oversized)
+    indexer.index_document(document)
     indexer.shutdown()
 
     refreshed = database.get_file(document.id)

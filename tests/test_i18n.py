@@ -2,13 +2,43 @@
 
 from __future__ import annotations
 
+import ast
 import re
+from pathlib import Path
 
 import pytest
 
 from organizador import i18n
 from organizador.config import LANGUAGE_IDS
 from organizador.i18n_data import EN_STRINGS, ES_STRINGS, FR_STRINGS
+
+
+def _source_translation_literals() -> set[str]:
+    """Collect every literal passed as the first argument to ``_()`` in src."""
+
+    root = Path(__file__).resolve().parent.parent / "src" / "organizador"
+    literals: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                literals.add(node.args[0].value)
+    return literals
+
+
+def test_every_source_literal_has_a_translation() -> None:
+    missing = sorted(
+        literal for literal in _source_translation_literals() if literal not in EN_STRINGS
+    )
+
+    assert missing == []
 
 
 def _format_fields(template: str) -> set[str]:

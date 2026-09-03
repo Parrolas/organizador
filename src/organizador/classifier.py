@@ -110,7 +110,10 @@ def guess_filing(
         score = int(fuzz.WRatio(normalised_name, subject_name) * 0.42)
         if subject_name and subject_name in normalised_name:
             score += 55
-        if code and (code in tokens or code.replace(" ", "") in normalised_name.replace(" ", "")):
+        if code and (
+            code in tokens
+            or re.search(r"\b" + re.escape(code) + r"\b", normalised_name) is not None
+        ):
             score += 90
         for keyword in subject.keywords:
             normalised_keyword = normalise(keyword)

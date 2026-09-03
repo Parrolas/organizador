@@ -668,6 +668,76 @@ EN_STRINGS: dict[str, str] = {
     "A nova versão não conseguiu arrancar. Foi tentada a reposição da cópia de segurança.": (
         "The new version failed to start. Restoring the backup was attempted."
     ),
+    "Não foi possível ler a pasta Downloads configurada.": (
+        "Could not read the configured Downloads folder."
+    ),
+    "Já não foi possível encontrar {name}.": "Could no longer find {name}.",
+    "{name} ficou em Downloads, mas uma cópia incompleta pode ter ficado em {leftover}. Compara os ficheiros antes de a remover.": (
+        "{name} stayed in Downloads, but an incomplete copy may have been left at "
+        "{leftover}. Compare the files before removing it."
+    ),
+    "{name} mudou ou ainda está a ser usado e ficou em Downloads.": (
+        "{name} changed or is still in use and stayed in Downloads."
+    ),
+    "Não foi possível registar {name}. O ficheiro ficou em {destination}.": (
+        "Could not register {name}. The file stayed at {destination}."
+    ),
+    "Não foi possível registar {name}; foi devolvido a Downloads como {returned}.": (
+        "Could not register {name}; it was returned to Downloads as {returned}."
+    ),
+    "Este ficheiro já não está na Caixa de Entrada.": "This file is no longer in the Inbox.",
+    "Escolhe uma disciplina ativa.": "Choose an active subject.",
+    "Escolhe um tipo de documento válido.": "Choose a valid document type.",
+    "Não foi possível encontrar {name}.": "Could not find {name}.",
+    "Não foi possível preparar o histórico da organização.": (
+        "Could not prepare the filing history."
+    ),
+    "A organização ficou incompleta. O original e a cópia foram mantidos; revê ambos na Caixa de Entrada antes de continuar.": (
+        "Filing was left incomplete. The original and the copy were kept; "
+        "review both in the Inbox before continuing."
+    ),
+    "O ficheiro ainda está a ser usado por outra aplicação. Fecha-o e tenta novamente.": (
+        "The file is still being used by another application. Close it and try again."
+    ),
+    "O movimento foi revertido porque não foi possível atualizar o histórico.": (
+        "The move was reverted because the history could not be updated."
+    ),
+    "Não foi possível atualizar o histórico. Revê a Caixa de Entrada antes de repetir.": (
+        "Could not update the history. Review the Inbox before retrying."
+    ),
+    "O ficheiro já não está disponível para devolver.": (
+        "The file is no longer available to return."
+    ),
+    "Não foi possível preparar o histórico da devolução.": (
+        "Could not prepare the return history."
+    ),
+    "A devolução ficou incompleta. O original e a cópia foram mantidos; revê a Caixa de Entrada e Downloads antes de continuar.": (
+        "The return was left incomplete. The original and the copy were kept; "
+        "review the Inbox and Downloads before continuing."
+    ),
+    "Não foi possível devolver o ficheiro. Fecha-o noutras aplicações e tenta de novo.": (
+        "Could not return the file. Close it in other applications and try again."
+    ),
+    "Não foi possível registar a devolução do ficheiro.": ("Could not register the file return."),
+    "O último ficheiro organizado já não está no destino. O histórico não foi alterado.": (
+        "The last organized file is no longer at its destination. History was not changed."
+    ),
+    "Não foi possível preparar o histórico para desfazer.": (
+        "Could not prepare the history for undo."
+    ),
+    "A operação de desfazer ficou incompleta. O original e a cópia foram mantidos; revê ambos na Caixa de Entrada antes de continuar.": (
+        "The undo operation was left incomplete. The original and the copy were kept; "
+        "review both in the Inbox before continuing."
+    ),
+    "Não foi possível desfazer porque o ficheiro está a ser usado.": (
+        "Could not undo because the file is in use."
+    ),
+    "Não foi possível atualizar o histórico ao desfazer.": (
+        "Could not update the history while undoing."
+    ),
+    "Criar tarefa": "Create task",
+    "A cópia incompleta ficou em {path}.": "The incomplete copy was left at {path}.",
+    "A pasta de destino não é segura: {path}.": "The destination folder is not safe: {path}.",
 }
 
 ES_STRINGS: dict[str, str] = {
@@ -1363,6 +1433,80 @@ ES_STRINGS: dict[str, str] = {
     "A nova versão não conseguiu arrancar. Foi tentada a reposição da cópia de segurança.": (
         "La nueva versión no pudo iniciarse. Se intentó restaurar la copia de seguridad."
     ),
+    "Não foi possível ler a pasta Downloads configurada.": (
+        "No se pudo leer la carpeta de Descargas configurada."
+    ),
+    "Já não foi possível encontrar {name}.": "Ya no se pudo encontrar {name}.",
+    "{name} ficou em Downloads, mas uma cópia incompleta pode ter ficado em {leftover}. Compara os ficheiros antes de a remover.": (
+        "{name} se quedó en Descargas, pero es posible que haya una copia incompleta en "
+        "{leftover}. Compara los archivos antes de eliminarla."
+    ),
+    "{name} mudou ou ainda está a ser usado e ficou em Downloads.": (
+        "{name} cambió o sigue en uso y se quedó en Descargas."
+    ),
+    "Não foi possível registar {name}. O ficheiro ficou em {destination}.": (
+        "No se pudo registrar {name}. El archivo se quedó en {destination}."
+    ),
+    "Não foi possível registar {name}; foi devolvido a Downloads como {returned}.": (
+        "No se pudo registrar {name}; se devolvió a Descargas como {returned}."
+    ),
+    "Este ficheiro já não está na Caixa de Entrada.": (
+        "Este archivo ya no está en la Bandeja de Entrada."
+    ),
+    "Escolhe uma disciplina ativa.": "Elige una asignatura activa.",
+    "Escolhe um tipo de documento válido.": "Elige un tipo de documento válido.",
+    "Não foi possível encontrar {name}.": "No se pudo encontrar {name}.",
+    "Não foi possível preparar o histórico da organização.": (
+        "No se pudo preparar el historial de organización."
+    ),
+    "A organização ficou incompleta. O original e a cópia foram mantidos; revê ambos na Caixa de Entrada antes de continuar.": (
+        "La organización quedó incompleta. El original y la copia se conservaron; "
+        "revísalos en la Bandeja de Entrada antes de continuar."
+    ),
+    "O ficheiro ainda está a ser usado por outra aplicação. Fecha-o e tenta novamente.": (
+        "El archivo sigue en uso en otra aplicación. Ciérralo e inténtalo de nuevo."
+    ),
+    "O movimento foi revertido porque não foi possível atualizar o histórico.": (
+        "El movimiento se revirtió porque no se pudo actualizar el historial."
+    ),
+    "Não foi possível atualizar o histórico. Revê a Caixa de Entrada antes de repetir.": (
+        "No se pudo actualizar el historial. Revisa la Bandeja de Entrada antes de reintentar."
+    ),
+    "O ficheiro já não está disponível para devolver.": (
+        "El archivo ya no está disponible para devolver."
+    ),
+    "Não foi possível preparar o histórico da devolução.": (
+        "No se pudo preparar el historial de devolución."
+    ),
+    "A devolução ficou incompleta. O original e a cópia foram mantidos; revê a Caixa de Entrada e Downloads antes de continuar.": (
+        "La devolución quedó incompleta. El original y la copia se conservaron; "
+        "revisa la Bandeja de Entrada y Descargas antes de continuar."
+    ),
+    "Não foi possível devolver o ficheiro. Fecha-o noutras aplicações e tenta de novo.": (
+        "No se pudo devolver el archivo. Ciérralo en otras aplicaciones e inténtalo de nuevo."
+    ),
+    "Não foi possível registar a devolução do ficheiro.": (
+        "No se pudo registrar la devolución del archivo."
+    ),
+    "O último ficheiro organizado já não está no destino. O histórico não foi alterado.": (
+        "El último archivo organizado ya no está en su destino. El historial no se modificó."
+    ),
+    "Não foi possível preparar o histórico para desfazer.": (
+        "No se pudo preparar el historial para deshacer."
+    ),
+    "A operação de desfazer ficou incompleta. O original e a cópia foram mantidos; revê ambos na Caixa de Entrada antes de continuar.": (
+        "La operación de deshacer quedó incompleta. El original y la copia se conservaron; "
+        "revísalos en la Bandeja de Entrada antes de continuar."
+    ),
+    "Não foi possível desfazer porque o ficheiro está a ser usado.": (
+        "No se pudo deshacer porque el archivo está en uso."
+    ),
+    "Não foi possível atualizar o histórico ao desfazer.": (
+        "No se pudo actualizar el historial al deshacer."
+    ),
+    "Criar tarefa": "Crear tarea",
+    "A cópia incompleta ficou em {path}.": "La copia incompleta se quedó en {path}.",
+    "A pasta de destino não é segura: {path}.": "La carpeta de destino no es segura: {path}.",
 }
 
 FR_STRINGS: dict[str, str] = {
@@ -2073,4 +2217,78 @@ FR_STRINGS: dict[str, str] = {
     "A nova versão não conseguiu arrancar. Foi tentada a reposição da cópia de segurança.": (
         "La nouvelle version n'a pas pu démarrer. La restauration de la sauvegarde a été tentée."
     ),
+    "Não foi possível ler a pasta Downloads configurada.": (
+        "Impossible de lire le dossier Téléchargements configuré."
+    ),
+    "Já não foi possível encontrar {name}.": "Impossible de retrouver {name}.",
+    "{name} ficou em Downloads, mas uma cópia incompleta pode ter ficado em {leftover}. Compara os ficheiros antes de a remover.": (
+        "{name} est resté dans Téléchargements, mais une copie incomplète se trouve "
+        "peut-être ici : {leftover}. Compare les fichiers avant de la supprimer."
+    ),
+    "{name} mudou ou ainda está a ser usado e ficou em Downloads.": (
+        "{name} a changé ou est encore utilisé et est resté dans Téléchargements."
+    ),
+    "Não foi possível registar {name}. O ficheiro ficou em {destination}.": (
+        "Impossible d'enregistrer {name}. Le fichier est resté ici : {destination}."
+    ),
+    "Não foi possível registar {name}; foi devolvido a Downloads como {returned}.": (
+        "Impossible d'enregistrer {name} ; "
+        "il a été renvoyé dans Téléchargements sous le nom {returned}."
+    ),
+    "Este ficheiro já não está na Caixa de Entrada.": (
+        "Ce fichier n'est plus dans la Boîte de réception."
+    ),
+    "Escolhe uma disciplina ativa.": "Choisis une matière active.",
+    "Escolhe um tipo de documento válido.": "Choisis un type de document valide.",
+    "Não foi possível encontrar {name}.": "Impossible de trouver {name}.",
+    "Não foi possível preparar o histórico da organização.": (
+        "Impossible de préparer l'historique de rangement."
+    ),
+    "A organização ficou incompleta. O original e a cópia foram mantidos; revê ambos na Caixa de Entrada antes de continuar.": (
+        "Le rangement est resté incomplet. L'original et la copie ont été conservés ; "
+        "vérifie-les dans la Boîte de réception avant de continuer."
+    ),
+    "O ficheiro ainda está a ser usado por outra aplicação. Fecha-o e tenta novamente.": (
+        "Le fichier est encore utilisé par une autre application. Ferme-la et réessaie."
+    ),
+    "O movimento foi revertido porque não foi possível atualizar o histórico.": (
+        "Le déplacement a été annulé car l'historique n'a pas pu être mis à jour."
+    ),
+    "Não foi possível atualizar o histórico. Revê a Caixa de Entrada antes de repetir.": (
+        "Impossible de mettre à jour l'historique. "
+        "Vérifie la Boîte de réception avant de réessayer."
+    ),
+    "O ficheiro já não está disponível para devolver.": ("Le fichier ne peut plus être renvoyé."),
+    "Não foi possível preparar o histórico da devolução.": (
+        "Impossible de préparer l'historique de renvoi."
+    ),
+    "A devolução ficou incompleta. O original e a cópia foram mantidos; revê a Caixa de Entrada e Downloads antes de continuar.": (
+        "Le renvoi est resté incomplet. L'original et la copie ont été conservés ; "
+        "vérifie la Boîte de réception et Téléchargements avant de continuer."
+    ),
+    "Não foi possível devolver o ficheiro. Fecha-o noutras aplicações e tenta de novo.": (
+        "Impossible de renvoyer le fichier. Ferme-le dans les autres applications et réessaie."
+    ),
+    "Não foi possível registar a devolução do ficheiro.": (
+        "Impossible d'enregistrer le renvoi du fichier."
+    ),
+    "O último ficheiro organizado já não está no destino. O histórico não foi alterado.": (
+        "Le dernier fichier rangé n'est plus à sa destination. L'historique n'a pas été modifié."
+    ),
+    "Não foi possível preparar o histórico para desfazer.": (
+        "Impossible de préparer l'historique pour annuler."
+    ),
+    "A operação de desfazer ficou incompleta. O original e a cópia foram mantidos; revê ambos na Caixa de Entrada antes de continuar.": (
+        "L'annulation est restée incomplète. L'original et la copie ont été conservés ; "
+        "vérifie-les dans la Boîte de réception avant de continuer."
+    ),
+    "Não foi possível desfazer porque o ficheiro está a ser usado.": (
+        "Impossible d'annuler car le fichier est utilisé."
+    ),
+    "Não foi possível atualizar o histórico ao desfazer.": (
+        "Impossible de mettre à jour l'historique pendant l'annulation."
+    ),
+    "Criar tarefa": "Créer une tâche",
+    "A cópia incompleta ficou em {path}.": "La copie incomplète est restée ici : {path}.",
+    "A pasta de destino não é segura: {path}.": "Le dossier de destination n'est pas sûr : {path}.",
 }

@@ -14,7 +14,7 @@ from watchdog.events import FileCreatedEvent, FileMovedEvent
 
 from organizador.config import AppConfig
 from organizador.db import Database
-from organizador.indexer import MAX_PENDING_INDEX_JOBS, DocumentIndexer
+from organizador.indexer import MAX_PENDING_INDEX_JOBS, DocumentIndexer, _cap_pages
 from organizador.models import ExistingDownload, Subject
 from organizador.stabilizer import wait_until_stable
 from organizador.watcher import DownloadEventHandler, DownloadWatcher
@@ -462,4 +462,65 @@ def test_symlinked_document_is_never_selected_or_indexed(
     refreshed = database.get_file(file_id)
     assert refreshed is not None
     assert refreshed.indexed_at is None
+
+
+def test_cap_pages_truncates_at_the_character_limit() -> None:
+    kept, truncated = _cap_pages(["ab", "cdef", "gh"], limit=5)
+
+    assert kept == ["ab", "cde"]
+    assert truncated is True
+
+    kept, truncated = _cap_pages(["ab", "cd"], limit=4)
+
+    assert kept == ["ab", "cd"]
+    assert truncated is False
+
+    with pytest.raises(ValueError):
+        _cap_pages(["ab"], limit=0)
+
+
+def test_changed_file_size_refreshes_the_record_and_defers_indexing(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "editado.txt"
+    path.write_bytes(b"x")
+    file_id = _file_record(database, subject, path)
+    path.write_bytes(b"y" * 5000)
+    indexer = DocumentIndexer(database)
+
+    indexer.index_document(database.get_file(file_id))
+    indexer.shutdown()
+
+    refreshed = database.get_file(file_id)
+    assert refreshed is not None
+    assert refreshed.size == 5000
+    assert refreshed.indexed_at is None
+
+    indexer = DocumentIndexer(database)
+    indexer.index_document(refreshed)
+    indexer.shutdown()
+
+    indexed = database.get_file(file_id)
+    assert indexed is not None
+    assert indexed.indexed_at is not None
+
+
+def test_indexed_text_is_capped_but_head_terms_stay_searchable(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    from organizador.indexer import MAX_INDEX_CHARS
+
+    head = "cabecalho-marcador-unico"
+    tail = "cauda-marcador-unico"
+    path = tmp_path / "longo.txt"
+    path.write_text(head + "\n" + ("texto de enchimento\n" * 60000) + tail + "\n", encoding="utf-8")
+    assert path.stat().st_size > MAX_INDEX_CHARS
+    file_id = _file_record(database, subject, path)
+    indexer = DocumentIndexer(database)
+
+    indexer.index_document(database.get_file(file_id))
+    indexer.shutdown()
+
+    assert database.search("cabecalho-marcador-unico")
+    assert database.search("cauda-marcador-unico") == []
     assert database.search("indexed") == []

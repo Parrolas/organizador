@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from organizador.classifier import extract_due_date, guess_filing, normalise
 from organizador.models import ExistingDownload, FilingHint, Subject
 from organizador.paths import (
     move_without_overwrite,
+    resolve_contained,
     sanitise_component,
     sanitise_filename,
     unique_path,
@@ -145,6 +147,21 @@ def test_classifier_does_not_force_an_unrelated_subject() -> None:
     assert guess.confidence == 30
 
 
+def test_classifier_code_requires_a_token_boundary() -> None:
+    subjects = [Subject(1, "Matemática", "MAT", "#000000", (), "MAT")]
+
+    guess = guess_filing("material_de_estudo.pdf", subjects)
+
+    assert guess.confidence < 90
+
+    prefixed = guess_filing(
+        "aula-mat101_extra.pdf", [dataclasses.replace(subjects[0], code="MAT101")]
+    )
+
+    assert prefixed.subject_id == 1
+    assert prefixed.confidence >= 90
+
+
 def test_classifier_learns_only_after_two_matching_confirmations() -> None:
     subjects = [
         Subject(1, "Física", "FIS", "#000000", (), "FIS"),
@@ -208,6 +225,23 @@ def test_due_date_ignores_section_numbering_without_deadline_context() -> None:
     assert extract_due_date("aula_7-8.pdf") is None
     assert extract_due_date("Seccao 2-10.pdf") is None
     assert extract_due_date("Ficha3-4.pdf") is None
+
+
+def test_resolve_contained_accepts_inside_paths(tmp_path: Path) -> None:
+    root = tmp_path / "Universidade"
+    (root / "MAT101" / "Slides").mkdir(parents=True)
+
+    resolved = resolve_contained(root / "MAT101" / "Slides" / "aula.pdf", root)
+
+    assert resolved == (root / "MAT101" / "Slides" / "aula.pdf").resolve()
+
+
+def test_resolve_contained_rejects_dotdot_escape(tmp_path: Path) -> None:
+    root = tmp_path / "Universidade"
+    root.mkdir()
+
+    with pytest.raises(OSError, match="managed folder"):
+        resolve_contained(root / ".." / "outside.pdf", root)
 
 
 def test_due_date_accepts_unambiguous_or_contextual_pairs() -> None:

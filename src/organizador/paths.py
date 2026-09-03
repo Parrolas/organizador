@@ -11,6 +11,8 @@ from pathlib import Path
 from stat import S_ISREG
 from typing import Any
 
+from organizador.i18n import _
+
 FileIdentity = tuple[int, int, int, int]
 
 GENERIC_READ = 0x80000000
@@ -46,7 +48,7 @@ class IncompleteMoveError(OSError):
 
     def __init__(self, leftover_path: Path) -> None:
         self.leftover_path = leftover_path
-        super().__init__(f"A cópia incompleta ficou em {leftover_path}.")
+        super().__init__(_("A cópia incompleta ficou em {path}.").format(path=leftover_path))
 
 
 INVALID_WINDOWS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -363,3 +365,21 @@ def is_direct_child(path: Path, directory: Path) -> bool:
         return path.resolve().parent == directory.resolve()
     except OSError:
         return False
+
+
+def resolve_contained(path: Path, root: Path) -> Path:
+    """Resolve reparse points and require containment within a managed root.
+
+    Junctions, symlinks and ``..`` segments that escape the root raise
+    ``OSError`` instead of silently redirecting file operations outside the
+    library.
+    """
+
+    try:
+        resolved = path.resolve()
+        anchor = root.resolve()
+    except OSError as exc:
+        raise OSError(f"Could not resolve path: {path}") from exc
+    if resolved != anchor and anchor not in resolved.parents:
+        raise OSError(f"Path escapes its managed folder: {path}")
+    return resolved

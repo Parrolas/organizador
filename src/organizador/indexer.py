@@ -18,9 +18,25 @@ from organizador.models import ExistingDownload, FiledDocument
 LOGGER = logging.getLogger(__name__)
 IndexCallback = Callable[[int, str], None]
 MAX_INDEX_BYTES = 50 * 1024 * 1024
+MAX_INDEX_CHARS = 1_000_000
 INDEXABLE_SUFFIXES = OFFICE_SUFFIXES | {".pdf", ".txt", ".md", ".csv", ".ipynb"}
 MAX_PENDING_INDEX_JOBS = 50
 DocumentKey = tuple[int, str]
+
+
+def _cap_pages(pages: list[str], limit: int = MAX_INDEX_CHARS) -> tuple[list[str], bool]:
+    """Truncate extracted text so one document cannot bloat the search index."""
+
+    if limit < 1:
+        raise ValueError("index character limit must be positive")
+    kept: list[str] = []
+    total = 0
+    for page in pages:
+        if total >= limit:
+            break
+        kept.append(page[: limit - total])
+        total += len(kept[-1])
+    return kept, total < sum(len(page) for page in pages)
 
 
 class DocumentIndexer:
@@ -72,10 +88,24 @@ class DocumentIndexer:
         if ExistingDownload.capture(path) is None:
             LOGGER.warning("Deferring index because the document is missing or unsafe: %s", path)
             return
+        try:
+            current_size = path.stat().st_size
+        except OSError:
+            LOGGER.warning("Deferring index because the document cannot be statted: %s", path)
+            return
+        if current_size != document.size:
+            LOGGER.info("Requeuing index after on-disk change: %s", path)
+            self.database.refresh_file_size(
+                document.id,
+                current_size,
+                expected_path=document.current_path,
+                expected_record_token=document.record_token,
+            )
+            return
         subject = self.database.get_subject(document.subject_id)
         subject_name = subject.name if subject else ""
         suffix = path.suffix.casefold()
-        if suffix in INDEXABLE_SUFFIXES and document.size > MAX_INDEX_BYTES:
+        if suffix in INDEXABLE_SUFFIXES and current_size > MAX_INDEX_BYTES:
             LOGGER.warning("Skipping oversized document index: %s", path)
             self.database.mark_document_indexed(
                 document.id,
@@ -131,11 +161,16 @@ class DocumentIndexer:
                 )
                 return
         if not self._stop.is_set():
+            capped, truncated = _cap_pages(pages)
+            if truncated:
+                LOGGER.warning(
+                    "Truncated indexed text for %s at %d characters", path, MAX_INDEX_CHARS
+                )
             self.database.replace_document_pages(
                 document.id,
                 subject_name,
                 document.original_name,
-                pages,
+                capped,
                 expected_path=document.current_path,
                 expected_record_token=document.record_token,
             )

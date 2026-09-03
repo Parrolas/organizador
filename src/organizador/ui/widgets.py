@@ -79,7 +79,7 @@ def format_day(value: date | datetime | None) -> str:
     """Format a Portuguese-style calendar date."""
 
     if value is None:
-        return "Sem prazo"
+        return _("Sem prazo")
     actual = value.date() if isinstance(value, datetime) else value
     return actual.strftime("%d/%m/%Y")
 

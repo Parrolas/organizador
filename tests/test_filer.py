@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
@@ -290,3 +292,36 @@ def test_template_without_extension_still_gets_one_through_filing(
     assert final_name == "MAT101_resumo.pdf"
     assert document.current_path.name == "MAT101_resumo.pdf"
     assert database.activity_summary().collisions_renamed == 0
+
+
+def _make_junction(link: Path, target: Path) -> bool:
+    """Create a directory junction without administrator rights, if possible."""
+
+    target.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+    )
+    return completed.returncode == 0 and link.is_dir()
+
+
+def test_filing_rejects_subject_folder_that_escapes_through_a_junction(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "outside"
+    link = app_config.university_root / subject.folder_name
+    shutil.rmtree(link, ignore_errors=True)
+    if not _make_junction(link, outside):
+        pytest.skip("directory junctions are not available on this filesystem")
+    item = filer.ingest(_download(app_config))
+    assert item is not None
+
+    with pytest.raises(FilingError, match="não é segura"):
+        filer.file_document(item.id, subject.id, "Slides", "Ficha.pdf")
+
+    assert list(outside.iterdir()) == []
+    assert database.count_inbox_items() == 1

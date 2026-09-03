@@ -12,6 +12,7 @@ from organizador.config import (
     AppConfig,
 )
 from organizador.db import METRIC_COLLISIONS_RENAMED, Database
+from organizador.i18n import _
 from organizador.models import (
     FILE_KINDS,
     ExistingDownload,
@@ -24,6 +25,7 @@ from organizador.paths import (
     IncompleteMoveError,
     is_direct_child,
     move_without_overwrite,
+    resolve_contained,
     sanitise_component,
     sanitise_filename,
     unique_path,
@@ -111,7 +113,7 @@ class FilingService:
                 key=lambda path: (path.name.casefold(), path.name),
             )
         except OSError as exc:
-            raise FilingError("Não foi possível ler a pasta Downloads configurada.") from exc
+            raise FilingError(_("Não foi possível ler a pasta Downloads configurada.")) from exc
 
         candidates: list[ExistingDownload] = []
         for path in paths:
@@ -141,7 +143,9 @@ class FilingService:
             if source.exists():
                 return None
             exc = FileNotFoundError(source)
-            raise FilingError(f"Já não foi possível encontrar {source.name}.") from exc
+            raise FilingError(
+                _("Já não foi possível encontrar {name}.").format(name=source.name)
+            ) from exc
         if expected is not None and current != expected:
             return None
         size = current.size
@@ -150,7 +154,9 @@ class FilingService:
 
         try:
             self.config.inbox_dir.mkdir(parents=True, exist_ok=True)
-            destination, collided = self._plan_destination(self.config.inbox_dir, source.name)
+            destination, collided = self._plan_contained_destination(
+                self.config.inbox_dir, source.name, self.config.inbox_dir
+            )
             if expected is not None and not expected.still_matches():
                 return None
             expected_identity = (
@@ -161,12 +167,16 @@ class FilingService:
             move_without_overwrite(source, destination, expected_identity=expected_identity)
         except IncompleteMoveError as exc:
             raise FilingError(
-                f"{source.name} ficou em Downloads, mas uma cópia incompleta pode ter ficado "
-                f"em {exc.leftover_path}. Compara os ficheiros antes de a remover."
+                _(
+                    "{name} ficou em Downloads, mas uma cópia incompleta pode ter ficado "
+                    "em {leftover}. Compara os ficheiros antes de a remover."
+                ).format(name=source.name, leftover=exc.leftover_path)
             ) from exc
         except OSError as exc:
             raise FilingError(
-                f"{source.name} mudou ou ainda está a ser usado e ficou em Downloads."
+                _("{name} mudou ou ainda está a ser usado e ficou em Downloads.").format(
+                    name=source.name
+                )
             ) from exc
         try:
             item = self.database.add_inbox_item(destination, source, source.name, size)
@@ -176,13 +186,14 @@ class FilingService:
                 move_without_overwrite(destination, rollback)
             except OSError as rollback_error:
                 LOGGER.exception("Failed to roll back an inbox move")
+                leftover = _("Não foi possível registar {name}. O ficheiro ficou em {destination}.")
                 raise FilingError(
-                    f"Não foi possível registar {source.name}. O ficheiro ficou em {destination}."
+                    leftover.format(name=source.name, destination=destination)
                 ) from rollback_error
-            raise FilingError(
-                f"Não foi possível registar {source.name}; foi devolvido a Downloads "
-                f"como {rollback.name}."
-            ) from exc
+            returned = _(
+                "Não foi possível registar {name}; foi devolvido a Downloads como {returned}."
+            )
+            raise FilingError(returned.format(name=source.name, returned=rollback.name)) from exc
         self._register_collision(collided)
         return item
 
@@ -198,28 +209,34 @@ class FilingService:
         item = self.database.get_inbox_item(inbox_id)
         subject = self.database.get_subject(subject_id)
         if item is None:
-            raise FilingError("Este ficheiro já não está na Caixa de Entrada.")
+            raise FilingError(_("Este ficheiro já não está na Caixa de Entrada."))
         if subject is None or not subject.active:
-            raise FilingError("Escolhe uma disciplina ativa.")
+            raise FilingError(_("Escolhe uma disciplina ativa."))
         if kind not in FILE_KINDS:
-            raise FilingError("Escolhe um tipo de documento válido.")
+            raise FilingError(_("Escolhe um tipo de documento válido."))
         if not item.path.is_file():
             self.database.set_inbox_status(inbox_id, "error", "Ficheiro não encontrado")
-            raise FilingError(f"Não foi possível encontrar {item.original_name}.")
+            raise FilingError(
+                _("Não foi possível encontrar {name}.").format(name=item.original_name)
+            )
 
         filename = self._name_with_original_extension(requested_name, item.original_name)
         folder = self.config.university_root / subject.folder_name / kind
-        destination, collided = self._plan_destination(folder, filename)
+        destination, collided = self._plan_contained_destination(
+            folder, filename, self.config.university_root
+        )
         try:
             pending = self.database.begin_document_filing(inbox_id, subject_id, kind, destination)
         except Exception as exc:
-            raise FilingError("Não foi possível preparar o histórico da organização.") from exc
+            raise FilingError(_("Não foi possível preparar o histórico da organização.")) from exc
         try:
             move_without_overwrite(item.path, destination)
         except IncompleteMoveError as exc:
             raise FilingError(
-                "A organização ficou incompleta. O original e a cópia foram mantidos; "
-                "revê ambos na Caixa de Entrada antes de continuar."
+                _(
+                    "A organização ficou incompleta. O original e a cópia foram mantidos; "
+                    "revê ambos na Caixa de Entrada antes de continuar."
+                )
             ) from exc
         except OSError as exc:
             try:
@@ -229,7 +246,10 @@ class FilingService:
             except Exception:
                 LOGGER.exception("Failed to cancel a prepared filing")
             raise FilingError(
-                "O ficheiro ainda está a ser usado por outra aplicação. Fecha-o e tenta novamente."
+                _(
+                    "O ficheiro ainda está a ser usado por outra aplicação. "
+                    "Fecha-o e tenta novamente."
+                )
             ) from exc
 
         try:
@@ -254,10 +274,12 @@ class FilingService:
                 except Exception:
                     LOGGER.exception("Failed to cancel the rolled-back filing")
             message = (
-                "O movimento foi revertido porque não foi possível atualizar o histórico."
+                _("O movimento foi revertido porque não foi possível atualizar o histórico.")
                 if rolled_back
-                else "Não foi possível atualizar o histórico. "
-                "Revê a Caixa de Entrada antes de repetir."
+                else _(
+                    "Não foi possível atualizar o histórico. "
+                    "Revê a Caixa de Entrada antes de repetir."
+                )
             )
             raise FilingError(message) from exc
         self._register_collision(collided)
@@ -268,20 +290,22 @@ class FilingService:
 
         item = self.database.get_inbox_item(inbox_id)
         if item is None or not item.path.is_file():
-            raise FilingError("O ficheiro já não está disponível para devolver.")
-        destination, collided = self._plan_destination(
-            self.config.downloads_dir, item.original_name
+            raise FilingError(_("O ficheiro já não está disponível para devolver."))
+        destination, collided = self._plan_contained_destination(
+            self.config.downloads_dir, item.original_name, self.config.downloads_dir
         )
         try:
             pending = self.database.begin_return(inbox_id, destination)
         except Exception as exc:
-            raise FilingError("Não foi possível preparar o histórico da devolução.") from exc
+            raise FilingError(_("Não foi possível preparar o histórico da devolução.")) from exc
         try:
             move_without_overwrite(item.path, destination)
         except IncompleteMoveError as exc:
             raise FilingError(
-                "A devolução ficou incompleta. O original e a cópia foram mantidos; "
-                "revê a Caixa de Entrada e Downloads antes de continuar."
+                _(
+                    "A devolução ficou incompleta. O original e a cópia foram mantidos; "
+                    "revê a Caixa de Entrada e Downloads antes de continuar."
+                )
             ) from exc
         except OSError as exc:
             try:
@@ -291,7 +315,10 @@ class FilingService:
             except Exception:
                 LOGGER.exception("Failed to cancel a prepared return")
             raise FilingError(
-                "Não foi possível devolver o ficheiro. Fecha-o noutras aplicações e tenta de novo."
+                _(
+                    "Não foi possível devolver o ficheiro. "
+                    "Fecha-o noutras aplicações e tenta de novo."
+                )
             ) from exc
         try:
             self.database.record_return(inbox_id, destination, pending_event_id=pending.id)
@@ -306,7 +333,7 @@ class FilingService:
                     self.database.cancel_pending_inbox_operation(pending.id, current_path=rollback)
                 except Exception:
                     LOGGER.exception("Failed to cancel the rolled-back return")
-            raise FilingError("Não foi possível registar a devolução do ficheiro.") from exc
+            raise FilingError(_("Não foi possível registar a devolução do ficheiro.")) from exc
         self._register_collision(collided)
         return destination
 
@@ -318,21 +345,26 @@ class FilingService:
             return None
         if not event.destination_path.is_file():
             raise FilingError(
-                "O último ficheiro organizado já não está no destino. O histórico não foi alterado."
+                _(
+                    "O último ficheiro organizado já não está no destino. "
+                    "O histórico não foi alterado."
+                )
             )
-        restored_path, collided = self._plan_destination(
-            self.config.inbox_dir, event.source_path.name
+        restored_path, collided = self._plan_contained_destination(
+            self.config.inbox_dir, event.source_path.name, self.config.inbox_dir
         )
         try:
             pending = self.database.begin_filing_undo(event, restored_path)
         except Exception as exc:
-            raise FilingError("Não foi possível preparar o histórico para desfazer.") from exc
+            raise FilingError(_("Não foi possível preparar o histórico para desfazer.")) from exc
         try:
             move_without_overwrite(event.destination_path, restored_path)
         except IncompleteMoveError as exc:
             raise FilingError(
-                "A operação de desfazer ficou incompleta. O original e a cópia foram mantidos; "
-                "revê ambos na Caixa de Entrada antes de continuar."
+                _(
+                    "A operação de desfazer ficou incompleta. O original e a cópia foram mantidos; "
+                    "revê ambos na Caixa de Entrada antes de continuar."
+                )
             ) from exc
         except OSError as exc:
             try:
@@ -340,7 +372,7 @@ class FilingService:
             except Exception:
                 LOGGER.exception("Failed to cancel a prepared undo")
             raise FilingError(
-                "Não foi possível desfazer porque o ficheiro está a ser usado."
+                _("Não foi possível desfazer porque o ficheiro está a ser usado.")
             ) from exc
         try:
             self.database.mark_filing_undone(event, restored_path)
@@ -355,7 +387,7 @@ class FilingService:
                     self.database.cancel_pending_undo(pending.id)
                 except Exception:
                     LOGGER.exception("Failed to cancel the rolled-back undo")
-            raise FilingError("Não foi possível atualizar o histórico ao desfazer.") from exc
+            raise FilingError(_("Não foi possível atualizar o histórico ao desfazer.")) from exc
         self._register_collision(collided)
         if event.inbox_id is None:  # pragma: no cover - schema invariant
             return None
@@ -384,6 +416,20 @@ class FilingService:
 
         destination = unique_path(directory, filename)
         return destination, destination.name != sanitise_filename(filename)
+
+    def _plan_contained_destination(
+        self, directory: Path, filename: str, root: Path
+    ) -> tuple[Path, bool]:
+        """Plan a destination that cannot escape its managed root via reparse points."""
+
+        destination, collided = self._plan_destination(directory, filename)
+        try:
+            resolve_contained(destination, root)
+        except OSError as exc:
+            raise FilingError(
+                _("A pasta de destino não é segura: {path}.").format(path=directory)
+            ) from exc
+        return destination, collided
 
     def _register_collision(self, collided: bool) -> None:
         """Count one safely renamed collision for the activity summary."""

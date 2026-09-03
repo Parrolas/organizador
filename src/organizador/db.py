@@ -1867,6 +1867,44 @@ class Database:
                 )
             connection.commit()
 
+    def refresh_file_size(
+        self,
+        file_id: int,
+        size: int,
+        *,
+        expected_path: Path | None = None,
+        expected_record_token: str | None = None,
+    ) -> None:
+        """Record a new on-disk size and requeue the document for indexing."""
+
+        with self.connect() as connection:
+            if expected_path is not None:
+                token_clause = " AND record_token = ?" if expected_record_token is not None else ""
+                parameters: tuple[object, ...] = (
+                    size,
+                    file_id,
+                    str(expected_path),
+                )
+                if expected_record_token is not None:
+                    parameters += (expected_record_token,)
+                connection.execute(
+                    f"""
+                    UPDATE files SET size = ?, indexed_at = NULL
+                    WHERE id = ? AND current_path = ?{token_clause}
+                      AND catalog_state = 'active'
+                    """,
+                    parameters,
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE files SET size = ?, indexed_at = NULL
+                    WHERE id = ? AND catalog_state = 'active'
+                    """,
+                    (size, file_id),
+                )
+            connection.commit()
+
     def search(self, text: str, limit: int = 40) -> list[SearchResult]:
         """Search indexed pages using safe prefix terms."""
 
