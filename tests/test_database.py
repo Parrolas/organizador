@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from datetime import date
 from pathlib import Path
 
@@ -710,7 +711,7 @@ def test_backup_includes_committed_rows_still_resident_in_wal(
         health = database.backup_to(snapshot)
 
     assert health.healthy
-    with sqlite3.connect(snapshot) as connection:
+    with closing(sqlite3.connect(snapshot)) as connection:
         count = int(
             connection.execute("SELECT COUNT(*) FROM subjects WHERE code = 'WAL'").fetchone()[0]
         )
@@ -733,7 +734,7 @@ def test_backup_excludes_uncommitted_rows(database: Database, tmp_path: Path) ->
         database.backup_to(snapshot)
 
         writer.rollback()
-    with sqlite3.connect(snapshot) as connection:
+    with closing(sqlite3.connect(snapshot)) as connection:
         count = int(
             connection.execute("SELECT COUNT(*) FROM subjects WHERE code = 'NOPE'").fetchone()[0]
         )

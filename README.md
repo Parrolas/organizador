@@ -134,7 +134,9 @@ guardados.
 - PDFs digitalizados apenas como imagem precisam de OCR e não entram na pesquisa textual.
 - `.doc`, `.ppt`, `.xls` e ficheiros OneNote podem ser organizados, mas o conteúdo não é indexado.
 - Documentos com mais de 50 MB são organizados sem indexação para limitar memória em segundo plano.
+- O texto indexado por documento é limitado para proteger a base de dados; documentos muito longos ficam pesquisáveis pelo início.
 - As sugestões aprendidas dependem de padrões de nome repetidos e continuam a exigir confirmação.
+- Mudanças entre discos diferentes preservam conteúdo, datas e atributos básicos, mas não fluxos de dados alternativos (ADS), ACLs, encriptação nem dispersão; estes casos ficam registados no diagnóstico.
 
 ## Desenvolvimento
 

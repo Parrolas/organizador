@@ -2,6 +2,16 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.6.5 - 2026-09-04
+
+### Fixed
+
+- Cross-volume moves now preserve timestamps and basic attributes, and warn
+  in the diagnostic log when alternate data streams cannot travel with the
+  file; ACL, encryption, and sparse-file limits are documented.
+- Fixed two unclosed SQLite connections in tests that produced
+  ResourceWarnings under the full suite.
+
 ## 0.6.4 - 2026-09-04
 
 ### Fixed

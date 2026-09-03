@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
+import os
+import subprocess
 from datetime import date
 from pathlib import Path
 
@@ -242,6 +245,50 @@ def test_resolve_contained_rejects_dotdot_escape(tmp_path: Path) -> None:
 
     with pytest.raises(OSError, match="managed folder"):
         resolve_contained(root / ".." / "outside.pdf", root)
+
+
+def _force_copy_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(path_operations, "_rename_windows_handle", lambda *args, **kwargs: False)
+
+
+def test_cross_volume_fallback_preserves_times_and_attributes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "orig.pdf"
+    source.write_bytes(b"bytes" * 100)
+    created_ns = source.stat().st_ctime_ns
+    old_ns = 1_600_000_000_000_000_000
+    os.utime(source, ns=(old_ns, old_ns))
+    subprocess.run(["attrib", "+h", str(source)], check=True)
+    _force_copy_fallback(monkeypatch)
+    target = tmp_path / "dest.pdf"
+
+    result = move_without_overwrite(source, target)
+
+    assert result == target
+    assert not source.exists()
+    assert target.stat().st_mtime_ns == old_ns
+    assert target.stat().st_ctime_ns == created_ns
+    assert target.stat().st_file_attributes & 0x2
+
+
+def test_cross_volume_fallback_warns_about_dropped_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    source = tmp_path / "com-mark.pdf"
+    source.write_bytes(b"main content")
+    Path(f"{source}:Zone.Identifier").write_text("[ZoneTransfer]\nZoneId=3\n")
+    _force_copy_fallback(monkeypatch)
+    target = tmp_path / "sem-mark.pdf"
+
+    with caplog.at_level(logging.WARNING, logger="organizador.paths"):
+        result = move_without_overwrite(source, target)
+
+    assert result == target
+    assert target.read_bytes() == b"main content"
+    assert not Path(f"{target}:Zone.Identifier").exists()
+    assert "alternate data streams" in caplog.text
+    assert "Zone.Identifier" in caplog.text
 
 
 def test_due_date_accepts_unambiguous_or_contextual_pairs() -> None:

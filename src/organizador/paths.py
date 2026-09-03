@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import re
 import shutil
@@ -12,6 +13,8 @@ from stat import S_ISREG
 from typing import Any
 
 from organizador.i18n import _
+
+LOGGER = logging.getLogger(__name__)
 
 FileIdentity = tuple[int, int, int, int]
 
@@ -217,6 +220,7 @@ def _move_windows(
             raise ctypes.WinError(error, str(target))
 
         _copy_windows_handles(kernel32, source_handle, destination_handle, identity[2])
+        _preserve_copy_metadata(kernel32, source_handle, destination_handle, source, target)
         if not _delete_windows_handle(source_handle, set_information):
             raise ctypes.WinError(ctypes.get_last_error(), str(source))
     except Exception as exc:
@@ -257,6 +261,33 @@ def _delete_windows_handle(handle: int, set_information: Any) -> bool:
             ctypes.sizeof(information),
         )
     )
+
+
+class _ByHandleFileInformation(ctypes.Structure):
+    _fields_ = (
+        ("file_attributes", wintypes.DWORD),
+        ("creation_time", wintypes.FILETIME),
+        ("last_access_time", wintypes.FILETIME),
+        ("last_write_time", wintypes.FILETIME),
+        ("volume_serial_number", wintypes.DWORD),
+        ("file_size_high", wintypes.DWORD),
+        ("file_size_low", wintypes.DWORD),
+        ("number_of_links", wintypes.DWORD),
+        ("file_index_high", wintypes.DWORD),
+        ("file_index_low", wintypes.DWORD),
+    )
+
+
+class _Win32FindStreamData(ctypes.Structure):
+    _fields_ = (
+        ("stream_size", ctypes.c_int64),
+        ("stream_name", wintypes.WCHAR * 296),
+    )
+
+
+# Attribute bits that are safe to mirror onto a freshly written copy.
+_PRESERVABLE_ATTRIBUTES = 0x1 | 0x2 | 0x4 | 0x20 | 0x100  # R/H/S/A/TEMPORARY
+_FILE_ATTRIBUTE_NORMAL = 0x80
 
 
 def _copy_windows_handles(
@@ -308,6 +339,96 @@ def _copy_windows_handles(
         raise OSError("O ficheiro mudou durante a cópia.")
     if not flush_file_buffers(destination_handle):
         raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _file_information(kernel32: Any, handle: int) -> _ByHandleFileInformation:
+    get_information = kernel32.GetFileInformationByHandle
+    get_information.argtypes = (wintypes.HANDLE, ctypes.POINTER(_ByHandleFileInformation))
+    get_information.restype = wintypes.BOOL
+    information = _ByHandleFileInformation()
+    if not get_information(handle, ctypes.byref(information)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return information
+
+
+def _apply_file_times(kernel32: Any, handle: int, information: _ByHandleFileInformation) -> None:
+    set_times = kernel32.SetFileTime
+    set_times.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    )
+    set_times.restype = wintypes.BOOL
+    if not set_times(
+        handle,
+        ctypes.byref(information.creation_time),
+        ctypes.byref(information.last_access_time),
+        ctypes.byref(information.last_write_time),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _apply_file_attributes(kernel32: Any, target: Path, attributes: int) -> None:
+    set_attributes = kernel32.SetFileAttributesW
+    set_attributes.argtypes = (wintypes.LPCWSTR, wintypes.DWORD)
+    set_attributes.restype = wintypes.BOOL
+    wanted = attributes & _PRESERVABLE_ATTRIBUTES or _FILE_ATTRIBUTE_NORMAL
+    if not set_attributes(str(target), wanted):
+        raise ctypes.WinError(ctypes.get_last_error(), str(target))
+
+
+def _extra_data_streams(kernel32: Any, path: str) -> list[str]:
+    """List alternate data streams; never raises so exotic filesystems keep working."""
+
+    find_first = kernel32.FindFirstStreamW
+    find_first.argtypes = (wintypes.LPCWSTR, wintypes.INT, wintypes.LPVOID, wintypes.DWORD)
+    find_first.restype = wintypes.HANDLE
+    find_next = kernel32.FindNextStreamW
+    find_next.argtypes = (wintypes.HANDLE, wintypes.LPVOID)
+    find_next.restype = wintypes.BOOL
+    find_close = kernel32.FindClose
+    find_close.argtypes = (wintypes.HANDLE,)
+    find_close.restype = wintypes.BOOL
+    streams: list[str] = []
+    data = _Win32FindStreamData()
+    handle = find_first(path, 0, ctypes.byref(data), 0)
+    if handle == INVALID_HANDLE_VALUE or handle is None:
+        LOGGER.debug("Could not enumerate streams for %s", path)
+        return []
+    try:
+        while True:
+            name = str(data.stream_name)
+            if name and name != "::$DATA":
+                streams.append(name)
+            data = _Win32FindStreamData()
+            if not find_next(handle, ctypes.byref(data)):
+                break
+    finally:
+        find_close(handle)
+    return streams
+
+
+def _preserve_copy_metadata(
+    kernel32: Any,
+    source_handle: int,
+    destination_handle: int,
+    source: Path,
+    target: Path,
+) -> None:
+    """Mirror timestamps and safe attributes; warn about dropped alternate streams."""
+
+    information = _file_information(kernel32, source_handle)
+    _apply_file_times(kernel32, destination_handle, information)
+    _apply_file_attributes(kernel32, target, information.file_attributes)
+    extra = _extra_data_streams(kernel32, str(source))
+    if extra:
+        LOGGER.warning(
+            "Moved %s without its alternate data streams (%s); "
+            "only the main content, timestamps and attributes were preserved.",
+            source,
+            ", ".join(extra),
+        )
 
 
 def _copy_exclusive(
