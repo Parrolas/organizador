@@ -18,7 +18,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSystemTrayIcon
 
-from organizador import updater
+from organizador import ocr, updater
 from organizador.classifier import guess_filing
 from organizador.config import AppConfig, parse_extensions
 from organizador.db import Database
@@ -106,6 +106,7 @@ class AppController(QObject):
         self.indexer = DocumentIndexer(
             self.database,
             lambda file_id, error: self.index_completed.emit(file_id, error),
+            ocr_languages=self._ocr_language_tags,
         )
         self.watcher: DownloadWatcher | None = None
         self.prompt_queue: deque[int] = deque()
@@ -347,6 +348,13 @@ class AppController(QObject):
         self.prompt.filing_requested.connect(self._file_item)
         self.prompt.later_requested.connect(self._prompt_finished)
         self.prompt.return_requested.connect(self._return_item)
+
+    def _ocr_language_tags(self) -> tuple[str, ...] | None:
+        """Provide OCR languages live, honouring the current toggle and language."""
+
+        if not self.config.ocr_enabled:
+            return None
+        return ocr.preferred_language_tags(self.config.language)
 
     def _restart_watcher(self) -> None:
         self._watcher_generation += 1
@@ -1026,6 +1034,7 @@ class AppController(QObject):
             self.config.theme = str(values["theme"])
             self.config.language = str(values["language"])
             self.config.check_updates_on_launch = bool(values["check_updates_on_launch"])
+            self.config.ocr_enabled = bool(values["ocr_enabled"])
             self.config.watch_enabled = bool(values["watch_enabled"])
             desired_startup = bool(values["launch_at_login"])
             self.config.launch_at_login = desired_startup
@@ -1074,6 +1083,7 @@ class AppController(QObject):
         self.config.theme = previous.theme
         self.config.language = previous.language
         self.config.check_updates_on_launch = previous.check_updates_on_launch
+        self.config.ocr_enabled = previous.ocr_enabled
         self.config.initialized = previous.initialized
 
     def _set_paused(self, paused: bool) -> None:

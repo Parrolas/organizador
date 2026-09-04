@@ -101,6 +101,36 @@ def test_settings_preserve_an_exact_minimum_file_size(
     window.close()
 
 
+def test_settings_ocr_checkbox_round_trips_through_payload(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+) -> None:
+    del qt_app
+    app_config.ocr_enabled = False
+    window = MainWindow(database, app_config)
+    payloads: list[SettingsPayload] = []
+    window.settings_page.save_requested.connect(payloads.append)
+
+    ocr_box = next(
+        control
+        for control in window.settings_page.findChildren(QCheckBox)
+        if control.text() == "Reconhecer texto em PDFs digitalizados (OCR)"
+    )
+    assert not ocr_box.isChecked()
+    ocr_box.setChecked(True)
+    save = next(
+        control
+        for control in window.settings_page.findChildren(QPushButton)
+        if control.text() == "Guardar definições"
+    )
+    save.click()
+
+    assert payloads[0]["ocr_enabled"] is True
+    window.allow_close = True
+    window.close()
+
+
 def test_recovery_row_offers_only_a_safe_folder_action(
     qt_app: QApplication,
     app_config: AppConfig,
@@ -410,6 +440,7 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
         "theme": "escuro",
         "language": "pt",
         "check_updates_on_launch": True,
+        "ocr_enabled": True,
         "watch_enabled": True,
         "launch_at_login": True,
     }

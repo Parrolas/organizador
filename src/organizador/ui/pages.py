@@ -69,6 +69,7 @@ class SettingsPayload(TypedDict):
     theme: str
     language: str
     check_updates_on_launch: bool
+    ocr_enabled: bool
     watch_enabled: bool
     launch_at_login: bool
 
@@ -1368,9 +1369,11 @@ class SettingsPage(QWidget):
         self.watch_check = QCheckBox(_("Vigiar novos ficheiros em Downloads"))
         self.startup_check = QCheckBox(_("Iniciar o Organizador quando entro no Windows"))
         self.check_updates_check = QCheckBox(_("Procurar atualizações automaticamente"))
+        self.ocr_check = QCheckBox(_("Reconhecer texto em PDFs digitalizados (OCR)"))
         panel_layout.addWidget(self.watch_check)
         panel_layout.addWidget(self.startup_check)
         panel_layout.addWidget(self.check_updates_check)
+        panel_layout.addWidget(self.ocr_check)
         note = label(
             _(
                 "Alterar a pasta Universidade afeta os próximos ficheiros; "
@@ -1427,6 +1430,7 @@ class SettingsPage(QWidget):
         self.watch_check.setChecked(config.watch_enabled)
         self.startup_check.setChecked(config.launch_at_login)
         self.check_updates_check.setChecked(config.check_updates_on_launch)
+        self.ocr_check.setChecked(config.ocr_enabled)
 
     def set_status(self, message: str, *, error: bool = False) -> None:
         """Show settings persistence feedback."""
@@ -1453,6 +1457,7 @@ class SettingsPage(QWidget):
             "theme": str(self.theme_combo.currentData()),
             "language": str(self.language_combo.currentData()),
             "check_updates_on_launch": self.check_updates_check.isChecked(),
+            "ocr_enabled": self.ocr_check.isChecked(),
             "watch_enabled": self.watch_check.isChecked(),
             "launch_at_login": self.startup_check.isChecked(),
         }

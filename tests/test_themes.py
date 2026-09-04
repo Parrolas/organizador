@@ -101,6 +101,7 @@ def test_theme_round_trips_through_settings(
         "theme": "claro",
         "language": "pt",
         "check_updates_on_launch": True,
+        "ocr_enabled": True,
         "watch_enabled": True,
         "launch_at_login": False,
     }

@@ -108,6 +108,7 @@ class AppConfig:
     theme: str = DEFAULT_THEME
     language: str = DEFAULT_LANGUAGE
     check_updates_on_launch: bool = True
+    ocr_enabled: bool = True
     initialized: bool = False
 
     @property
@@ -247,6 +248,7 @@ class AppConfig:
                 theme=_str_setting(raw, "theme", DEFAULT_THEME),
                 language=_str_setting(raw, "language", DEFAULT_LANGUAGE),
                 check_updates_on_launch=_bool_setting(raw, "check_updates_on_launch", True),
+                ocr_enabled=_bool_setting(raw, "ocr_enabled", True),
                 initialized=_bool_setting(raw, "initialized", False),
             )
             config.validate()

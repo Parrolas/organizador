@@ -2,6 +2,15 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.9.0 - 2026-09-05
+
+### Added
+
+- OCR for scanned PDFs using the built-in Windows engine: pages without
+  extractable text are recognized (pt-PT preferred) and indexed like normal
+  text, toggleable in Definições. Without a language pack or with OCR off,
+  documents keep the filename-only fallback.
+
 ## 0.8.1 - 2026-09-04
 
 ### Added

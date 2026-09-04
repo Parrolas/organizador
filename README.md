@@ -131,7 +131,7 @@ guardados.
 
 ## Limitações atuais
 
-- PDFs digitalizados apenas como imagem precisam de OCR e não entram na pesquisa textual.
+- PDFs digitalizados apenas como imagem são lidos pelo OCR do Windows quando a opção está ativa nas Definições; sem pacote de idioma ou com o OCR desligado, entram na pesquisa apenas pelo nome.
 - `.doc`, `.ppt`, `.xls` e ficheiros OneNote podem ser organizados, mas o conteúdo não é indexado.
 - Documentos com mais de 50 MB são organizados sem indexação para limitar memória em segundo plano.
 - O texto indexado por documento é limitado para proteger a base de dados; documentos muito longos ficam pesquisáveis pelo início.

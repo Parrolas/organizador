@@ -12,12 +12,14 @@ from threading import Event
 
 from pypdf import PdfReader
 
+from organizador import ocr
 from organizador.db import Database
 from organizador.extractors import OFFICE_SUFFIXES, extract_docx, extract_pptx, extract_xlsx
 from organizador.models import ExistingDownload, FiledDocument
 
 LOGGER = logging.getLogger(__name__)
 IndexCallback = Callable[[int, str], None]
+OcrLanguages = Callable[[], tuple[str, ...] | None]
 MAX_INDEX_BYTES = 50 * 1024 * 1024
 MAX_INDEX_CHARS = 1_000_000
 INDEXABLE_SUFFIXES = OFFICE_SUFFIXES | {".pdf", ".txt", ".md", ".csv", ".ipynb"}
@@ -43,9 +45,16 @@ def _cap_pages(pages: list[str], limit: int = MAX_INDEX_CHARS) -> tuple[list[str
 class DocumentIndexer:
     """Extract document text serially to keep foreground interactions responsive."""
 
-    def __init__(self, database: Database, on_finished: IndexCallback | None = None) -> None:
+    def __init__(
+        self,
+        database: Database,
+        on_finished: IndexCallback | None = None,
+        *,
+        ocr_languages: OcrLanguages | None = None,
+    ) -> None:
         self.database = database
         self.on_finished = on_finished
+        self._ocr_languages = ocr_languages
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pdf-indexer")
         self._active: set[DocumentKey] = set()
         self._attempted: set[DocumentKey] = set()
@@ -178,7 +187,7 @@ class DocumentIndexer:
         if self._stop.is_set():
             return []
         if suffix == ".pdf":
-            return self._extract_pdf(document, path)
+            return self._extract_pdf(path)
         if suffix in {".txt", ".md", ".csv"}:
             return [path.read_text(encoding="utf-8", errors="replace")]
         if suffix == ".ipynb":
@@ -197,7 +206,7 @@ class DocumentIndexer:
             return extract_xlsx(path)
         return []
 
-    def _extract_pdf(self, document: FiledDocument, path: Path) -> list[str]:
+    def _extract_pdf(self, path: Path) -> list[str]:
         reader = PdfReader(path)
         if reader.is_encrypted:
             try:
@@ -209,7 +218,26 @@ class DocumentIndexer:
             if self._stop.is_set():
                 return []
             pages.append((page.extract_text() or "").strip())
-        return pages
+        return self._ocr_blank_pages(path, pages)
+
+    def _ocr_blank_pages(self, path: Path, pages: list[str]) -> list[str]:
+        """Fill textless PDF pages with OS-engine OCR, best effort."""
+
+        provider = self._ocr_languages
+        if provider is None:
+            return pages
+        try:
+            tags = provider()
+        except Exception:
+            LOGGER.debug("OCR language provider failed", exc_info=True)
+            return pages
+        if not tags or not any(not page.strip() for page in pages):
+            return pages
+        try:
+            return ocr.ocr_blank_pages(path, pages, tags)
+        except Exception:
+            LOGGER.debug("OCR pass failed for %s", path, exc_info=True)
+            return pages
 
     def shutdown(self) -> None:
         """Stop accepting work and cancel jobs that have not started."""

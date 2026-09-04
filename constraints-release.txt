@@ -6,6 +6,7 @@ lxml==6.1.2
 openpyxl==3.1.5
 Pillow==12.3.0
 pypdf==6.16.2
+pypdfium2==5.13.0
 PySide6-Essentials==6.11.2
 python-docx==1.2.0
 python-pptx==1.0.2
@@ -13,6 +14,13 @@ RapidFuzz==3.14.5
 shiboken6==6.11.2
 typing_extensions==4.16.0
 watchdog==6.0.0
+winrt-runtime==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
+winrt-Windows.Globalization==3.2.1
+winrt-Windows.Graphics.Imaging==3.2.1
+winrt-Windows.Media.Ocr==3.2.1
+winrt-Windows.Storage.Streams==3.2.1
 XlsxWriter==3.2.9
 
 # Quality, packaging, and transitive packages used by the release workflow.

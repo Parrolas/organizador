@@ -105,6 +105,7 @@ def test_load_rejects_non_object_json(tmp_path: Path, payload: object) -> None:
         ("launch_at_login", "false"),
         ("prompt_timeout_seconds", 45.0),
         ("initialized", 1),
+        ("ocr_enabled", 1),
     ],
 )
 def test_load_rejects_wrong_setting_types(tmp_path: Path, field: str, value: object) -> None:
@@ -163,6 +164,14 @@ def test_settings_round_trip_for_reminder_and_template(tmp_path: Path) -> None:
 
     assert loaded.reminder_lead_days == 5
     assert loaded.filename_template == "{codigo}_{tipo}_{nome_original}"
+
+
+def test_settings_round_trip_for_ocr_toggle(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path, ocr_enabled=False)
+    config.save()
+
+    assert AppConfig.load(tmp_path).ocr_enabled is False
+    assert AppConfig(data_dir=tmp_path).ocr_enabled is True
 
 
 def test_load_rejects_wrong_types_for_new_settings(tmp_path: Path) -> None:
