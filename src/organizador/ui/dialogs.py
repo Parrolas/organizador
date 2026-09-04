@@ -562,6 +562,7 @@ class SubjectFilesDialog(QDialog):
     """Read-only overview of one subject's organised files."""
 
     open_requested = Signal(object)
+    reindex_requested = Signal(int)
 
     def __init__(
         self,
@@ -655,7 +656,20 @@ class SubjectFilesDialog(QDialog):
                 "Muted",
             )
         )
+        if document.index_state == "failed":
+            failed_note = label(
+                _("Falha na indexação — o ficheiro continua pesquisável pelo nome."),
+                "Muted",
+            )
+            failed_note.setWordWrap(True)
+            copy.addWidget(failed_note)
         row_layout.addLayout(copy, 1)
+        if document.index_state == "failed":
+            reindex_button = button(_("Reindexar"), variant="quiet")
+            reindex_button.clicked.connect(
+                lambda checked=False, file_id=document.id: self.reindex_requested.emit(file_id)
+            )
+            row_layout.addWidget(reindex_button)
         open_button = button(_("Abrir"), variant="quiet")
         open_button.clicked.connect(
             lambda checked=False, path=document.current_path: self.open_requested.emit(path)

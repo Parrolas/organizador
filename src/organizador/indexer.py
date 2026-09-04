@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from functools import partial
+from pathlib import Path
 from threading import Event
 
 from pypdf import PdfReader
@@ -79,6 +80,18 @@ class DocumentIndexer:
                 return
             self.submit(document)
 
+    def reindex(self, document: FiledDocument) -> None:
+        """Queue a document again even if a previous attempt finished or failed."""
+
+        key = (document.id, document.record_token)
+        self._attempted.discard(key)
+        self.database.clear_index_state(
+            document.id,
+            expected_path=document.current_path,
+            expected_record_token=document.record_token,
+        )
+        self.submit(document)
+
     def index_document(self, document: FiledDocument) -> None:
         """Extract and persist text for one supported document."""
 
@@ -101,79 +114,102 @@ class DocumentIndexer:
                 expected_path=document.current_path,
                 expected_record_token=document.record_token,
             )
+            # Let the refill pass queue the refreshed record; otherwise the new
+            # size would never be extracted.
+            self._attempted.discard((document.id, document.record_token))
             return
+        final_name = path.name
         subject = self.database.get_subject(document.subject_id)
         subject_name = subject.name if subject else ""
         suffix = path.suffix.casefold()
         if suffix in INDEXABLE_SUFFIXES and current_size > MAX_INDEX_BYTES:
             LOGGER.warning("Skipping oversized document index: %s", path)
-            self.database.mark_document_indexed(
-                document.id,
-                expected_path=document.current_path,
-                expected_record_token=document.record_token,
-            )
+            self._store_name_only(document, subject_name, final_name)
+            self._mark_failed(document, state="too_large", error="")
             return
-        pages: list[str] = []
+        try:
+            pages = self._extract_text(document, path, suffix)
+            extract_error: str | None = None
+        except Exception as exc:
+            LOGGER.exception("Failed to extract document %s", path)
+            pages = []
+            extract_error = str(exc) or type(exc).__name__
+        if self._stop.is_set():
+            return
+        capped, truncated = _cap_pages(pages)
+        if truncated:
+            LOGGER.warning("Truncated indexed text for %s at %d characters", path, MAX_INDEX_CHARS)
+        if not any(page.strip() for page in capped):
+            # Documents without extractable text stay findable by their final name.
+            capped = [final_name]
+        self.database.replace_document_pages(
+            document.id,
+            subject_name,
+            final_name,
+            capped,
+            expected_path=document.current_path,
+            expected_record_token=document.record_token,
+        )
+        if extract_error is not None:
+            self._mark_failed(document, state="failed", error=extract_error)
+
+    def _store_name_only(self, document: FiledDocument, subject_name: str, final_name: str) -> None:
+        self.database.replace_document_pages(
+            document.id,
+            subject_name,
+            final_name,
+            [final_name],
+            expected_path=document.current_path,
+            expected_record_token=document.record_token,
+        )
+
+    def _mark_failed(self, document: FiledDocument, *, state: str, error: str) -> None:
+        self.database.mark_document_indexed(
+            document.id,
+            expected_path=document.current_path,
+            expected_record_token=document.record_token,
+            index_state=state,
+            index_error=error,
+        )
+
+    def _extract_text(self, document: FiledDocument, path: Path, suffix: str) -> list[str]:
+        """Extract raw page texts; failures propagate to a failed index state."""
+
+        if self._stop.is_set():
+            return []
         if suffix == ".pdf":
-            reader = PdfReader(path)
-            if reader.is_encrypted:
-                try:
-                    reader.decrypt("")
-                except Exception:
-                    self.database.mark_document_indexed(
-                        document.id,
-                        expected_path=document.current_path,
-                        expected_record_token=document.record_token,
-                    )
-                    return
-            for page in reader.pages:
-                if self._stop.is_set():
-                    return
-                pages.append((page.extract_text() or "").strip())
-        elif suffix in {".txt", ".md", ".csv"}:
-            if self._stop.is_set():
-                return
-            pages = [path.read_text(encoding="utf-8", errors="replace")]
-        elif suffix == ".ipynb":
-            if self._stop.is_set():
-                return
+            return self._extract_pdf(document, path)
+        if suffix in {".txt", ".md", ".csv"}:
+            return [path.read_text(encoding="utf-8", errors="replace")]
+        if suffix == ".ipynb":
             payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
             cells = payload.get("cells", [])
-            pages = [
+            return [
                 "".join(str(part) for part in cell.get("source", []))
                 for cell in cells
                 if isinstance(cell, dict)
             ]
-        elif suffix in OFFICE_SUFFIXES:
+        if suffix in OFFICE_SUFFIXES:
+            if suffix == ".docx":
+                return extract_docx(path)
+            if suffix == ".pptx":
+                return extract_pptx(path)
+            return extract_xlsx(path)
+        return []
+
+    def _extract_pdf(self, document: FiledDocument, path: Path) -> list[str]:
+        reader = PdfReader(path)
+        if reader.is_encrypted:
             try:
-                if suffix == ".docx":
-                    pages = extract_docx(path)
-                elif suffix == ".pptx":
-                    pages = extract_pptx(path)
-                else:
-                    pages = extract_xlsx(path)
-            except Exception:
-                LOGGER.exception("Failed to extract Office document %s", path)
-                self.database.mark_document_indexed(
-                    document.id,
-                    expected_path=document.current_path,
-                    expected_record_token=document.record_token,
-                )
-                return
-        if not self._stop.is_set():
-            capped, truncated = _cap_pages(pages)
-            if truncated:
-                LOGGER.warning(
-                    "Truncated indexed text for %s at %d characters", path, MAX_INDEX_CHARS
-                )
-            self.database.replace_document_pages(
-                document.id,
-                subject_name,
-                document.original_name,
-                capped,
-                expected_path=document.current_path,
-                expected_record_token=document.record_token,
-            )
+                reader.decrypt("")
+            except Exception as exc:
+                raise OSError("PDF protegido por palavra-passe.") from exc
+        pages: list[str] = []
+        for page in reader.pages:
+            if self._stop.is_set():
+                return []
+            pages.append((page.extract_text() or "").strip())
+        return pages
 
     def shutdown(self) -> None:
         """Stop accepting work and cancel jobs that have not started."""

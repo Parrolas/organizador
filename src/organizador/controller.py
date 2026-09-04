@@ -334,6 +334,7 @@ class AppController(QObject):
         self.main_window.inbox_page.unregister_requested.connect(self._unregister_adopted_file)
         self.main_window.search_page.open_path.connect(self._open_path)
         self.main_window.search_page.reveal_path.connect(self._reveal_path)
+        self.main_window.search_page.retry_requested.connect(self._retry_failed_indexes)
         self.main_window.tasks_page.changed.connect(self._refresh)
         self.main_window.subjects_page.add_requested.connect(self._add_subject)
         self.main_window.subjects_page.edit_requested.connect(self._edit_subject)
@@ -910,7 +911,23 @@ class AppController(QObject):
             self.main_window,
         )
         dialog.open_requested.connect(self._open_path)
+        dialog.reindex_requested.connect(self._reindex_document)
         dialog.exec()
+
+    def _reindex_document(self, file_id: int) -> None:
+        """Queue one document for extraction again."""
+
+        document = self.database.get_file(file_id)
+        if document is None:
+            return
+        self.indexer.reindex(document)
+
+    def _retry_failed_indexes(self) -> None:
+        """Queue every failed document for extraction again."""
+
+        for document in self.database.list_failed_index_documents():
+            self.indexer.reindex(document)
+        self.main_window.search_page.refresh_index_status()
 
     def _organise_selection(self, inbox_ids: object) -> None:
         if not isinstance(inbox_ids, (tuple, list)):

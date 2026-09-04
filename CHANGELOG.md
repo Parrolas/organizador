@@ -2,6 +2,16 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.7.0 - 2026-09-04
+
+### Added
+
+- Every organized document is now searchable by its final filename, even
+  when no text can be extracted; search results show the current file name.
+- Indexing tracks per-document state: the search page reports pending and
+  failed counts, failed documents can be retried from the search page or
+  from the subject file overview, and changed files refresh automatically.
+
 ## 0.6.5 - 2026-09-04
 
 ### Fixed

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -26,7 +27,7 @@ from organizador.config import AppConfig
 from organizador.controller import AppController
 from organizador.db import Database
 from organizador.filer import FilingService
-from organizador.models import FindingReason, Subject
+from organizador.models import ExistingDownload, FindingReason, Subject
 from organizador.paths import IncompleteMoveError
 from organizador.reconcile import findings, visible_findings
 from organizador.reconcile import scan as scan_reconciliation
@@ -1266,6 +1267,82 @@ def test_pending_update_rollback_result_warns_once(
         assert len(notices) == 1
         assert notices[0][0][0] == "Atualização revertida"
         assert notices[0][1].get("icon") == QSystemTrayIcon.MessageIcon.Warning
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_subject_files_dialog_offers_reindex_for_failed_documents(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    del qt_app
+    path = app_config.university_root / subject.folder_name / "Outros" / "quebrado.docx"
+    path.write_bytes(b"not an OOXML archive")
+    candidate = ExistingDownload.capture(path)
+    assert candidate is not None
+    filed = database.adopt_subject_file(candidate, subject.id, "Outros")
+    indexer_documents = database.get_file(filed.id)
+    assert indexer_documents is not None
+    from organizador.indexer import DocumentIndexer
+
+    indexer = DocumentIndexer(database)
+    indexer.index_document(indexer_documents)
+    indexer.shutdown()
+    stored = database.get_file(filed.id)
+    assert stored is not None
+    assert stored.index_state == "failed"
+
+    dialog = SubjectFilesDialog(subject, [dataclasses.replace(stored)], app_config.university_root)
+    requested: list[int] = []
+    dialog.reindex_requested.connect(requested.append)
+    buttons = {control.text(): control for control in dialog.findChildren(QPushButton)}
+    labels = {control.text() for control in dialog.findChildren(QLabel)}
+
+    assert "Reindexar" in buttons
+    assert any("pesquisável pelo nome" in text for text in labels)
+    buttons["Reindexar"].click()
+
+    assert requested == [filed.id]
+    dialog.allow_close = True
+    dialog.close()
+
+
+def test_retry_failed_indexes_requeues_documents_through_the_worker(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from docx import Document
+
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        path = app_config.university_root / "recuperar.docx"
+        path.write_bytes(b"not an OOXML archive")
+        candidate = ExistingDownload.capture(path)
+        assert candidate is not None
+        subject = controller.database.add_subject(
+            "Recuperação", "REC", "#123456", (), "Recuperação"
+        )
+        filed = controller.database.adopt_subject_file(candidate, subject.id, "Outros")
+        controller.indexer.index_document(controller.database.get_file(filed.id))
+        failed = controller.database.get_file(filed.id)
+        assert failed is not None
+        assert failed.index_state == "failed"
+
+        repaired = Document()
+        repaired.add_paragraph("conteúdo recuperado pelo worker")
+        repaired.save(path)
+        controller._retry_failed_indexes()
+
+        deadline = time.monotonic() + 15.0
+        while not controller.database.search("recuperado") and time.monotonic() < deadline:
+            qt_app.processEvents()
+            time.sleep(0.05)
+
+        assert controller.database.search("recuperado")
+        assert controller.database.list_failed_index_documents() == []
     finally:
         _close_controller(qt_app, controller)
 

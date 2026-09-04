@@ -27,7 +27,7 @@ from organizador.models import (
 from organizador.paths import normalise_path_key
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 METRIC_COLLISIONS_RENAMED = "collisions_renamed"
 METRIC_OPERATIONS_RECOVERED = "operations_recovered"
@@ -138,7 +138,9 @@ CREATE TABLE IF NOT EXISTS files (
     origin TEXT NOT NULL DEFAULT 'filed' CHECK (origin IN ('filed', 'adopted')),
     record_token TEXT NOT NULL DEFAULT '',
     catalog_state TEXT NOT NULL DEFAULT 'active'
-        CHECK (catalog_state IN ('active', 'dropped'))
+        CHECK (catalog_state IN ('active', 'dropped')),
+    index_state TEXT NOT NULL DEFAULT '',
+    index_error TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -212,7 +214,7 @@ _EXPECTED_INDEXES = (
 )
 _ADDITIVE_COLUMNS = {
     "events": ("subject_id", "kind"),
-    "files": ("origin", "record_token", "catalog_state"),
+    "files": ("origin", "record_token", "catalog_state", "index_state", "index_error"),
     "tasks": ("reminder_lead_days", "last_notified_on"),
 }
 
@@ -370,6 +372,9 @@ class Database:
                 self._prepare_operation_journal(connection)
                 self._prepare_reconciliation_actions(connection)
                 self._prepare_task_reminders(connection)
+                self._prepare_search_metadata(connection)
+                if previous_version < 6:
+                    self._prepare_search_reindex(connection)
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 connection.commit()
             except BaseException:
@@ -476,6 +481,25 @@ class Database:
             connection.execute("ALTER TABLE tasks ADD COLUMN reminder_lead_days INTEGER")
         if "last_notified_on" not in columns:
             connection.execute("ALTER TABLE tasks ADD COLUMN last_notified_on TEXT")
+
+    @staticmethod
+    def _prepare_search_metadata(connection: sqlite3.Connection) -> None:
+        """Ensure the additive index-state columns exist on the files table."""
+
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(files)").fetchall()
+        }
+        if "index_state" not in columns:
+            connection.execute("ALTER TABLE files ADD COLUMN index_state TEXT NOT NULL DEFAULT ''")
+        if "index_error" not in columns:
+            connection.execute("ALTER TABLE files ADD COLUMN index_error TEXT NOT NULL DEFAULT ''")
+
+    @staticmethod
+    def _prepare_search_reindex(connection: sqlite3.Connection) -> None:
+        """Rebuild search rows once so every document gains final-name titles."""
+
+        connection.execute("DELETE FROM document_pages")
+        connection.execute("UPDATE files SET indexed_at = NULL, index_state = '', index_error = ''")
 
     def add_subject(
         self,
@@ -1804,7 +1828,7 @@ class Database:
                     parameters += (expected_record_token,)
                 updated = connection.execute(
                     f"""
-                    UPDATE files SET indexed_at = ?
+                    UPDATE files SET indexed_at = ?, index_state = '', index_error = ''
                     WHERE id = ? AND current_path = ?{token_clause}
                       AND catalog_state = 'active'
                     """,
@@ -1815,7 +1839,7 @@ class Database:
             else:
                 connection.execute(
                     """
-                    UPDATE files SET indexed_at = ?
+                    UPDATE files SET indexed_at = ?, index_state = '', index_error = ''
                     WHERE id = ? AND catalog_state = 'active'
                     """,
                     (_now(), file_id),
@@ -1840,18 +1864,26 @@ class Database:
         *,
         expected_path: Path | None = None,
         expected_record_token: str | None = None,
+        index_state: str = "",
+        index_error: str = "",
     ) -> None:
         """Mark a document handled even when it contains no extractable text."""
 
         with self.connect() as connection:
             if expected_path is not None:
                 token_clause = " AND record_token = ?" if expected_record_token is not None else ""
-                parameters: tuple[object, ...] = (_now(), file_id, str(expected_path))
+                parameters: tuple[object, ...] = (
+                    _now(),
+                    index_state,
+                    index_error,
+                    file_id,
+                    str(expected_path),
+                )
                 if expected_record_token is not None:
                     parameters += (expected_record_token,)
                 connection.execute(
                     f"""
-                    UPDATE files SET indexed_at = ?
+                    UPDATE files SET indexed_at = ?, index_state = ?, index_error = ?
                     WHERE id = ? AND current_path = ?{token_clause}
                       AND catalog_state = 'active'
                     """,
@@ -1860,12 +1892,83 @@ class Database:
             else:
                 connection.execute(
                     """
-                    UPDATE files SET indexed_at = ?
+                    UPDATE files SET indexed_at = ?, index_state = ?, index_error = ?
                     WHERE id = ? AND catalog_state = 'active'
                     """,
-                    (_now(), file_id),
+                    (_now(), index_state, index_error, file_id),
                 )
             connection.commit()
+
+    def clear_index_state(
+        self,
+        file_id: int,
+        *,
+        expected_path: Path | None = None,
+        expected_record_token: str | None = None,
+    ) -> None:
+        """Reset index state so a document is queued for extraction again."""
+
+        with self.connect() as connection:
+            if expected_path is not None:
+                token_clause = " AND record_token = ?" if expected_record_token is not None else ""
+                parameters: tuple[object, ...] = (file_id, str(expected_path))
+                if expected_record_token is not None:
+                    parameters += (expected_record_token,)
+                connection.execute(
+                    f"""
+                    UPDATE files SET indexed_at = NULL, index_state = '', index_error = ''
+                    WHERE id = ? AND current_path = ?{token_clause}
+                      AND catalog_state = 'active'
+                    """,
+                    parameters,
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE files SET indexed_at = NULL, index_state = '', index_error = ''
+                    WHERE id = ? AND catalog_state = 'active'
+                    """,
+                    (file_id,),
+                )
+            connection.commit()
+
+    def list_failed_index_documents(self, limit: int = 200) -> list[FiledDocument]:
+        """Return indexed documents whose extraction failed and can be retried."""
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM files
+                WHERE catalog_state = 'active' AND indexed_at IS NOT NULL
+                  AND index_state = 'failed'
+                ORDER BY id ASC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [self._file(row) for row in rows]
+
+    def index_summary(self) -> tuple[int, int, int]:
+        """Return ``(pending, failed, active)`` document counts for status display."""
+
+        with self.connect() as connection:
+            pending = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM files "
+                    "WHERE catalog_state = 'active' AND indexed_at IS NULL"
+                ).fetchone()[0]
+            )
+            failed = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM files "
+                    "WHERE catalog_state = 'active' AND index_state = 'failed'"
+                ).fetchone()[0]
+            )
+            active = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM files WHERE catalog_state = 'active'"
+                ).fetchone()[0]
+            )
+        return pending, failed, active
 
     def refresh_file_size(
         self,
@@ -1918,7 +2021,6 @@ class Database:
                     SELECT
                         f.id AS file_id,
                         f.current_path AS path,
-                        f.original_name AS title,
                         s.name AS subject_name,
                         f.kind AS kind,
                         CAST(dp.page AS INTEGER) AS page,
@@ -1940,7 +2042,7 @@ class Database:
             SearchResult(
                 file_id=int(row["file_id"]),
                 path=Path(str(row["path"])),
-                title=str(row["title"]),
+                title=Path(str(row["path"])).name,
                 subject_name=str(row["subject_name"]),
                 kind=str(row["kind"]),
                 page=int(row["page"]),
@@ -2136,6 +2238,8 @@ class Database:
             origin=str(row["origin"]),
             record_token=str(row["record_token"]),
             catalog_state=str(row["catalog_state"]),
+            index_state=str(row["index_state"]),
+            index_error=str(row["index_error"]),
         )
 
     @staticmethod

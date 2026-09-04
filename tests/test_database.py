@@ -240,7 +240,7 @@ def test_schema_v3_adds_operation_journal_metadata(database: Database) -> None:
     assert {"subject_id", "kind"} <= columns
     assert index_row is not None
     assert "'returning'" in str(index_row["sql"])
-    assert version == 5
+    assert version == 6
 
 
 def test_schema_v4_adds_file_origin_and_persisted_reviews(
@@ -278,13 +278,85 @@ def test_schema_v4_adds_file_origin_and_persisted_reviews(
     assert columns["record_token"]["notnull"] == 1
     assert columns["catalog_state"]["dflt_value"] == "'active'"
     assert columns["catalog_state"]["notnull"] == 1
-    assert version == 5
+    assert version == 6
     assert database.list_reviewed_finding_keys() == {
         (
             normalise_path_key(migrated.current_path),
             FindingReason.MISSING_DOCUMENT.value,
         )
     }
+
+
+def test_schema_v6_adds_search_state_and_rebuilds_titles(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    from organizador.indexer import DocumentIndexer
+
+    inbox_path = tmp_path / "inbox" / "original.txt"
+    inbox_path.parent.mkdir(parents=True)
+    inbox_path.write_text("texto para pesquisa", encoding="utf-8")
+    item = database.add_inbox_item(
+        inbox_path,
+        tmp_path / "downloads" / "original.txt",
+        "original.txt",
+        inbox_path.stat().st_size,
+    )
+    destination = tmp_path / "subject" / "relatorio-final.txt"
+    destination.parent.mkdir()
+    inbox_path.replace(destination)
+    filed = database.record_filing(item.id, subject.id, "Outros", destination)
+    document = database.get_file(filed.id)
+    assert document is not None
+    indexer = DocumentIndexer(database)
+    indexer.index_document(document)
+    indexer.shutdown()
+    assert database.search("relatorio")
+
+    with database.connect() as connection:
+        connection.execute("ALTER TABLE files DROP COLUMN index_state")
+        connection.execute("ALTER TABLE files DROP COLUMN index_error")
+        connection.execute(
+            "UPDATE document_pages SET title = 'original.txt' WHERE CAST(file_id AS INTEGER) = ?",
+            (filed.id,),
+        )
+        connection.execute("PRAGMA user_version = 5")
+        connection.commit()
+    assert database.search("original")
+    assert database.search("relatorio") == []
+
+    inspection = database.inspect_schema()
+    assert inspection.user_version == 5
+    assert inspection.requires_migration
+    assert set(inspection.missing_additions) >= {"files.index_state", "files.index_error"}
+
+    database.initialize()
+
+    with database.connect() as connection:
+        columns = {
+            str(row["name"]): row
+            for row in connection.execute("PRAGMA table_info(files)").fetchall()
+        }
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        pages = connection.execute("SELECT COUNT(*) FROM document_pages").fetchone()[0]
+    assert columns["index_state"]["dflt_value"] == "''"
+    assert columns["index_state"]["notnull"] == 1
+    assert columns["index_error"]["dflt_value"] == "''"
+    assert columns["index_error"]["notnull"] == 1
+    assert version == 6
+    assert int(pages) == 0
+    reset = database.get_file(filed.id)
+    assert reset is not None
+    assert reset.indexed_at is None
+    assert database.search("original") == []
+    assert database.inspect_schema().is_current
+
+    refreshed = database.get_file(filed.id)
+    assert refreshed is not None
+    indexer = DocumentIndexer(database)
+    indexer.index_document(refreshed)
+    indexer.shutdown()
+
+    assert database.search("relatorio")
 
 
 def test_adopted_file_has_no_inbox_history_or_filing_hint(
@@ -421,7 +493,7 @@ def test_stale_index_job_cannot_write_after_same_path_is_readopted(
 
 def test_newer_database_version_is_refused_without_downgrade(database: Database) -> None:
     with database.connect() as connection:
-        connection.execute("PRAGMA user_version = 6")
+        connection.execute("PRAGMA user_version = 7")
         connection.commit()
 
     with pytest.raises(NewerDatabaseError, match="versão mais recente"):
@@ -429,7 +501,7 @@ def test_newer_database_version_is_refused_without_downgrade(database: Database)
 
     with database.connect() as connection:
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    assert version == 6
+    assert version == 7
 
 
 def test_normal_filing_reuses_a_dropped_path_tombstone(
@@ -521,7 +593,7 @@ def test_task_reminder_columns_are_added_additively(database: Database) -> None:
         }
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     assert {"reminder_lead_days", "last_notified_on"} <= columns
-    assert version == 5
+    assert version == 6
     task = database.add_task("Ainda funciona", None, None)
     assert task.last_notified_on is None
     assert task.reminder_lead_days is None
@@ -652,7 +724,7 @@ def test_schema_inspection_detects_same_version_additive_drift(database: Databas
 
     inspection = database.inspect_schema()
 
-    assert inspection.user_version == 5
+    assert inspection.user_version == 6
     assert inspection.requires_migration
     assert set(inspection.missing_additions) >= {
         "tasks.reminder_lead_days",

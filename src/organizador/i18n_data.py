@@ -738,6 +738,15 @@ EN_STRINGS: dict[str, str] = {
     "Criar tarefa": "Create task",
     "A cópia incompleta ficou em {path}.": "The incomplete copy was left at {path}.",
     "A pasta de destino não é segura: {path}.": "The destination folder is not safe: {path}.",
+    "Falha na indexação — o ficheiro continua pesquisável pelo nome.": (
+        "Indexing failed — the file is still searchable by name."
+    ),
+    "Reindexar": "Reindex",
+    "Tentar novamente": "Retry",
+    "{count} documentos por indexar": "{count} documents pending indexing",
+    "1 documento por indexar": "1 document pending indexing",
+    "{count} documentos com falha na indexação": "{count} documents failed indexing",
+    "1 documento com falha na indexação": "1 document failed indexing",
 }
 
 ES_STRINGS: dict[str, str] = {
@@ -1507,6 +1516,15 @@ ES_STRINGS: dict[str, str] = {
     "Criar tarefa": "Crear tarea",
     "A cópia incompleta ficou em {path}.": "La copia incompleta se quedó en {path}.",
     "A pasta de destino não é segura: {path}.": "La carpeta de destino no es segura: {path}.",
+    "Falha na indexação — o ficheiro continua pesquisável pelo nome.": (
+        "La indexación falló — el archivo sigue siendo buscable por su nombre."
+    ),
+    "Reindexar": "Reindexar",
+    "Tentar novamente": "Reintentar",
+    "{count} documentos por indexar": "{count} documentos pendientes de indexación",
+    "1 documento por indexar": "1 documento pendiente de indexación",
+    "{count} documentos com falha na indexação": "{count} documentos con error de indexación",
+    "1 documento com falha na indexação": "1 documento con error de indexación",
 }
 
 FR_STRINGS: dict[str, str] = {
@@ -2291,4 +2309,13 @@ FR_STRINGS: dict[str, str] = {
     "Criar tarefa": "Créer une tâche",
     "A cópia incompleta ficou em {path}.": "La copie incomplète est restée ici : {path}.",
     "A pasta de destino não é segura: {path}.": "Le dossier de destination n'est pas sûr : {path}.",
+    "Falha na indexação — o ficheiro continua pesquisável pelo nome.": (
+        "L'indexation a échoué — le fichier reste trouvable par son nom."
+    ),
+    "Reindexar": "Réindexer",
+    "Tentar novamente": "Réessayer",
+    "{count} documentos por indexar": "{count} documents en attente d'indexation",
+    "1 documento por indexar": "1 document en attente d'indexation",
+    "{count} documentos com falha na indexação": "{count} documents en échec d'indexation",
+    "1 documento com falha na indexação": "1 document en échec d'indexation",
 }

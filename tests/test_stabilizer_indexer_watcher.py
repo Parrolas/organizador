@@ -524,3 +524,72 @@ def test_indexed_text_is_capped_but_head_terms_stay_searchable(
     assert database.search("cabecalho-marcador-unico")
     assert database.search("cauda-marcador-unico") == []
     assert database.search("indexed") == []
+
+
+def test_document_without_extractable_text_stays_findable_by_final_name(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "apontamento-vazio.txt"
+    path.write_text("", encoding="utf-8")
+    file_id = _file_record(database, subject, path)
+    document = database.get_file(file_id)
+    assert document is not None
+    indexer = DocumentIndexer(database)
+
+    indexer.index_document(document)
+    indexer.shutdown()
+
+    refreshed = database.get_file(file_id)
+    assert refreshed is not None
+    assert refreshed.indexed_at is not None
+    assert refreshed.index_state == ""
+    results = database.search("apontamento-vazio")
+    assert [result.file_id for result in results] == [file_id]
+    assert results[0].title == "apontamento-vazio.txt"
+
+
+def test_failed_extraction_can_be_fixed_and_reindexed(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    from docx import Document
+
+    path = tmp_path / "quebrado.docx"
+    path.write_bytes(b"not an OOXML archive")
+    file_id = _file_record(database, subject, path)
+    document = database.get_file(file_id)
+    assert document is not None
+    indexer = DocumentIndexer(database)
+
+    indexer.index_document(document)
+    indexer.shutdown()
+
+    failed = database.get_file(file_id)
+    assert failed is not None
+    assert failed.indexed_at is not None
+    assert failed.index_state == "failed"
+    assert [document.id for document in database.list_failed_index_documents()] == [file_id]
+    assert database.search("quebrado")
+
+    repaired = Document()
+    repaired.add_paragraph("conteúdo recuperado de testes")
+    repaired.save(path)
+
+    indexer = DocumentIndexer(database)
+    indexer.reindex(failed)
+    indexer.shutdown()
+    refreshed = database.get_file(file_id)
+    assert refreshed is not None
+    assert refreshed.indexed_at is None
+    assert refreshed.index_state == ""
+
+    for _ in range(3):
+        current = database.get_file(file_id)
+        assert current is not None
+        if current.indexed_at is not None:
+            break
+        worker = DocumentIndexer(database)
+        worker.index_document(current)
+        worker.shutdown()
+
+    assert database.search("recuperado")
+    assert database.list_failed_index_documents() == []

@@ -62,6 +62,8 @@ class FiledDocument:
     origin: str = "filed"
     record_token: str = ""
     catalog_state: str = "active"
+    index_state: str = ""
+    index_error: str = ""
 
 
 class FindingReason(StrEnum):

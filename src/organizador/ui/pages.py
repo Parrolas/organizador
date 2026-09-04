@@ -630,6 +630,7 @@ class SearchPage(QWidget):
 
     open_path = Signal(object)
     reveal_path = Signal(object)
+    retry_requested = Signal()
 
     def __init__(self, database: Database, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -651,6 +652,17 @@ class SearchPage(QWidget):
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setAccessibleName(_("Pesquisa nos documentos"))
         layout.addWidget(self.search_edit)
+        self.index_status_row = QHBoxLayout()
+        self.index_status_row.setContentsMargins(0, 0, 0, 0)
+        self.index_status_label = label("", "Muted")
+        self.index_status_label.setWordWrap(True)
+        self.index_status_row.addWidget(self.index_status_label, 1)
+        self.retry_button = button(_("Tentar novamente"), variant="quiet")
+        self.retry_button.clicked.connect(self.retry_requested)
+        self.index_status_row.addWidget(self.retry_button)
+        self.index_status_container = QWidget()
+        self.index_status_container.setLayout(self.index_status_row)
+        layout.addWidget(self.index_status_container)
         self.status_label = label(
             _(
                 "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm "
@@ -676,11 +688,34 @@ class SearchPage(QWidget):
         self.search_edit.setFocus()
         self.search_edit.selectAll()
 
+    def refresh_index_status(self) -> None:
+        """Show pending/failed index counts and offer a retry when useful."""
+
+        pending, failed, _active = self.database.index_summary()
+        parts: list[str] = []
+        if pending:
+            parts.append(
+                _("{count} documentos por indexar").format(count=pending)
+                if pending != 1
+                else _("1 documento por indexar")
+            )
+        if failed:
+            parts.append(
+                _("{count} documentos com falha na indexação").format(count=failed)
+                if failed != 1
+                else _("1 documento com falha na indexação")
+            )
+        self.index_status_container.setVisible(bool(parts))
+        self.retry_button.setVisible(failed > 0)
+        if parts:
+            self.index_status_label.setText(" · ".join(parts))
+
     def search(self) -> None:
         """Execute and render a safe FTS query."""
 
         text = self.search_edit.text().strip()
         clear_layout(self.results_layout)
+        self.refresh_index_status()
         if not text:
             self.status_label.setText(
                 _("A pesquisa é local. Escreve duas ou mais letras para começar.")
