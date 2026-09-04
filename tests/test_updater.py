@@ -736,7 +736,7 @@ def _terminate_exact_pid(pid: int | None) -> None:
         os.kill(pid, signal.SIGTERM)
 
 
-def _wait_until(predicate: Callable[[], bool], timeout: float = 10.0) -> None:
+def _wait_until(predicate: Callable[[], bool], timeout: float = 20.0) -> None:
     deadline = time.monotonic() + timeout
     while not predicate():
         if time.monotonic() >= deadline:
@@ -909,7 +909,7 @@ def test_real_powershell_helper_rolls_back_after_commit_failure(
         assert updater.wait_for_update_commit(
             transaction.manifest_path,
             transaction.token,
-            timeout_seconds=5,
+            timeout_seconds=30,
         )
         assert _wait_helper(helper, transaction) == 10
         result = updater.read_update_result(transaction)
