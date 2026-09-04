@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
         self.inbox_page.refresh()
         self.tasks_page.refresh()
         self.subjects_page.refresh()
+        self.search_page.refresh_filters()
         count = self.database.count_inbox_items()
         self.nav_buttons["inbox"].setText(
             _("Caixa de Entrada  {count}").format(count=count) if count else _("Caixa de Entrada")

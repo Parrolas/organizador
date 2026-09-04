@@ -823,3 +823,80 @@ def test_database_health_reports_corruption_without_writing(tmp_path: Path) -> N
     assert not health.healthy
     assert health.error
     assert path.read_bytes() == contents
+
+
+def _searchable_record(
+    database: Database, subject: Subject, tmp_path: Path, name: str, kind: str, text: str
+) -> int:
+    inbox_path = tmp_path / "inbox" / name
+    inbox_path.parent.mkdir(parents=True, exist_ok=True)
+    inbox_path.write_text(text, encoding="utf-8")
+    item = database.add_inbox_item(
+        inbox_path, tmp_path / "downloads" / name, name, inbox_path.stat().st_size
+    )
+    destination = tmp_path / "subject" / subject.folder_name / name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    inbox_path.replace(destination)
+    filed = database.record_filing(item.id, subject.id, kind, destination)
+    database.replace_document_pages(
+        filed.id, subject.name, name, (text,), expected_path=destination
+    )
+    return filed.id
+
+
+def test_search_accepts_subject_and_kind_filters(database: Database, tmp_path: Path) -> None:
+    first = database.add_subject("Cálculo I", "MAT101", "#000000", (), "MAT101")
+    second = database.add_subject("Física I", "FIS101", "#000000", (), "FIS101")
+    derivadas = _searchable_record(
+        database, first, tmp_path, "derivadas.txt", "Slides", "derivadas"
+    )
+    integral = _searchable_record(database, first, tmp_path, "integral.txt", "Testes", "derivadas")
+    cinematica = _searchable_record(
+        database, second, tmp_path, "cinematica.txt", "Slides", "derivadas"
+    )
+
+    assert {result.file_id for result in database.search("derivadas")} == {
+        derivadas,
+        integral,
+        cinematica,
+    }
+    assert {result.file_id for result in database.search("derivadas", subject_id=first.id)} == {
+        derivadas,
+        integral,
+    }
+    assert {result.file_id for result in database.search("derivadas", kind="Slides")} == {
+        derivadas,
+        cinematica,
+    }
+    assert [
+        result.file_id
+        for result in database.search("derivadas", subject_id=second.id, kind="Testes")
+    ] == []
+
+
+def test_browse_documents_lists_by_filter_without_query(database: Database, tmp_path: Path) -> None:
+    first = database.add_subject("Cálculo I", "MAT101", "#000000", (), "MAT101")
+    second = database.add_subject("Física I", "FIS101", "#000000", (), "FIS101")
+    derivadas = _searchable_record(
+        database, first, tmp_path, "derivadas.txt", "Slides", "derivadas"
+    )
+    integral = _searchable_record(database, first, tmp_path, "integral.txt", "Testes", "derivadas")
+    cinematica = _searchable_record(
+        database, second, tmp_path, "cinematica.txt", "Slides", "derivadas"
+    )
+
+    assert {result.file_id for result in database.browse_documents()} == {
+        derivadas,
+        integral,
+        cinematica,
+    }
+    assert {result.file_id for result in database.browse_documents(subject_id=first.id)} == {
+        derivadas,
+        integral,
+    }
+    assert {result.file_id for result in database.browse_documents(kind="Testes")} == {integral}
+    browsed = database.browse_documents(subject_id=second.id, kind="Slides")
+    assert [result.file_id for result in browsed] == [cinematica]
+    assert browsed[0].title == "cinematica.txt"
+    assert browsed[0].page == 0
+    assert browsed[0].snippet == ""

@@ -2008,16 +2008,32 @@ class Database:
                 )
             connection.commit()
 
-    def search(self, text: str, limit: int = 40) -> list[SearchResult]:
-        """Search indexed pages using safe prefix terms."""
+    def search(
+        self,
+        text: str,
+        limit: int = 40,
+        *,
+        subject_id: int | None = None,
+        kind: str | None = None,
+    ) -> list[SearchResult]:
+        """Search indexed pages using safe prefix terms, optionally filtered."""
 
         query = self._fts_query(text)
         if not query:
             return []
+        conditions = ["document_pages MATCH ?", "f.catalog_state = 'active'"]
+        parameters: list[object] = [query]
+        if subject_id is not None:
+            conditions.append("f.subject_id = ?")
+            parameters.append(subject_id)
+        if kind is not None:
+            conditions.append("f.kind = ?")
+            parameters.append(kind)
+        parameters.append(limit)
         try:
             with self.connect() as connection:
                 rows = connection.execute(
-                    """
+                    f"""
                     SELECT
                         f.id AS file_id,
                         f.current_path AS path,
@@ -2028,12 +2044,11 @@ class Database:
                     FROM document_pages AS dp
                     JOIN files AS f ON f.id = CAST(dp.file_id AS INTEGER)
                     JOIN subjects AS s ON s.id = f.subject_id
-                    WHERE document_pages MATCH ?
-                      AND f.catalog_state = 'active'
+                    WHERE {" AND ".join(conditions)}
                     ORDER BY bm25(document_pages), f.filed_at DESC
                     LIMIT ?
                     """,
-                    (query, limit),
+                    tuple(parameters),
                 ).fetchall()
         except sqlite3.OperationalError:
             LOGGER.exception("FTS search failed for query %r", text)
@@ -2047,6 +2062,53 @@ class Database:
                 kind=str(row["kind"]),
                 page=int(row["page"]),
                 snippet=str(row["excerpt"]),
+            )
+            for row in rows
+        ]
+
+    def browse_documents(
+        self,
+        limit: int = 40,
+        *,
+        subject_id: int | None = None,
+        kind: str | None = None,
+    ) -> list[SearchResult]:
+        """List recent documents by filter, without requiring search text."""
+
+        conditions = ["f.catalog_state = 'active'"]
+        parameters: list[object] = []
+        if subject_id is not None:
+            conditions.append("f.subject_id = ?")
+            parameters.append(subject_id)
+        if kind is not None:
+            conditions.append("f.kind = ?")
+            parameters.append(kind)
+        parameters.append(limit)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    f.id AS file_id,
+                    f.current_path AS path,
+                    s.name AS subject_name,
+                    f.kind AS kind
+                FROM files AS f
+                JOIN subjects AS s ON s.id = f.subject_id
+                WHERE {" AND ".join(conditions)}
+                ORDER BY f.filed_at DESC, f.id DESC
+                LIMIT ?
+                """,
+                tuple(parameters),
+            ).fetchall()
+        return [
+            SearchResult(
+                file_id=int(row["file_id"]),
+                path=Path(str(row["path"])),
+                title=Path(str(row["path"])).name,
+                subject_name=str(row["subject_name"]),
+                kind=str(row["kind"]),
+                page=0,
+                snippet="",
             )
             for row in rows
         ]

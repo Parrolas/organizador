@@ -747,6 +747,13 @@ EN_STRINGS: dict[str, str] = {
     "1 documento por indexar": "1 document pending indexing",
     "{count} documentos com falha na indexação": "{count} documents failed indexing",
     "1 documento com falha na indexação": "1 document failed indexing",
+    "Todas as disciplinas": "All subjects",
+    "Todos os tipos": "All types",
+    "Filtrar por disciplina": "Filter by subject",
+    "Filtrar por tipo de documento": "Filter by document type",
+    "{count} documentos": "{count} documents",
+    "1 documento": "1 document",
+    "{subject}  ·  {kind}": "{subject}  ·  {kind}",
 }
 
 ES_STRINGS: dict[str, str] = {
@@ -1525,6 +1532,13 @@ ES_STRINGS: dict[str, str] = {
     "1 documento por indexar": "1 documento pendiente de indexación",
     "{count} documentos com falha na indexação": "{count} documentos con error de indexación",
     "1 documento com falha na indexação": "1 documento con error de indexación",
+    "Todas as disciplinas": "Todas las asignaturas",
+    "Todos os tipos": "Todos los tipos",
+    "Filtrar por disciplina": "Filtrar por asignatura",
+    "Filtrar por tipo de documento": "Filtrar por tipo de documento",
+    "{count} documentos": "{count} documentos",
+    "1 documento": "1 documento",
+    "{subject}  ·  {kind}": "{subject}  ·  {kind}",
 }
 
 FR_STRINGS: dict[str, str] = {
@@ -2318,4 +2332,11 @@ FR_STRINGS: dict[str, str] = {
     "1 documento por indexar": "1 document en attente d'indexation",
     "{count} documentos com falha na indexação": "{count} documents en échec d'indexation",
     "1 documento com falha na indexação": "1 document en échec d'indexation",
+    "Todas as disciplinas": "Toutes les matières",
+    "Todos os tipos": "Tous les types",
+    "Filtrar por disciplina": "Filtrer par matière",
+    "Filtrar por tipo de documento": "Filtrer par type de document",
+    "{count} documentos": "{count} documents",
+    "1 documento": "1 document",
+    "{subject}  ·  {kind}": "{subject}  ·  {kind}",
 }

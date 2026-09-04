@@ -32,6 +32,7 @@ from organizador.config import THEME_IDS, AppConfig
 from organizador.db import Database
 from organizador.i18n import LANGUAGE_NAMES, _
 from organizador.models import (
+    FILE_KINDS,
     FiledDocument,
     FindingReason,
     InboxItem,
@@ -652,6 +653,19 @@ class SearchPage(QWidget):
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setAccessibleName(_("Pesquisa nos documentos"))
         layout.addWidget(self.search_edit)
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(10)
+        self.subject_combo = QComboBox()
+        self.subject_combo.setAccessibleName(_("Filtrar por disciplina"))
+        self.kind_combo = QComboBox()
+        self.kind_combo.setAccessibleName(_("Filtrar por tipo de documento"))
+        self.subject_combo.currentIndexChanged.connect(lambda _index: self.search())
+        self.kind_combo.currentIndexChanged.connect(lambda _index: self.search())
+        filter_row.addWidget(self.subject_combo, 1)
+        filter_row.addWidget(self.kind_combo, 1)
+        layout.addLayout(filter_row)
+        self.refresh_filters()
         self.index_status_row = QHBoxLayout()
         self.index_status_row.setContentsMargins(0, 0, 0, 0)
         self.index_status_label = label("", "Muted")
@@ -688,6 +702,46 @@ class SearchPage(QWidget):
         self.search_edit.setFocus()
         self.search_edit.selectAll()
 
+    def refresh_filters(self) -> None:
+        """Rebuild the filter combos, preserving the current selection."""
+
+        selected_subject, selected_kind = self.selected_filters()
+        self.subject_combo.blockSignals(True)
+        self.kind_combo.blockSignals(True)
+        try:
+            self.subject_combo.clear()
+            self.subject_combo.addItem(_("Todas as disciplinas"), None)
+            for subject in self.database.list_subjects(active_only=False):
+                display = f"{subject.name} ({subject.code})" if subject.code else subject.name
+                self.subject_combo.addItem(display, subject.id)
+            self.kind_combo.clear()
+            self.kind_combo.addItem(_("Todos os tipos"), None)
+            for kind in FILE_KINDS:
+                self.kind_combo.addItem(kind, kind)
+            self._select_combo_value(self.subject_combo, selected_subject)
+            self._select_combo_value(self.kind_combo, selected_kind)
+        finally:
+            self.subject_combo.blockSignals(False)
+            self.kind_combo.blockSignals(False)
+
+    @staticmethod
+    def _select_combo_value(combo: QComboBox, value: object) -> None:
+        for index in range(combo.count()):
+            if combo.itemData(index) == value:
+                combo.setCurrentIndex(index)
+                return
+        combo.setCurrentIndex(0)
+
+    def selected_filters(self) -> tuple[int | None, str | None]:
+        """Return the selected subject id and document kind, if any."""
+
+        subject_id = self.subject_combo.currentData()
+        kind = self.kind_combo.currentData()
+        return (
+            int(subject_id) if subject_id is not None else None,
+            str(kind) if kind is not None else None,
+        )
+
     def refresh_index_status(self) -> None:
         """Show pending/failed index counts and offer a retry when useful."""
 
@@ -711,18 +765,22 @@ class SearchPage(QWidget):
             self.index_status_label.setText(" · ".join(parts))
 
     def search(self) -> None:
-        """Execute and render a safe FTS query."""
+        """Execute and render a safe FTS query, honouring the active filters."""
 
         text = self.search_edit.text().strip()
         clear_layout(self.results_layout)
         self.refresh_index_status()
-        if not text:
+        subject_id, kind = self.selected_filters()
+        if text:
+            results = self.database.search(text, subject_id=subject_id, kind=kind)
+        elif subject_id is None and kind is None:
             self.status_label.setText(
                 _("A pesquisa é local. Escreve duas ou mais letras para começar.")
             )
             self.results_layout.addStretch(1)
             return
-        results = self.database.search(text)
+        else:
+            results = self.database.browse_documents(subject_id=subject_id, kind=kind)
         if not results:
             self.status_label.setText(
                 _(
@@ -740,13 +798,20 @@ class SearchPage(QWidget):
             self.results_layout.addWidget(empty)
             self.results_layout.addStretch(1)
             return
-        self.status_label.setText(
-            _("{count} resultados · os parênteses retos mostram a correspondência").format(
-                count=len(results)
+        if text:
+            self.status_label.setText(
+                _("{count} resultados · os parênteses retos mostram a correspondência").format(
+                    count=len(results)
+                )
+                if len(results) != 1
+                else _("1 resultado · os parênteses retos mostram a correspondência")
             )
-            if len(results) != 1
-            else _("1 resultado · os parênteses retos mostram a correspondência")
-        )
+        else:
+            self.status_label.setText(
+                _("{count} documentos").format(count=len(results))
+                if len(results) != 1
+                else _("1 documento")
+            )
         for result in results:
             row = QFrame()
             row.setObjectName("ListRow")
@@ -757,16 +822,18 @@ class SearchPage(QWidget):
             copy = QVBoxLayout()
             copy.setSpacing(2)
             copy.addWidget(label(result.title, "RowTitle"))
-            copy.addWidget(
-                label(
-                    _("{subject}  ·  {kind}  ·  {location}").format(
-                        subject=result.subject_name,
-                        kind=result.kind,
-                        location=self._location_copy(result.path, result.page),
-                    ),
-                    "Muted",
+            if result.page > 0:
+                meta = _("{subject}  ·  {kind}  ·  {location}").format(
+                    subject=result.subject_name,
+                    kind=result.kind,
+                    location=self._location_copy(result.path, result.page),
                 )
-            )
+            else:
+                meta = _("{subject}  ·  {kind}").format(
+                    subject=result.subject_name,
+                    kind=result.kind,
+                )
+            copy.addWidget(label(meta, "Muted"))
             top.addLayout(copy, 1)
             reveal = button(_("Mostrar na pasta"), variant="quiet")
             reveal.clicked.connect(
@@ -779,11 +846,12 @@ class SearchPage(QWidget):
             top.addWidget(reveal)
             top.addWidget(open_button)
             row_layout.addLayout(top)
-            snippet = QLabel(result.snippet.replace("\n", " "))
-            snippet.setWordWrap(True)
-            snippet.setStyleSheet(f"color: {ui_theme.current().muted}; line-height: 1.35;")
-            snippet.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            row_layout.addWidget(snippet)
+            if result.snippet.strip():
+                snippet = QLabel(result.snippet.replace("\n", " "))
+                snippet.setWordWrap(True)
+                snippet.setStyleSheet(f"color: {ui_theme.current().muted}; line-height: 1.35;")
+                snippet.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                row_layout.addWidget(snippet)
             self.results_layout.addWidget(row)
         self.results_layout.addStretch(1)
 

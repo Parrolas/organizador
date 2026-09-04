@@ -2,6 +2,13 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.8.0 - 2026-09-04
+
+### Added
+
+- Search filters by subject and document type, combinable with text search;
+  with only filters set, the search page lists recent matching documents.
+
 ## 0.7.0 - 2026-09-04
 
 ### Added

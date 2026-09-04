@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
+    QFrame,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -1307,6 +1309,78 @@ def test_subject_files_dialog_offers_reindex_for_failed_documents(
     assert requested == [filed.id]
     dialog.allow_close = True
     dialog.close()
+
+
+def _search_combo_texts(combo: QComboBox) -> list[str]:
+    return [combo.itemText(index) for index in range(combo.count())]
+
+
+def test_search_filter_combos_populate_and_filter_results(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+) -> None:
+    first = database.add_subject("Cálculo I", "MAT101", "#000000", (), "MAT101")
+    second = database.add_subject("Física I", "FIS101", "#000000", (), "FIS101")
+
+    def file_record(name: str, subject_id: int, kind: str, text: str) -> None:
+        inbox_path = app_config.inbox_dir / name
+        inbox_path.write_text(text, encoding="utf-8")
+        item = database.add_inbox_item(
+            inbox_path, app_config.downloads_dir / name, name, inbox_path.stat().st_size
+        )
+        destination = app_config.university_root / name
+        inbox_path.replace(destination)
+        filed = database.record_filing(item.id, subject_id, kind, destination)
+        database.replace_document_pages(filed.id, name, name, (text,), expected_path=destination)
+
+    file_record("derivadas.txt", first.id, "Slides", "derivadas")
+    file_record("integral.txt", first.id, "Testes", "derivadas")
+    file_record("cinematica.txt", second.id, "Slides", "derivadas")
+    window = MainWindow(database, app_config)
+    try:
+        page = window.search_page
+        assert _search_combo_texts(page.subject_combo) == [
+            "Todas as disciplinas",
+            "Cálculo I (MAT101)",
+            "Física I (FIS101)",
+        ]
+        assert _search_combo_texts(page.kind_combo) == [
+            "Todos os tipos",
+            "Slides",
+            "Exercícios",
+            "Testes",
+            "Trabalhos",
+            "Outros",
+        ]
+
+        page.search_edit.setText("derivadas")
+        page.kind_combo.setCurrentIndex(page.kind_combo.findData("Testes"))
+        qt_app.processEvents()
+
+        assert "1 resultado" in page.status_label.text()
+        titles = [
+            row.findChild(QLabel).text()
+            for row in page.results_layout.parentWidget().findChildren(QFrame)
+            if row.objectName() == "ListRow"
+        ]
+        assert titles == ["integral.txt"]
+
+        page.search_edit.clear()
+        page.kind_combo.setCurrentIndex(0)
+        page.subject_combo.setCurrentIndex(page.subject_combo.findData(second.id))
+        qt_app.processEvents()
+
+        assert page.status_label.text() == "1 documento"
+        browse_titles = [
+            row.findChild(QLabel).text()
+            for row in page.results_layout.parentWidget().findChildren(QFrame)
+            if row.objectName() == "ListRow"
+        ]
+        assert browse_titles == ["cinematica.txt"]
+    finally:
+        window.allow_close = True
+        window.close()
 
 
 def test_retry_failed_indexes_requeues_documents_through_the_worker(
