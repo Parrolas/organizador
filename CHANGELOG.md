@@ -2,6 +2,14 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.8.1 - 2026-09-04
+
+### Added
+
+- Real application logo: the packaged executable, taskbar, tray, window,
+  and Start Menu shortcut now show the Organizador mark instead of the
+  default icon.
+
 ## 0.8.0 - 2026-09-04
 
 ### Added

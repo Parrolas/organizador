@@ -35,11 +35,18 @@ Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
 & $Python (Join-Path $Root "scripts\generate_version_info.py") $VersionInfo
 if ($LASTEXITCODE -ne 0) { throw "Não foi possível gerar os metadados de versão" }
 
+& $Python (Join-Path $Root "scripts\generate_icon.py")
+if ($LASTEXITCODE -ne 0) { throw "Não foi possível gerar o ícone da aplicação" }
+$AppIcon = Join-Path $Root "assets\icon.ico"
+if (-not (Test-Path -LiteralPath $AppIcon)) { throw "Ícone em falta: $AppIcon" }
+
 & $Python -m PyInstaller `
     --noconfirm `
     --clean `
     --windowed `
     --onedir `
+    --icon $AppIcon `
+    --add-data ((Join-Path $Root "assets") + ";assets") `
     --noupx `
     --name "Organizador" `
     --paths (Join-Path $Root "src") `

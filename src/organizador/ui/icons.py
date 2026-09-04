@@ -1,6 +1,9 @@
-"""Small programmatic icon set, avoiding platform-dependent glyphs."""
+"""Application icons: committed logo asset with a programmatic fallback."""
 
 from __future__ import annotations
+
+import sys
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
@@ -10,8 +13,33 @@ ICON_INK = "#08111D"
 ICON_ACCENT = "#49CFC0"
 
 
+def _asset_path(name: str) -> Path | None:
+    """Resolve a bundled asset, both from source and from the packaged app."""
+
+    candidates: list[Path] = []
+    frozen_base = getattr(sys, "_MEIPASS", None)
+    if frozen_base is not None:
+        candidates.append(Path(frozen_base) / "assets" / name)
+    candidates.append(Path(__file__).resolve().parent.parent.parent.parent / "assets" / name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def app_icon(size: int = 64) -> QIcon:
-    """Draw the Organizador mark as a filed page inside an ink tile."""
+    """Return the Organizador mark, falling back to the drawn tile without assets."""
+
+    logo = _asset_path("icon-square.png")
+    if logo is not None:
+        icon = QIcon(str(logo))
+        if not icon.isNull():
+            return icon
+    return _drawn_icon(size)
+
+
+def _drawn_icon(size: int) -> QIcon:
+    """Draw the legacy filed-page mark as a filed page inside an ink tile."""
 
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
