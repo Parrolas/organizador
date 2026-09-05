@@ -86,6 +86,7 @@ def test_ocr_blank_pages_fills_only_blanks(tmp_path: Path, monkeypatch: pytest.M
         calls.append(image)
         return "TEXTO"
 
+    monkeypatch.setattr(ocr, "ocr_available", lambda _tags: True)
     monkeypatch.setattr(ocr, "recognize_page", fake_recognize)
 
     filled = ocr.ocr_blank_pages(path, ["mantido", "", "  "], ("pt-PT",))
@@ -104,6 +105,7 @@ def test_ocr_blank_pages_respects_max_pages(
         calls.append(image)
         return "TEXTO"
 
+    monkeypatch.setattr(ocr, "ocr_available", lambda _tags: True)
     monkeypatch.setattr(ocr, "recognize_page", fake_recognize)
 
     filled = ocr.ocr_blank_pages(path, [""] * 5, ("pt-PT",), max_pages=2)
