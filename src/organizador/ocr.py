@@ -147,20 +147,24 @@ def recognize_page(image_bytes: bytes, language_tags: tuple[str, ...]) -> str:
 
 def render_pdf_pages(
     path: Path, *, max_pages: int = MAX_OCR_PAGES, scale: float = RENDER_SCALE
-) -> list[bytes]:
-    """Render PDF pages to PNG bytes; return ``[]`` on any failure."""
+) -> dict[int, bytes]:
+    """Render PDF pages to PNG bytes keyed by their zero-based page index.
+
+    Pages that fail to render are omitted from the mapping so callers can
+    never mistake one page's image for another's.
+    """
 
     if max_pages < 1:
         raise ValueError("max_pages must be positive")
     pdfium = _pdfium()
     if pdfium is None:
-        return []
+        return {}
     try:
         document = pdfium.PdfDocument(str(path))
     except Exception:
         LOGGER.debug("Could not open PDF for rendering: %s", path, exc_info=True)
-        return []
-    rendered: list[bytes] = []
+        return {}
+    rendered: dict[int, bytes] = {}
     try:
         for index in range(min(len(document), max_pages)):
             try:
@@ -168,7 +172,7 @@ def render_pdf_pages(
                 image = bitmap.to_pil()
                 buffer = io.BytesIO()
                 image.save(buffer, format="PNG")
-                rendered.append(buffer.getvalue())
+                rendered[index] = buffer.getvalue()
             except Exception:
                 LOGGER.debug("Could not render page %d of %s", index, path, exc_info=True)
     finally:
@@ -190,15 +194,16 @@ def ocr_blank_pages(
         return pages
     if not ocr_available(language_tags):
         return pages
-    rendered = {
-        index: image for index, image in enumerate(render_pdf_pages(path, max_pages=max_pages))
-    }
+    rendered = render_pdf_pages(path, max_pages=max_pages)
     filled = list(pages)
     done = 0
     for index in blank:
-        if done >= max_pages or index not in rendered:
+        if done >= max_pages:
             break
-        text = recognize_page(rendered[index], language_tags).strip()
+        image = rendered.get(index)
+        if image is None:
+            continue
+        text = recognize_page(image, language_tags).strip()
         done += 1
         if text:
             filled[index] = text

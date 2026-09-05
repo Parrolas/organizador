@@ -105,5 +105,7 @@ gitignored and are not published with the repository. Regenerate them with:
     --temp-dir $env:TEMP
 ```
 
-The shipping application contains no generated raster assets; its mark is
-drawn programmatically in `src/organizador/ui/icons.py`.
+The shipping application carries one committed raster asset: the supplied
+brand mark (`assets/icon.png`), processed by `scripts/generate_icon.py` into
+`icon-square.png` and the multi-size `icon.ico`. The fallback icon is drawn
+programmatically in `src/organizador/ui/icons.py`.

@@ -44,7 +44,7 @@ from organizador.reconcile import (
 from organizador.reconcile import apply as apply_reconciliation
 from organizador.reconcile import scan as scan_reconciliation
 from organizador.recovery import RecoveryBundle, RecoveryCoordinator
-from organizador.startup import ensure_start_menu_shortcut, set_launch_at_login
+from organizador.startup import refresh_windows_integration, set_launch_at_login
 from organizador.ui.dialogs import (
     BulkFilingDialog,
     OnboardingDialog,
@@ -210,11 +210,11 @@ class AppController(QObject):
                 self._begin_update_check(automatic=True)
             self._handle_legacy_rollback_bridge()
             self._show_pending_update_result()
-            threading.Thread(
-                target=ensure_start_menu_shortcut,
-                name="start-menu-shortcut",
-                daemon=True,
-            ).start()
+        threading.Thread(
+            target=refresh_windows_integration,
+            name="start-menu-shortcut",
+            daemon=True,
+        ).start()
 
         self._refresh()
         if background and state.configured and not smoke_test:

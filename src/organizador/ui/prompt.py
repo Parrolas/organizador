@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QDate, QEasingCurve, QPoint, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QColor, QCursor, QGuiApplication, QKeySequence, QShortcut
@@ -82,6 +82,13 @@ class FilingPrompt(QWidget):
         self.name_edit.setAccessibleName(_("Nome final do ficheiro"))
         self.name_edit.setToolTip(_("Podes corrigir o nome; a extensão original é preservada"))
         card_layout.addWidget(self.name_edit)
+        self._programmatic_name = False
+        self._custom_name = False
+        self._prompt_subjects: list[Subject] = []
+        self._prompt_template = "{nome_original}"
+        self._prompt_original_name = ""
+        self._prompt_when = datetime.now()
+        self.name_edit.textChanged.connect(self._name_text_changed)
 
         subject_header = QHBoxLayout()
         subject_header.addWidget(label(_("Disciplina"), "RowTitle"))
@@ -102,6 +109,7 @@ class FilingPrompt(QWidget):
         type_row.setSpacing(7)
         self.type_group = QButtonGroup(self)
         self.type_group.setExclusive(True)
+        self.type_group.idClicked.connect(lambda _identifier: self._render_name())
         self.type_buttons: dict[str, QPushButton] = {}
         for kind in FILE_KINDS:
             type_button = QPushButton(kind)
@@ -164,20 +172,11 @@ class FilingPrompt(QWidget):
         self.current_item_id = item.id
         self.selected_subject_id = guess.subject_id
         self.error_label.clear()
-        template_subject = next(
-            (subject for subject in subjects if subject.id == self.selected_subject_id), None
-        )
-        self.name_edit.setText(
-            render_final_name(
-                name_template,
-                subject_name=template_subject.name if template_subject else "",
-                subject_code=template_subject.code if template_subject else "",
-                kind=guess.kind,
-                original_name=item.original_name,
-                when=item.detected_at,
-            )
-        )
-        self.name_edit.selectAll()
+        self._custom_name = False
+        self._prompt_subjects = list(subjects)
+        self._prompt_template = name_template
+        self._prompt_original_name = item.original_name
+        self._prompt_when = item.detected_at
         self.meta_label.setText(
             _("{size}  ·  recebido da pasta Downloads").format(size=format_size(item.size))
         )
@@ -221,6 +220,8 @@ class FilingPrompt(QWidget):
             type_button.setChecked(kind == guess.kind)
         if not any(type_button.isChecked() for type_button in self.type_buttons.values()):
             self.type_buttons["Outros"].setChecked(True)
+        self._render_name()
+        self.name_edit.selectAll()
 
         inferred_due = extract_due_date(item.original_name)
         self.task_check.setChecked(inferred_due is not None)
@@ -261,6 +262,42 @@ class FilingPrompt(QWidget):
     def _subject_clicked(self, subject_id: int) -> None:
         self.selected_subject_id = subject_id
         self.confirm_button.setEnabled(True)
+        self._render_name()
+
+    def _name_text_changed(self) -> None:
+        if self._programmatic_name:
+            return
+        self._custom_name = True
+
+    def _render_name(self) -> None:
+        """Regenerate the filename preview while the user has not taken over."""
+
+        if self._custom_name:
+            return
+        template_subject = next(
+            (
+                subject
+                for subject in self._prompt_subjects
+                if subject.id == self.selected_subject_id
+            ),
+            None,
+        )
+        checked = self.type_group.checkedButton()
+        kind = checked.text() if checked is not None else "Outros"
+        self._programmatic_name = True
+        try:
+            self.name_edit.setText(
+                render_final_name(
+                    self._prompt_template,
+                    subject_name=template_subject.name if template_subject else "",
+                    subject_code=template_subject.code if template_subject else "",
+                    kind=kind,
+                    original_name=self._prompt_original_name,
+                    when=self._prompt_when,
+                )
+            )
+        finally:
+            self._programmatic_name = False
 
     def _choose_subject(self, subject_id: int, target: QPushButton) -> None:
         target.setChecked(True)

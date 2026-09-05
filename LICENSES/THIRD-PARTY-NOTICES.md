@@ -47,6 +47,39 @@ No Qt or PySide source files were modified for this distribution.
 `defusedxml` is an intentional runtime dependency. `openpyxl` detects it at
 runtime and uses its hardened XML parser when reading untrusted workbooks.
 
+## PDF rendering and OCR
+
+The packaged app bundles the following components for PDF text extraction and
+Windows OCR; these distributions ship no license file of their own, so their
+terms are documented here.
+
+- pypdfium2 5.13.0: BSD-3-Clause. Project:
+  https://github.com/pypdfium2-team/pypdfium2. It bundles Google's PDFium
+  binary (`pdfium.dll`), licensed under Apache-2.0:
+  https://pdfium.googlesource.com/pdfium/
+- Python/WinRT projections 3.2.1 (`winrt-runtime`, `winrt-Windows.Foundation`,
+  `winrt-Windows.Foundation.Collections`, `winrt-Windows.Globalization`,
+  `winrt-Windows.Graphics.Imaging`, `winrt-Windows.Media.Ocr`,
+  `winrt-Windows.Storage.Streams`): MIT License. Project:
+  https://github.com/pywinrt/pywinrt
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the "Software"),
+  to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  and/or sell copies of the Software, and to permit persons to whom the
+  Software is furnished to do so, subject to the following conditions: the
+  above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED
+  "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+  NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+  PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+  HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+  ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+- The OCR engine itself is a Windows component (Windows.Media.Ocr); it is
+  not redistributed with the package.
+
 The build copies the exact license, copying, notice, and author files supplied
 by these installed distributions into the `packages` subdirectory. Copyright
 notices in those files are retained verbatim.

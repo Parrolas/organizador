@@ -656,6 +656,78 @@ def test_cleanup_previous_version_only_removes_legacy_rollback(tmp_path: Path) -
     assert transaction_rollback.exists()
 
 
+def test_prune_completed_rollback_directories_removes_only_healthy_leftovers(
+    tmp_path: Path,
+) -> None:
+    app = _make_app_layout(tmp_path / "App")
+    data_dir = tmp_path / "dados"
+    healthy_id = "a" * 32
+    failed_id = "b" * 32
+    orphan_id = "c" * 32
+    healthy = _make_app_layout(tmp_path / f".App.update-{healthy_id}.rollback")
+    failed = _make_app_layout(tmp_path / f".App.update-{failed_id}.rollback")
+    orphan = _make_app_layout(tmp_path / f".App.update-{orphan_id}.rollback")
+    for transaction_id, status in (
+        (healthy_id, "succeeded"),
+        (failed_id, "failed_after_commit"),
+    ):
+        state = data_dir / "updates" / transaction_id
+        state.mkdir(parents=True)
+        (state / "result.json").write_text(
+            json.dumps({"transaction_id": transaction_id, "status": status}),
+            encoding="utf-8",
+        )
+
+    removed = updater.prune_completed_rollback_directories(app, data_dir)
+
+    assert removed == (healthy,)
+    assert not healthy.exists()
+    assert failed.exists()
+    assert orphan.exists()
+    assert updater.prune_completed_rollback_directories(app, data_dir) == ()
+
+
+def test_prune_completed_rollback_directories_ignores_unknown_names(tmp_path: Path) -> None:
+    app = _make_app_layout(tmp_path / "App")
+    intruder = _make_app_layout(tmp_path / ".App.update-not-a-transaction.rollback")
+    legacy = _make_app_layout(tmp_path / "Organizador.old")
+
+    assert updater.prune_completed_rollback_directories(app, tmp_path / "dados") == ()
+    assert intruder.exists()
+    assert legacy.exists()
+
+
+def test_update_result_preserves_cleanup_deferred(app_dir: Path) -> None:
+    transaction = updater.create_update_transaction(app_dir, "0.6.2")
+    try:
+        result = updater.UpdateResult(
+            transaction_id=transaction.transaction_id,
+            status=updater.UpdateResultStatus.SUCCEEDED,
+            phase="complete",
+            committed=True,
+            rollback_succeeded=None,
+            error=None,
+            old_pid=transaction.old_pid,
+            new_pid=None,
+            started_at=updater._utc_now(),
+            finished_at=updater._utc_now(),
+            app_dir=transaction.app_dir,
+            rollback_dir=transaction.rollback_dir,
+            cleanup_deferred=True,
+        )
+        updater.write_update_result(transaction.result_path, result)
+
+        restored = updater.read_update_result(transaction)
+        assert restored is not None
+        assert restored.cleanup_deferred is True
+        assert updater.mark_update_result_seen(transaction) is not None
+        reloaded = updater.read_update_result(transaction)
+        assert reloaded is not None
+        assert reloaded.cleanup_deferred is True
+    finally:
+        updater.release_installation_lock(transaction)
+
+
 def _powershell_path() -> str | None:
     if sys.platform != "win32":
         return None
@@ -932,6 +1004,82 @@ def test_real_powershell_helper_rolls_back_after_commit_failure(
     finally:
         if helper.poll() is None:
             helper.terminate()
+        _terminate_exact_pid(result.new_pid if result is not None else None)
+        updater.release_installation_lock(transaction)
+
+
+def test_real_powershell_helper_keeps_healthy_install_when_cleanup_fails(
+    tmp_path: Path,
+    sleeping_executable: Path,
+) -> None:
+    powershell = _powershell_path()
+    assert powershell is not None
+    app = _make_app_layout(tmp_path / "deferred % ç" / "App", executable=b"old executable")
+    data_dir = tmp_path / "deferred % ç data"
+    transaction = updater.create_update_transaction(
+        app,
+        "0.6.2",
+        data_dir=data_dir,
+        old_pid=2_147_483_647,
+        ready_timeout_seconds=5,
+        healthy_timeout_seconds=5,
+        move_attempts=2,
+        move_retry_seconds=0.05,
+    )
+    _make_app_layout(transaction.staging_dir, executable=sleeping_executable.read_bytes())
+    updater.write_update_helper(transaction)
+    helper = updater.launch_update_helper(transaction, powershell_executable=powershell)
+    folder_holder: subprocess.Popen[bytes] | None = None
+    result: updater.UpdateResult | None = None
+    try:
+        _wait_until(
+            lambda: transaction.rollback_dir.is_dir() and not transaction.staging_dir.exists()
+        )
+        # A process with its working directory inside the rollback folder
+        # keeps Windows from deleting it, simulating a locked old file.
+        folder_holder = subprocess.Popen(
+            [powershell, "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 20"],
+            cwd=str(transaction.rollback_dir),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        updater.mark_update_ready(transaction.manifest_path, transaction.token)
+        assert updater.wait_for_update_commit(
+            transaction.manifest_path,
+            transaction.token,
+            timeout_seconds=30,
+        )
+        updater.mark_update_healthy(transaction.manifest_path, transaction.token)
+        assert _wait_helper(helper, transaction) == 0
+        result = updater.read_update_result(transaction)
+        assert result is not None
+        assert result.status is updater.UpdateResultStatus.SUCCEEDED
+        assert result.phase == "complete"
+        assert result.committed is True
+        assert result.cleanup_deferred is True
+        # The healthy new installation stays in place and the retained old
+        # copy is swept by a later launch.
+        assert (app / "Organizador.exe").read_bytes() == sleeping_executable.read_bytes()
+        assert transaction.rollback_dir.is_dir()
+        assert not transaction.lock_path.exists()
+        assert updater.prune_completed_rollback_directories(app, data_dir) == ()
+        folder_holder.terminate()
+        folder_holder.wait(timeout=10)
+        folder_holder = None
+        _wait_until(
+            lambda: (
+                updater.prune_completed_rollback_directories(app, data_dir)
+                == (transaction.rollback_dir,)
+            ),
+            timeout=10.0,
+        )
+        assert not transaction.rollback_dir.exists()
+    finally:
+        if helper.poll() is None:
+            helper.terminate()
+        if folder_holder is not None and folder_holder.poll() is None:
+            folder_holder.terminate()
         _terminate_exact_pid(result.new_pid if result is not None else None)
         updater.release_installation_lock(transaction)
 

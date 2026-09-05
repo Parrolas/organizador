@@ -48,8 +48,8 @@ EN_STRINGS: dict[str, str] = {
     "A pesquisa é local. Escreve duas ou mais letras para começar.": (
         "Search is local. Type two or more letters to begin."
     ),
-    "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm texto pesquisável.": (
-        "Search is local. Scanned image-only PDFs do not have searchable text yet."
+    "A pesquisa é local. PDFs digitalizados só como imagem podem não ter texto pesquisável.": (
+        "Search is local. Scanned image-only PDFs may not have searchable text."
     ),
     "A preparar a vigilância de Downloads…": "Preparing the Downloads watch…",
     "A verificar {count} ficheiros…": "Checking {count} files…",
@@ -804,8 +804,8 @@ ES_STRINGS: dict[str, str] = {
     "A pesquisa é local. Escreve duas ou mais letras para começar.": (
         "La búsqueda es local. Escribe dos o más letras para empezar."
     ),
-    "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm texto pesquisável.": (
-        "La búsqueda es local. Los PDF escaneados solo como imagen aún no tienen texto buscable."
+    "A pesquisa é local. PDFs digitalizados só como imagem podem não ter texto pesquisável.": (
+        "La búsqueda es local. Los PDF escaneados solo como imagen pueden no tener texto buscable."
     ),
     "A preparar a vigilância de Downloads…": "Preparando la vigilancia de Descargas…",
     "A verificar {count} ficheiros…": "Verificando {count} archivos…",
@@ -1598,8 +1598,8 @@ FR_STRINGS: dict[str, str] = {
     "A pesquisa é local. Escreve duas ou mais letras para começar.": (
         "La recherche est locale. Tape deux lettres ou plus pour commencer."
     ),
-    "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm texto pesquisável.": (
-        "La recherche est locale. Les PDF numérisés en image seule n'ont pas encore de texte cherchable."
+    "A pesquisa é local. PDFs digitalizados só como imagem podem não ter texto pesquisável.": (
+        "La recherche est locale. Les PDF numérisés en image seule peuvent ne pas avoir de texte cherchable."
     ),
     "A preparar a vigilância de Downloads…": "Préparation de la surveillance de Téléchargements…",
     "A verificar {count} ficheiros…": "Vérification de {count} fichiers…",

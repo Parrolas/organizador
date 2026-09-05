@@ -53,8 +53,9 @@ undo trail.
 - All filing operations are logged and the latest filing can be undone.
 - PDF, DOCX, PPTX, XLSX, text and notebook search is local and does not upload
   documents.
-- Scanned image-only PDFs require future OCR support and are not searchable in
-  the first version.
+- Scanned image-only PDFs are recognized by the built-in Windows OCR engine
+  when a language pack is installed and the setting is on; pages without a
+  usable engine fall back to filename-only search.
 - Existing files in Downloads are never moved automatically. The user may scan
   the top level explicitly, confirm the exact candidate count, and import no
   more than 25 into the inbox per confirmation; each still needs a filing
@@ -64,7 +65,9 @@ undo trail.
 
 ## Evidence on Hand
 
-There are no supplied brand assets or production datasets. UI examples and
+The brand mark is a supplied logo asset (`assets/icon.png`, processed into
+`icon-square.png` and `icon.ico` by `scripts/generate_icon.py`). There are no
+production datasets. UI examples and
 empty states must not be presented as real university data.
 
 ## Product Principles

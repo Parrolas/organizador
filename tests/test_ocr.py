@@ -40,7 +40,7 @@ def test_preferred_language_tags() -> None:
 
 
 def test_render_pdf_pages_missing_file(tmp_path: Path) -> None:
-    assert ocr.render_pdf_pages(tmp_path / "ausente.pdf") == []
+    assert ocr.render_pdf_pages(tmp_path / "ausente.pdf") == {}
 
 
 def test_render_pdf_pages_produces_png_images(tmp_path: Path) -> None:
@@ -48,8 +48,8 @@ def test_render_pdf_pages_produces_png_images(tmp_path: Path) -> None:
 
     rendered = ocr.render_pdf_pages(path)
 
-    assert len(rendered) == 2
-    assert all(image.startswith(b"\x89PNG\r\n\x1a\n") for image in rendered)
+    assert sorted(rendered) == [0, 1]
+    assert all(image.startswith(b"\x89PNG\r\n\x1a\n") for image in rendered.values())
 
 
 def test_recognize_page_empty_bytes() -> None:
@@ -134,12 +134,34 @@ def test_ocr_blank_pages_skips_render_when_nothing_is_blank(
 ) -> None:
     path = _blank_pdf(tmp_path / "texto.pdf")
 
-    def fail_render(path: Path, **kwargs: object) -> list[bytes]:
+    def fail_render(path: Path, **kwargs: object) -> dict[int, bytes]:
         raise AssertionError("rendering must not run")
 
     monkeypatch.setattr(ocr, "render_pdf_pages", fail_render)
 
     assert ocr.ocr_blank_pages(path, ["já existe"], ("pt-PT",)) == ["já existe"]
+
+
+def test_ocr_blank_pages_keeps_true_page_mapping_on_render_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _blank_pdf(tmp_path / "falha.pdf", pages=3)
+    first_image = b"page-1-png"
+    third_image = b"page-3-png"
+
+    def failing_render(path: Path, **kwargs: object) -> dict[int, bytes]:
+        return {0: first_image, 2: third_image}
+
+    def fake_recognize(image: bytes, tags: object) -> str:
+        return "UM" if image == first_image else "TRES"
+
+    monkeypatch.setattr(ocr, "ocr_available", lambda _tags: True)
+    monkeypatch.setattr(ocr, "render_pdf_pages", failing_render)
+    monkeypatch.setattr(ocr, "recognize_page", fake_recognize)
+
+    filled = ocr.ocr_blank_pages(path, ["", "", ""], ("pt-PT",))
+
+    assert filled == ["UM", "", "TRES"]
 
 
 def test_indexer_never_calls_ocr_without_provider(

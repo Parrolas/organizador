@@ -8,10 +8,17 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
 from organizador.config import AppConfig
 from organizador.logging_setup import configure_logging, log_uncaught_exception
-from organizador.main import build_parser, load_config_safely, split_update_arguments
+from organizador.main import (
+    SingleInstance,
+    build_parser,
+    load_config_safely,
+    reload_config_after_restore,
+    split_update_arguments,
+)
 
 
 def test_configure_logging_is_idempotent_for_same_path(tmp_path: Path) -> None:
@@ -105,3 +112,66 @@ def test_build_parser_accepts_hidden_update_arguments() -> None:
     assert parsed.update_manifest == Path("state/transaction.json")
     assert parsed.update_token == "secret"
     assert build_parser().parse_args([]).update_manifest is None
+
+
+def test_single_instance_blocks_a_second_copy_of_the_same_data(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    del qt_app
+    first = SingleInstance(tmp_path)
+    second = SingleInstance(tmp_path)
+    elsewhere = SingleInstance(tmp_path.parent / "outros-dados")
+    try:
+        assert first.acquire() is True
+        assert second.acquire() is False
+        assert elsewhere.acquire() is True
+    finally:
+        first.server.close()
+        elsewhere.server.close()
+
+
+def test_reload_config_after_restore_picks_up_rewritten_settings(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[Exception] = []
+    monkeypatch.setattr(
+        "organizador.main._warn_unreadable_settings", lambda error: warnings.append(error)
+    )
+    downloads = tmp_path.parent / f"{tmp_path.name}-downloads"
+    config = AppConfig(data_dir=tmp_path, downloads_dir=downloads)
+    config.save()
+
+    reloaded, error = reload_config_after_restore(qt_app, tmp_path)
+    assert error is None
+    assert not warnings
+    assert reloaded.downloads_dir == downloads
+
+    restored = AppConfig(
+        data_dir=tmp_path, downloads_dir=tmp_path.parent / f"{tmp_path.name}-original"
+    )
+    restored.save()
+
+    reloaded, error = reload_config_after_restore(qt_app, tmp_path)
+
+    assert error is None
+    assert reloaded.downloads_dir == tmp_path.parent / f"{tmp_path.name}-original"
+
+
+def test_reload_config_after_restore_reports_unreadable_settings(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[Exception] = []
+    monkeypatch.setattr(
+        "organizador.main._warn_unreadable_settings", lambda error: warnings.append(error)
+    )
+    (tmp_path / "settings.json").write_text("{corrompido", encoding="utf-8")
+
+    config, error = reload_config_after_restore(qt_app, tmp_path)
+
+    assert config == AppConfig(data_dir=tmp_path)
+    assert error is not None
+    assert len(warnings) == 1

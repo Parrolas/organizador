@@ -681,7 +681,7 @@ class SearchPage(QWidget):
         layout.addWidget(self.index_status_container)
         self.status_label = label(
             _(
-                "A pesquisa é local. PDFs digitalizados só como imagem ainda não têm "
+                "A pesquisa é local. PDFs digitalizados só como imagem podem não ter "
                 "texto pesquisável."
             ),
             "PageSubtitle",

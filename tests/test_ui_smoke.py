@@ -391,6 +391,52 @@ def test_filing_prompt_selects_classifier_suggestion(
     prompt.hide()
 
 
+def test_filing_prompt_regenerates_name_on_subject_and_type_change(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    other = database.add_subject(
+        "Biologia",
+        "BIO101",
+        "#123456",
+        (),
+        "BIO101 - Biologia",
+    )
+    subjects = [subject, other]
+    path = app_config.inbox_dir / "BIO101_ficha.pdf"
+    path.write_bytes(b"content")
+    item = database.add_inbox_item(path, app_config.downloads_dir / path.name, path.name, 7)
+    guess = guess_filing(item.original_name, subjects)
+    prompt = FilingPrompt(timeout_seconds=30)
+    try:
+        prompt.show_item(item, subjects, guess, name_template="{codigo}_{tipo}_{nome_original}")
+        qt_app.processEvents()
+        initial = prompt.name_edit.text()
+        assert other.code in initial
+
+        prompt._choose_subject(subject.id, prompt.subject_group.button(subject.id))
+        qt_app.processEvents()
+        regenerated = prompt.name_edit.text()
+        assert regenerated != initial
+        assert regenerated.startswith(f"{subject.code}_")
+        assert initial.startswith(f"{other.code}_")
+
+        prompt.type_buttons["Slides"].click()
+        qt_app.processEvents()
+        assert prompt.type_buttons["Slides"].isChecked()
+        assert "Slides" in prompt.name_edit.text()
+
+        prompt.name_edit.setText("o meu nome.pdf")
+        prompt.type_buttons["Trabalhos"].click()
+        qt_app.processEvents()
+        assert prompt.name_edit.text() == "o meu nome.pdf"
+    finally:
+        prompt.timer.stop()
+        prompt.hide()
+
+
 def test_subject_colour_button_keeps_readable_text(qt_app: QApplication) -> None:
     dialog = SubjectDialog()
 

@@ -24,9 +24,28 @@ PACKAGES = (
     "XlsxWriter",
     "typing_extensions",
     "pyinstaller",
+    "pypdfium2",
+    "winrt-runtime",
+    "winrt-Windows.Foundation",
+    "winrt-Windows.Foundation.Collections",
+    "winrt-Windows.Globalization",
+    "winrt-Windows.Graphics.Imaging",
+    "winrt-Windows.Media.Ocr",
+    "winrt-Windows.Storage.Streams",
 )
 NOTICE_NAMES = ("license", "licence", "copying", "notice", "authors")
-MANUALLY_DOCUMENTED_PACKAGES = {"PySide6-Essentials", "shiboken6"}
+MANUALLY_DOCUMENTED_PACKAGES = {
+    "PySide6-Essentials",
+    "shiboken6",
+    "pypdfium2",
+    "winrt-runtime",
+    "winrt-Windows.Foundation",
+    "winrt-Windows.Foundation.Collections",
+    "winrt-Windows.Globalization",
+    "winrt-Windows.Graphics.Imaging",
+    "winrt-Windows.Media.Ocr",
+    "winrt-Windows.Storage.Streams",
+}
 
 
 def main() -> None:

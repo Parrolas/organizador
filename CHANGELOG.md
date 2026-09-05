@@ -2,6 +2,27 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.10.1 - 2026-09-05
+
+### Fixed
+
+- A failed deletion of the previous version after a healthy update no longer
+  rolls back the working installation; the old copy is retained and swept by
+  the next launch.
+- A second copy of the app installed in another folder can no longer operate
+  on the same data; one instance per data folder is now enforced in addition
+  to the per-installation guard.
+- Settings restored by recovery are now reloaded, so the session never runs
+  with folders that contradict its restored configuration.
+- OCR text can no longer be attached to the wrong PDF page when one page
+  fails to render.
+- The filing prompt regenerates the suggested filename when the subject or
+  document type changes (a manual edit always wins).
+- Paths containing apostrophes no longer break Start Menu shortcut creation.
+- The login startup entry now follows the current installation on every
+  launch when startup is enabled.
+- The license inventory documents the PDF rendering and OCR dependencies.
+
 ## 0.10.0 - 2026-09-05
 
 ### Added

@@ -55,6 +55,40 @@ def is_launch_at_login() -> bool:
     return bool(value)
 
 
+def refresh_launch_at_login() -> bool:
+    """Point the login entry at the current executable when startup is enabled.
+
+    The registration stores an absolute path; rewriting it on every launch
+    keeps a freshly updated installation authoritative without resurrecting
+    an entry the user turned off.
+    """
+
+    if not getattr(sys, "frozen", False) or os.name != "nt" or winreg is None:
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, VALUE_NAME)
+    except OSError:
+        return False
+    desired = startup_command()
+    if str(value) == desired:
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, desired)
+    except OSError:
+        LOGGER.warning("Could not refresh the login startup entry", exc_info=True)
+        return False
+    return True
+
+
+def refresh_windows_integration() -> None:
+    """Refresh the login entry and Start Menu shortcut for this installation."""
+
+    refresh_launch_at_login()
+    ensure_start_menu_shortcut()
+
+
 def start_menu_shortcut_path(programs_dir: Path | None = None) -> Path:
     """Return the per-user Start Menu shortcut for the packaged application."""
 
@@ -62,6 +96,26 @@ def start_menu_shortcut_path(programs_dir: Path | None = None) -> Path:
         return programs_dir / SHORTCUT_NAME
     base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     return base / "Microsoft" / "Windows" / "Start Menu" / "Programs" / SHORTCUT_NAME
+
+
+def _ps_single_quote(value: str) -> str:
+    """Escape a value for a PowerShell single-quoted string literal."""
+
+    return value.replace("'", "''")
+
+
+def shortcut_command(target: Path, shortcut: Path) -> str:
+    """Build the PowerShell command that writes the Start Menu shortcut."""
+
+    return (
+        "$ws = New-Object -ComObject WScript.Shell; "
+        f"$s = $ws.CreateShortcut('{_ps_single_quote(str(shortcut))}'); "
+        f"$s.TargetPath = '{_ps_single_quote(str(target))}'; "
+        f"$s.WorkingDirectory = '{_ps_single_quote(str(target.parent))}'; "
+        f"$s.IconLocation = '{_ps_single_quote(str(target))},0'; "
+        "$s.Description = 'Organizador - estudo local'; "
+        "$s.Save()"
+    )
 
 
 def ensure_start_menu_shortcut(programs_dir: Path | None = None) -> bool:
@@ -76,15 +130,7 @@ def ensure_start_menu_shortcut(programs_dir: Path | None = None) -> bool:
         return False
     target = Path(sys.executable)
     shortcut = start_menu_shortcut_path(programs_dir)
-    command = (
-        "$ws = New-Object -ComObject WScript.Shell; "
-        f"$s = $ws.CreateShortcut('{shortcut}'); "
-        f"$s.TargetPath = '{target}'; "
-        f"$s.WorkingDirectory = '{target.parent}'; "
-        f"$s.IconLocation = '{target},0'; "
-        f"$s.Description = 'Organizador - estudo local'; "
-        "$s.Save()"
-    )
+    command = shortcut_command(target, shortcut)
     try:
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],

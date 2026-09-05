@@ -224,6 +224,7 @@ class UpdateResult:
     app_dir: Path
     rollback_dir: Path
     recovery_receipt_path: Path | None = None
+    cleanup_deferred: bool = False
     seen_at: str | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -246,6 +247,7 @@ class UpdateResult:
             "recovery_receipt_path": (
                 str(self.recovery_receipt_path) if self.recovery_receipt_path is not None else None
             ),
+            "cleanup_deferred": self.cleanup_deferred,
             "seen_at": self.seen_at,
         }
 
@@ -788,6 +790,48 @@ def prune_abandoned_update_state(data_dir: Path, *, max_age_days: float = 7.0) -
     return tuple(removed)
 
 
+def prune_completed_rollback_directories(
+    app_dir: Path,
+    data_dir: Path | None = None,
+) -> tuple[Path, ...]:
+    """Delete rollback folders retained by updates that finished healthy.
+
+    When the helper cannot delete the previous version (a locked file, for
+    instance) it keeps the folder rather than roll back a working install.
+    Later launches sweep those folders once no process needs them.
+    """
+
+    resolved_app = app_dir.resolve()
+    parent = resolved_app.parent
+    prefix = f".{resolved_app.name}.update-"
+    state_root = (
+        updates_directory(data_dir)
+        if data_dir is not None
+        else parent / f".{resolved_app.name}.updates"
+    )
+    removed: list[Path] = []
+    for child in sorted(parent.glob(f"{prefix}*.rollback")):
+        try:
+            if not child.is_dir() or child.is_symlink():
+                continue
+            remainder = child.name[len(prefix) : -len(".rollback")]
+            if not remainder or set(remainder) - set("0123456789abcdef"):
+                continue
+            result_path = state_root / remainder / "result.json"
+            if not result_path.is_file():
+                continue
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or payload.get("status") != "succeeded":
+                continue
+            shutil.rmtree(child, ignore_errors=True)
+            if child.is_dir():
+                continue
+            removed.append(child)
+        except (OSError, ValueError):
+            continue
+    return tuple(removed)
+
+
 def _coerce_version(version: str | Version) -> Version:
     if isinstance(version, str):
         parsed = version_tuple(version)
@@ -1035,6 +1079,7 @@ def read_update_result(path: Path | UpdateTransaction) -> UpdateResult | None:
                 if payload.get("recovery_receipt_path") is not None
                 else None
             ),
+            cleanup_deferred=bool(payload.get("cleanup_deferred", False)),
             seen_at=optional_string("seen_at"),
         )
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
@@ -1265,10 +1310,11 @@ _POWERSHELL_HELPER = r"""param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
-$script:Phase = 'load_manifest'
-$script:Committed = $false
-$script:AppMoved = $false
-$script:StagingMoved = $false
+    $script:Phase = 'load_manifest'
+    $script:Committed = $false
+    $script:AppMoved = $false
+    $script:StagingMoved = $false
+    $script:CleanupDeferred = $false
 $script:NewProcess = $null
 $script:StartedAt = [DateTime]::UtcNow.ToString('o')
 $script:Transaction = $null
@@ -1433,6 +1479,7 @@ function Save-Result([string]$Status, [string]$ErrorMessage, [object]$RollbackSu
         app_dir = [string]$script:Transaction.app_dir
         rollback_dir = [string]$script:Transaction.rollback_dir
         recovery_receipt_path = $receipt
+        cleanup_deferred = $script:CleanupDeferred
         seen_at = $null
     }
     Write-AtomicJson ([string]$script:Transaction.result_path) $result
@@ -1535,7 +1582,14 @@ try {
     Wait-ForMarker ([string]$script:Transaction.healthy_path) ([double]$script:Transaction.healthy_timeout_seconds) 'healthy'
 
     $script:Phase = 'cleanup_rollback'
-    Remove-DirectoryWithRetry $rollbackPath
+    try {
+        Remove-DirectoryWithRetry $rollbackPath
+    } catch {
+        # The update committed and the new version reported healthy. Deleting
+        # the old copy must never undo a working installation; retain the
+        # folder so a later launch can sweep it.
+        $script:CleanupDeferred = $true
+    }
     $script:Phase = 'complete'
     Save-Result 'succeeded' $null $null
     Release-Lock

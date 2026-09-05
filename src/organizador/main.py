@@ -97,6 +97,35 @@ def load_config_safely(data_dir: Path) -> tuple[AppConfig, Exception | None]:
         return AppConfig(data_dir=data_dir), exc
 
 
+def _warn_unreadable_settings(error: Exception) -> None:
+    QMessageBox.warning(
+        None,
+        _("Definições danificadas"),
+        _(
+            "Não foi possível ler as definições guardadas. "
+            "A app abriu com valores seguros para poderes corrigi-las.\n\n{error}"
+        ).format(error=error),
+    )
+
+
+def reload_config_after_restore(
+    application: QApplication, data_dir: Path
+) -> tuple[AppConfig, Exception | None]:
+    """Reload settings after a recovery restore replaced them on disk.
+
+    The restored backup may point at folders that differ from the config the
+    session loaded earlier; re-reading keeps the running app consistent with
+    its own restored configuration.
+    """
+
+    config, error = load_config_safely(data_dir)
+    if error is not None:
+        _warn_unreadable_settings(error)
+    set_language(config.language)
+    apply_theme(application, get_theme(config.theme))
+    return config, error
+
+
 def _set_app_user_model_id() -> None:
     """Give the packaged app a stable identity for tray notifications."""
 
@@ -142,14 +171,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config, config_error = load_config_safely(target_data_dir)
     if config_error is not None:
-        QMessageBox.warning(
-            None,
-            _("Definições danificadas"),
-            _(
-                "Não foi possível ler as definições guardadas. "
-                "A app abriu com valores seguros para poderes corrigi-las.\n\n{error}"
-            ).format(error=config_error),
-        )
+        _warn_unreadable_settings(config_error)
     set_language(config.language)
     apply_theme(application, get_theme(config.theme))
 
@@ -163,11 +185,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    # One installation, one updater: frozen processes rendezvous on the install
-    # folder so two profiles can never update the same binaries concurrently.
-    install_dir = updater.app_directory()
-    instance = SingleInstance(install_dir if install_dir is not None else target_data_dir)
+    # One data set, one manager: copies installed in different folders share
+    # the per-user database, so a data-dir guard must reject a second copy
+    # before it can watch, migrate or recover the same files.
+    instance = SingleInstance(target_data_dir)
     if not arguments.smoke_test and not instance.acquire():
+        return 0
+
+    # One installation, one updater: frozen processes rendezvous on the
+    # install folder so two profiles can never update the same binaries
+    # concurrently.
+    install_dir = updater.app_directory()
+    if (
+        install_dir is not None
+        and not arguments.smoke_test
+        and not SingleInstance(install_dir).acquire()
+    ):
         return 0
 
     coordinator = RecoveryCoordinator(target_data_dir)
@@ -188,9 +221,13 @@ def main(argv: list[str] | None = None) -> int:
         LOGGER.warning(
             "Restored pre-migration backup from an interrupted update: %s", restored.path
         )
+        config, config_error = reload_config_after_restore(application, target_data_dir)
 
     with suppress(Exception):
         updater.prune_abandoned_update_state(target_data_dir)
+    if install_dir is not None:
+        with suppress(Exception):
+            updater.prune_completed_rollback_directories(install_dir, target_data_dir)
 
     database = Database(config.database_path)
     bundle: RecoveryBundle | None = None
