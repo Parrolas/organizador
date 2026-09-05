@@ -106,6 +106,7 @@ def test_load_rejects_non_object_json(tmp_path: Path, payload: object) -> None:
         ("prompt_timeout_seconds", 45.0),
         ("initialized", 1),
         ("ocr_enabled", 1),
+        ("quiet_intake", 1),
     ],
 )
 def test_load_rejects_wrong_setting_types(tmp_path: Path, field: str, value: object) -> None:
@@ -172,6 +173,14 @@ def test_settings_round_trip_for_ocr_toggle(tmp_path: Path) -> None:
 
     assert AppConfig.load(tmp_path).ocr_enabled is False
     assert AppConfig(data_dir=tmp_path).ocr_enabled is True
+
+
+def test_settings_round_trip_for_quiet_intake(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path, quiet_intake=True)
+    config.save()
+
+    assert AppConfig.load(tmp_path).quiet_intake is True
+    assert AppConfig(data_dir=tmp_path).quiet_intake is False
 
 
 def test_load_rejects_wrong_types_for_new_settings(tmp_path: Path) -> None:

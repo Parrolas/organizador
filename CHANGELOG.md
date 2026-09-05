@@ -2,6 +2,16 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.10.0 - 2026-09-05
+
+### Added
+
+- Quieter intake: notifications for new inbox material are batched within a
+  10-second window, so a burst of downloads produces a single toast. Rapid
+  filing confirmations aggregate into one summary after the first toast.
+- New setting "Silenciar notificações de arquivo" suppresses intake and
+  filing toasts entirely; errors, deadlines and update notices stay visible.
+
 ## 0.9.0 - 2026-09-05
 
 ### Added

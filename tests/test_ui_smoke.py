@@ -131,6 +131,36 @@ def test_settings_ocr_checkbox_round_trips_through_payload(
     window.close()
 
 
+def test_settings_quiet_checkbox_round_trips_through_payload(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+) -> None:
+    del qt_app
+    app_config.quiet_intake = True
+    window = MainWindow(database, app_config)
+    payloads: list[SettingsPayload] = []
+    window.settings_page.save_requested.connect(payloads.append)
+
+    quiet_box = next(
+        control
+        for control in window.settings_page.findChildren(QCheckBox)
+        if control.text() == "Silenciar notificações de arquivo"
+    )
+    assert quiet_box.isChecked()
+    quiet_box.setChecked(False)
+    save = next(
+        control
+        for control in window.settings_page.findChildren(QPushButton)
+        if control.text() == "Guardar definições"
+    )
+    save.click()
+
+    assert payloads[0]["quiet_intake"] is False
+    window.allow_close = True
+    window.close()
+
+
 def test_recovery_row_offers_only_a_safe_folder_action(
     qt_app: QApplication,
     app_config: AppConfig,
@@ -441,6 +471,7 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
         "language": "pt",
         "check_updates_on_launch": True,
         "ocr_enabled": True,
+        "quiet_intake": True,
         "watch_enabled": True,
         "launch_at_login": True,
     }
@@ -450,6 +481,7 @@ def test_startup_registration_is_reverted_when_settings_save_fails(
 
     assert calls == [True, False]
     assert not app_config.launch_at_login
+    assert not app_config.quiet_intake
     assert "sem espaço" in controller.main_window.settings_page.status_label.text()
     controller.indexer.shutdown()
     controller.tray.hide()
@@ -1016,6 +1048,109 @@ def _finish_check(
     controller: AppController, result: updater.UpdateCheckResult, automatic: bool
 ) -> None:
     controller._on_update_check_finished(result, automatic, controller._update_check_generation)
+
+
+def test_intake_notice_single_file_keeps_named_message(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._queue_intake_notice("apontamentos.pdf")
+        controller._flush_intake_notices()
+
+        assert notices == [
+            (
+                (
+                    "Novo material na Caixa de Entrada",
+                    "apontamentos.pdf está pronto para organizar.",
+                ),
+                {},
+            )
+        ]
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_intake_notices_batch_into_one_summary(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._queue_intake_notice("a.pdf")
+        controller._queue_intake_notice("b.pdf")
+        controller._queue_intake_notice("c.pdf")
+        controller._flush_intake_notices()
+
+        assert notices == [
+            (
+                ("Novo material na Caixa de Entrada", "3 ficheiros estão prontos para organizar."),
+                {},
+            )
+        ]
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_first_filed_notice_is_immediate(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._notify_filed("apontamentos.pdf", "Matemática / Exercícios")
+
+        assert notices == [
+            (
+                (
+                    "Ficheiro organizado",
+                    "apontamentos.pdf foi guardado em Matemática / Exercícios.",
+                ),
+                {},
+            )
+        ]
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_filed_notices_aggregate_into_one_summary(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller._last_filed_notice = time.monotonic()
+        controller._notify_filed("a.pdf", "Matemática / Exercícios")
+        controller._notify_filed("b.pdf", "Matemática / Exercícios")
+        controller._notify_filed("c.pdf", "Biologia / Apontamentos")
+        controller._flush_filed_notices()
+
+        assert notices == [(("Ficheiros organizados", "3 ficheiros organizados"), {})]
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_quiet_intake_suppresses_intake_and_filed_notices(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        controller.config.quiet_intake = True
+        controller._queue_intake_notice("a.pdf")
+        controller._flush_intake_notices()
+        controller._notify_filed("a.pdf", "Matemática / Exercícios")
+        controller._flush_filed_notices()
+
+        assert notices == []
+    finally:
+        _close_controller(qt_app, controller)
 
 
 def test_begin_update_check_skips_while_installing(

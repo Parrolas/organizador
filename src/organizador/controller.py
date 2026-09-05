@@ -66,6 +66,11 @@ class _UpdateInstallAborted(Exception):
     """The update worker stopped early because the application is shutting down."""
 
 
+_INTAKE_NOTICE_WINDOW_MS = 10_000
+_FILED_NOTICE_WINDOW_MS = 4_000
+_FILED_IMMEDIATE_WINDOW_S = 10.0
+
+
 @dataclass(frozen=True, slots=True)
 class StartupState:
     """Whether onboarding completed and background services may start."""
@@ -134,6 +139,19 @@ class AppController(QObject):
         self.reminder_timer = QTimer(self)
         self.reminder_timer.setInterval(60_000)
         self.reminder_timer.timeout.connect(self._check_deadlines)
+
+        self._intake_notice_names: list[str] = []
+        self._intake_notice_timer = QTimer(self)
+        self._intake_notice_timer.setSingleShot(True)
+        self._intake_notice_timer.setInterval(_INTAKE_NOTICE_WINDOW_MS)
+        self._intake_notice_timer.timeout.connect(self._flush_intake_notices)
+
+        self._filed_pending: list[tuple[str, str]] = []
+        self._filed_notice_timer = QTimer(self)
+        self._filed_notice_timer.setSingleShot(True)
+        self._filed_notice_timer.setInterval(_FILED_NOTICE_WINDOW_MS)
+        self._filed_notice_timer.timeout.connect(self._flush_filed_notices)
+        self._last_filed_notice = 0.0
 
     def start(self, *, background: bool = False, smoke_test: bool = False) -> None:
         """Run first-time setup, start services and reveal the appropriate surface."""
@@ -432,12 +450,71 @@ class AppController(QObject):
         if item.id not in self.prompt_queue and self.prompt.current_item_id != item.id:
             self.prompt_queue.append(item.id)
         if notify:
-            self.tray.notify(
-                _("Novo material na Caixa de Entrada"),
-                _("{name} está pronto para organizar.").format(name=item.original_name),
-            )
+            self._queue_intake_notice(item.original_name)
             self._refresh()
         self._show_next_prompt()
+
+    def _queue_intake_notice(self, name: str) -> None:
+        """Collect intake names and surface one toast per batching window."""
+
+        if self.config.quiet_intake:
+            return
+        self._intake_notice_names.append(name)
+        if not self._intake_notice_timer.isActive():
+            self._intake_notice_timer.start()
+
+    def _flush_intake_notices(self) -> None:
+        self._intake_notice_timer.stop()
+        names = self._intake_notice_names
+        self._intake_notice_names = []
+        if not names or self.config.quiet_intake:
+            return
+        if len(names) == 1:
+            message = _("{name} está pronto para organizar.").format(name=names[0])
+        else:
+            message = _("{count} ficheiros estão prontos para organizar.").format(count=len(names))
+        self.tray.notify(_("Novo material na Caixa de Entrada"), message)
+
+    def _notify_filed(self, name: str, destination: str) -> None:
+        """Surface filing toasts: first is immediate, the rest join a batch."""
+
+        if self.config.quiet_intake:
+            return
+        now = time.monotonic()
+        if not self._filed_pending and now - self._last_filed_notice >= _FILED_IMMEDIATE_WINDOW_S:
+            self.tray.notify(
+                _("Ficheiro organizado"),
+                _("{name} foi guardado em {destination}.").format(
+                    name=name, destination=destination
+                ),
+            )
+            self._last_filed_notice = now
+            return
+        self._filed_pending.append((name, destination))
+        if not self._filed_notice_timer.isActive():
+            self._filed_notice_timer.start()
+
+    def _flush_filed_notices(self) -> None:
+        self._filed_notice_timer.stop()
+        pending = self._filed_pending
+        self._filed_pending = []
+        if not pending or self.config.quiet_intake:
+            return
+        if len(pending) == 1:
+            name, destination = pending[0]
+            self.tray.notify(
+                _("Ficheiro organizado"),
+                _("{name} foi guardado em {destination}.").format(
+                    name=name, destination=destination
+                ),
+            )
+            self._last_filed_notice = time.monotonic()
+            return
+        self._last_filed_notice = time.monotonic()
+        self.tray.notify(
+            _("Ficheiros organizados"),
+            _("{count} ficheiros organizados").format(count=len(pending)),
+        )
 
     def _import_existing_downloads(self) -> None:
         watcher = self.watcher
@@ -717,12 +794,9 @@ class AppController(QObject):
             )
         self.indexer.submit(document)
         subject = self.database.get_subject(subject_id)
-        self.tray.notify(
-            _("Ficheiro organizado"),
-            _("{name} foi guardado em {destination}.").format(
-                name=document.current_path.name,
-                destination=f"{subject.name if subject else kind} / {kind}",
-            ),
+        self._notify_filed(
+            document.current_path.name,
+            f"{subject.name if subject else kind} / {kind}",
         )
         self._refresh()
         QTimer.singleShot(120, self._show_next_prompt)
@@ -1035,6 +1109,7 @@ class AppController(QObject):
             self.config.language = str(values["language"])
             self.config.check_updates_on_launch = bool(values["check_updates_on_launch"])
             self.config.ocr_enabled = bool(values["ocr_enabled"])
+            self.config.quiet_intake = bool(values["quiet_intake"])
             self.config.watch_enabled = bool(values["watch_enabled"])
             desired_startup = bool(values["launch_at_login"])
             self.config.launch_at_login = desired_startup
@@ -1084,6 +1159,7 @@ class AppController(QObject):
         self.config.language = previous.language
         self.config.check_updates_on_launch = previous.check_updates_on_launch
         self.config.ocr_enabled = previous.ocr_enabled
+        self.config.quiet_intake = previous.quiet_intake
         self.config.initialized = previous.initialized
 
     def _set_paused(self, paused: bool) -> None:

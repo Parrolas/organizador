@@ -102,6 +102,7 @@ def test_theme_round_trips_through_settings(
         "language": "pt",
         "check_updates_on_launch": True,
         "ocr_enabled": True,
+        "quiet_intake": False,
         "watch_enabled": True,
         "launch_at_login": False,
     }

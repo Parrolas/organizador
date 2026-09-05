@@ -572,6 +572,12 @@ EN_STRINGS: dict[str, str] = {
         "Updates only apply to the installed version."
     ),
     "Sem atualizações nesta instalação": "No updates for this installation",
+    "Ficheiros organizados": "Files organized",
+    "{count} ficheiros estão prontos para organizar.": ("{count} files are ready to organize."),
+    "Silenciar notificações de arquivo": "Silence filing notifications",
+    "Sem avisos de ficheiros organizados; erros e prazos continuam visíveis.": (
+        "No organized-file notices; errors and deadlines stay visible."
+    ),
     "A app está a correr em modo de desenvolvimento; as atualizações aplicam-se apenas à versão instalada.": (
         "The app is running in development mode; updates only apply to the installed version."
     ),
@@ -1345,6 +1351,14 @@ ES_STRINGS: dict[str, str] = {
         "Las actualizaciones solo se aplican a la versión instalada."
     ),
     "Sem atualizações nesta instalação": "Sin actualizaciones en esta instalación",
+    "Ficheiros organizados": "Archivos organizados",
+    "{count} ficheiros estão prontos para organizar.": (
+        "{count} archivos están listos para organizar."
+    ),
+    "Silenciar notificações de arquivo": "Silenciar notificaciones de archivo",
+    "Sem avisos de ficheiros organizados; erros e prazos continuam visíveis.": (
+        "Sin avisos de archivos organizados; los errores y los plazos siguen visibles."
+    ),
     "A app está a correr em modo de desenvolvimento; as atualizações aplicam-se apenas à versão instalada.": (
         "La app se ejecuta en modo de desarrollo; las actualizaciones solo se aplican a la versión instalada."
     ),
@@ -2143,6 +2157,14 @@ FR_STRINGS: dict[str, str] = {
         "Les mises à jour ne s'appliquent qu'à la version installée."
     ),
     "Sem atualizações nesta instalação": "Aucune mise à jour pour cette installation",
+    "Ficheiros organizados": "Fichiers rangés",
+    "{count} ficheiros estão prontos para organizar.": (
+        "{count} fichiers sont prêts à être rangés."
+    ),
+    "Silenciar notificações de arquivo": "Silencier les notifications de rangement",
+    "Sem avisos de ficheiros organizados; erros e prazos continuam visíveis.": (
+        "Pas d'avis de fichiers rangés ; les erreurs et les échéances restent visibles."
+    ),
     "A app está a correr em modo de desenvolvimento; as atualizações aplicam-se apenas à versão instalada.": (
         "L'application tourne en mode développement ; les mises à jour ne s'appliquent "
         "qu'à la version installée."

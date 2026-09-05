@@ -109,6 +109,7 @@ class AppConfig:
     language: str = DEFAULT_LANGUAGE
     check_updates_on_launch: bool = True
     ocr_enabled: bool = True
+    quiet_intake: bool = False
     initialized: bool = False
 
     @property
@@ -249,6 +250,7 @@ class AppConfig:
                 language=_str_setting(raw, "language", DEFAULT_LANGUAGE),
                 check_updates_on_launch=_bool_setting(raw, "check_updates_on_launch", True),
                 ocr_enabled=_bool_setting(raw, "ocr_enabled", True),
+                quiet_intake=_bool_setting(raw, "quiet_intake", False),
                 initialized=_bool_setting(raw, "initialized", False),
             )
             config.validate()
