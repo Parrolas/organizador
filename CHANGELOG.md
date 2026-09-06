@@ -2,6 +2,18 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.12.0 - 2026-09-06
+
+### Fixed
+
+- File transfers no longer freeze the interface: ingestion, filing, returns,
+  undo and bulk filing now run on background worker threads, with prompts,
+  toasts and inbox updates marshalled back to the UI thread. Return, undo
+  and bulk runs ignore duplicate requests while one is in flight, and
+  shutdown waits briefly for running transfers.
+- The manual import summary now waits for every file's ingestion to finish
+  instead of reporting while transfers are still in flight.
+
 ## 0.11.0 - 2026-09-06
 
 ### Fixed

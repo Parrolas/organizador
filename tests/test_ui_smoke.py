@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
+import threading
 import time
+from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -26,7 +28,7 @@ from PySide6.QtWidgets import (
 from organizador import __version__, updater
 from organizador.classifier import guess_filing
 from organizador.config import AppConfig
-from organizador.controller import AppController
+from organizador.controller import AppController, _UndoJob
 from organizador.db import Database
 from organizador.filer import FilingService
 from organizador.models import ExistingDownload, FindingReason, Subject
@@ -609,7 +611,8 @@ def test_incomplete_return_is_ignored_by_the_live_watcher(
     monkeypatch.setattr("organizador.filer.move_without_overwrite", leave_partial)
 
     controller._return_item(item.id)
-    qt_app.processEvents()
+
+    _pump_until(qt_app, lambda: watcher.ignored != [])
 
     pending = controller.database.list_pending_returns()
     assert len(pending) == 1
@@ -783,6 +786,10 @@ def test_bulk_filing_files_selection_and_keeps_failures_pending(
 
     controller._organise_selection(tuple(ids))
 
+    _pump_until(
+        qt_app,
+        lambda: "2 organizados" in controller.main_window.inbox_page.import_status_label.text(),
+    )
     with controller.database.connect() as connection:
         filed_count = int(
             connection.execute("SELECT COUNT(*) FROM events WHERE action = 'file'").fetchone()[0]
@@ -802,6 +809,160 @@ def test_bulk_filing_files_selection_and_keeps_failures_pending(
     controller.tray.hide()
     controller.main_window.allow_close = True
     controller.main_window.close()
+
+
+def test_filing_runs_off_the_gui_thread(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        path = app_config.inbox_dir / "MAT101_trabalho.pdf"
+        path.write_bytes(b"filing content")
+        item = controller.database.add_inbox_item(
+            path, app_config.downloads_dir / path.name, path.name, path.stat().st_size
+        )
+        started = threading.Event()
+        release = threading.Event()
+        real_file_document = controller.filer.file_document
+
+        def slow_file_document(*args: object, **kwargs: object) -> object:
+            started.set()
+            assert release.wait(10.0)
+            return real_file_document(*args, **kwargs)
+
+        monkeypatch.setattr(controller.filer, "file_document", slow_file_document)
+        controller._file_item(item.id, subject.id, "Trabalhos", "trabalho.pdf", False, None)
+
+        assert started.wait(5.0)
+        assert notices == []
+        assert path.exists()
+        release.set()
+        _pump_until(qt_app, lambda: bool(notices))
+
+        assert notices[0][0][0] == "Ficheiro organizado"
+        destination = (
+            app_config.university_root / subject.folder_name / "Trabalhos" / "trabalho.pdf"
+        )
+        assert destination.is_file()
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_return_ignores_a_second_request_while_in_flight(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database, subject
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        path = app_config.inbox_dir / "devolver.pdf"
+        path.write_bytes(b"return content")
+        item = controller.database.add_inbox_item(
+            path, app_config.downloads_dir / path.name, path.name, path.stat().st_size
+        )
+        calls = 0
+        started = threading.Event()
+        release = threading.Event()
+        real_return = controller.filer.return_to_downloads
+
+        def slow_return(inbox_id: int) -> Path:
+            nonlocal calls
+            calls += 1
+            started.set()
+            assert release.wait(10.0)
+            return real_return(inbox_id)
+
+        monkeypatch.setattr(controller.filer, "return_to_downloads", slow_return)
+        controller._return_item(item.id)
+        assert started.wait(5.0)
+        controller._return_item(item.id)
+
+        release.set()
+        _pump_until(qt_app, lambda: any(args[0] == "Ficheiro devolvido" for args, _ in notices))
+
+        assert calls == 1
+        assert (app_config.downloads_dir / "devolver.pdf").is_file()
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_undo_ignores_a_second_request_while_in_flight(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database
+    controller, notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        path = app_config.inbox_dir / "MAT101_desfazer.pdf"
+        path.write_bytes(b"undo content")
+        item = controller.database.add_inbox_item(
+            path, app_config.downloads_dir / path.name, path.name, path.stat().st_size
+        )
+        controller.filer.file_document(item.id, subject.id, "Slides", "desfazer.pdf")
+        calls = 0
+        started = threading.Event()
+        release = threading.Event()
+        real_undo = controller.filer.undo_latest_filing
+
+        def slow_undo() -> object:
+            nonlocal calls
+            calls += 1
+            started.set()
+            assert release.wait(10.0)
+            return real_undo()
+
+        monkeypatch.setattr(controller.filer, "undo_latest_filing", slow_undo)
+        controller._undo()
+        assert started.wait(5.0)
+        controller._undo()
+
+        release.set()
+        _pump_until(qt_app, lambda: any(args[0] == "Organização desfeita" for args, _ in notices))
+
+        assert calls == 1
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_shutdown_transfers_joins_running_workers(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow() -> None:
+            entered.set()
+            assert release.wait(10.0)
+            return None
+
+        controller._submit_transfer("undo", _UndoJob(), slow)
+        assert entered.wait(5.0)
+
+        controller._shutdown_transfers(timeout=0.05)
+
+        release.set()
+        controller._shutdown_transfers(timeout=5.0)
+        with controller._transfer_lock:
+            assert not [thread for thread in controller._transfer_threads if thread.is_alive()]
+    finally:
+        _close_controller(qt_app, controller)
 
 
 def test_subjects_page_lists_archived_subjects_and_offers_restore(
@@ -1083,11 +1244,23 @@ def _watched_controller(
 
 
 def _close_controller(qt_app: QApplication, controller: AppController) -> None:
+    controller._shutdown_transfers()
     controller.indexer.shutdown()
     controller.tray.hide()
     controller.main_window.allow_close = True
     controller.main_window.close()
     qt_app.processEvents()
+
+
+def _pump_until(qt_app: QApplication, predicate: Callable[[], bool], timeout: float = 10.0) -> None:
+    """Pump Qt events until a background transfer delivers its outcome."""
+
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            raise AssertionError("timed out waiting for a background file transfer")
+        qt_app.processEvents()
+        time.sleep(0.01)
 
 
 def _finish_check(

@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date
@@ -28,6 +29,7 @@ from organizador.indexer import DocumentIndexer
 from organizador.logging_setup import configure_logging
 from organizador.models import (
     ExistingDownload,
+    FiledDocument,
     FilingGuess,
     FindingReason,
     InboxItem,
@@ -79,6 +81,70 @@ class StartupState:
     services_ready: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _TransferOutcome:
+    """One finished background file transfer, marshalled to the GUI thread."""
+
+    kind: str
+    job: object
+    result: object
+    error: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _IngestJob:
+    generation: int
+    path: Path
+    expected: ExistingDownload | None
+
+
+@dataclass(frozen=True, slots=True)
+class _FileJob:
+    inbox_id: int
+    subject_id: int
+    kind: str
+    filename: str
+    create_task: bool
+    due_date: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ReturnJob:
+    inbox_id: int
+    watcher: DownloadWatcher | None
+    unpause: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _UndoJob:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class _BulkItem:
+    inbox_id: int
+    original_name: str
+    final_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class _BulkJob:
+    items: tuple[_BulkItem, ...]
+    subject_id: int
+    kind: str
+    create_task: bool
+    due_date: date | None
+    failures: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _BulkResult:
+    handled: tuple[int, ...]
+    filed: int
+    failures: tuple[str, ...]
+    documents: tuple[FiledDocument, ...]
+
+
 def _deadline_copy(delta_days: int) -> str:
     if delta_days < 0:
         return _("está atrasada")
@@ -95,6 +161,7 @@ class AppController(QObject):
     download_ready = Signal(int, object)
     index_completed = Signal(int, str)
     import_completed = Signal(int)
+    transfer_finished = Signal(object)
     update_check_finished = Signal(object, bool, int)
     update_install_finished = Signal(object)
 
@@ -121,6 +188,9 @@ class AppController(QObject):
         self._manual_import_skipped = 0
         self._manual_import_failed = 0
         self._manual_import_deferred = 0
+        self._manual_import_pending = 0
+        self._manual_import_complete = False
+        self._manual_import_worker_skipped = 0
         self._manual_import_errors: list[str] = []
         self._watcher_generation = 0
         self._pending_update: UpdateInfo | None = None
@@ -139,6 +209,13 @@ class AppController(QObject):
         self.reminder_timer = QTimer(self)
         self.reminder_timer.setInterval(60_000)
         self.reminder_timer.timeout.connect(self._check_deadlines)
+
+        self._transfer_gate = threading.Semaphore(8)
+        self._transfer_threads: set[threading.Thread] = set()
+        self._transfer_lock = threading.Lock()
+        self._return_in_flight: set[int] = set()
+        self._undo_in_flight = False
+        self._bulk_filing_in_flight = False
 
         self._intake_notice_names: list[str] = []
         self._intake_notice_timer = QTimer(self)
@@ -308,6 +385,7 @@ class AppController(QObject):
             self.watcher = None
         self._reset_manual_import_state()
         self.indexer.shutdown()
+        self._shutdown_transfers()
         self.prompt.hide()
         self.tray.hide()
         self.main_window.allow_close = True
@@ -324,6 +402,7 @@ class AppController(QObject):
         self.download_ready.connect(self._ingest_download)
         self.index_completed.connect(self._index_finished)
         self.import_completed.connect(self._manual_import_finished)
+        self.transfer_finished.connect(self._on_transfer_finished)
         self.tray.open_requested.connect(lambda: self.show_main("inicio"))
         self.tray.inbox_requested.connect(lambda: self.show_main("inbox"))
         self.tray.pause_requested.connect(self._set_paused)
@@ -369,6 +448,82 @@ class AppController(QObject):
         self.prompt.filing_requested.connect(self._file_item)
         self.prompt.later_requested.connect(self._prompt_finished)
         self.prompt.return_requested.connect(self._return_item)
+
+    def _submit_transfer(self, kind: str, job: object, work: Callable[[], object]) -> None:
+        """Run a blocking file transfer on a daemon worker thread.
+
+        The outcome is marshalled back to the GUI thread through
+        ``transfer_finished``; only the finish handlers may touch widgets,
+        the tray, or the prompt.
+        """
+
+        thread = threading.Thread(
+            target=self._run_transfer,
+            args=(kind, job, work),
+            name=f"transfer-{kind}",
+            daemon=True,
+        )
+        with self._transfer_lock:
+            self._transfer_threads.add(thread)
+        thread.start()
+
+    def _run_transfer(self, kind: str, job: object, work: Callable[[], object]) -> None:
+        with self._transfer_gate:
+            try:
+                result = work()
+            except FilingError as exc:
+                outcome = _TransferOutcome(kind=kind, job=job, result=None, error=str(exc))
+            except Exception as exc:  # never lose a worker outcome
+                LOGGER.exception("Background file transfer failed")
+                outcome = _TransferOutcome(
+                    kind=kind, job=job, result=None, error=str(exc) or type(exc).__name__
+                )
+            else:
+                outcome = _TransferOutcome(kind=kind, job=job, result=result, error=None)
+        with self._transfer_lock:
+            self._transfer_threads.discard(threading.current_thread())
+        self.transfer_finished.emit(outcome)
+
+    def _shutdown_transfers(self, timeout: float = 10.0) -> None:
+        """Wait briefly for running transfers, then let the process exit.
+
+        Daemon worker threads never block interpreter shutdown; the
+        journal-first filer design makes an interrupted move recoverable on
+        the next launch through reconciliation.
+        """
+
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._transfer_lock:
+                alive = [thread for thread in self._transfer_threads if thread.is_alive()]
+            if not alive:
+                return
+            if time.monotonic() >= deadline:
+                LOGGER.warning("Leaving %s file transfer(s) running during shutdown", len(alive))
+                return
+            time.sleep(0.05)
+
+    def _on_transfer_finished(self, outcome: object) -> None:
+        if not isinstance(outcome, _TransferOutcome):
+            LOGGER.error("Ignoring malformed transfer outcome")
+            return
+        job = outcome.job
+        if outcome.kind == "ingest" and isinstance(job, _IngestJob):
+            self._finish_ingested(job, outcome.result, outcome.error)
+        elif outcome.kind == "file" and isinstance(job, _FileJob):
+            self._finish_filed(job, outcome.result, outcome.error)
+        elif outcome.kind == "return" and isinstance(job, _ReturnJob):
+            self._finish_returned(job, outcome.result, outcome.error)
+        elif outcome.kind == "undo" and isinstance(job, _UndoJob):
+            self._finish_undone(job, outcome.result, outcome.error)
+        elif outcome.kind == "bulk" and isinstance(job, _BulkJob):
+            result = outcome.result if isinstance(outcome.result, _BulkResult) else None
+            if result is None and outcome.error is None:
+                LOGGER.error("Ignoring malformed bulk transfer outcome")
+                return
+            self._finish_bulk(job, result, outcome.error)
+        else:
+            LOGGER.error("Ignoring malformed transfer outcome")
 
     def _ocr_language_tags(self) -> tuple[str, ...] | None:
         """Provide OCR languages live, honouring the current toggle and language."""
@@ -421,30 +576,52 @@ class AppController(QObject):
         if generation != self._watcher_generation:
             return
         if isinstance(candidate, ExistingDownload):
-            manual_candidate = candidate
+            expected: ExistingDownload | None = candidate
             path = candidate.path
         else:
-            manual_candidate = None
+            expected = None
             path = candidate
-        try:
-            item = self.filer.ingest(path, expected=manual_candidate)
-        except FilingError as exc:
-            LOGGER.exception("Could not ingest %s", path)
-            if manual_candidate is not None:
-                self._manual_import_failed += 1
-                self._manual_import_errors.append(f"{path.name}: {exc}")
-            else:
-                self.tray.notify(_("Não foi possível recolher o ficheiro"), str(exc))
-                if self.watcher is not None:
-                    self.watcher.requeue(path)
+        job = _IngestJob(generation=generation, path=path, expected=expected)
+        if expected is not None:
+            self._manual_import_pending += 1
+        self._submit_transfer("ingest", job, lambda: self.filer.ingest(path, expected=expected))
+
+    def _finish_ingested(self, job: _IngestJob, result: object, error: str | None) -> None:
+        manual = job.expected is not None
+        item = result if isinstance(result, InboxItem) else None
+        if manual:
+            if job.generation == self._watcher_generation:
+                if error is not None:
+                    LOGGER.warning("Could not ingest %s: %s", job.path, error)
+                    self._manual_import_failed += 1
+                    self._manual_import_errors.append(f"{job.path.name}: {error}")
+                elif item is None:
+                    self._manual_import_skipped += 1
+                else:
+                    self._manual_imported += 1
+                    self._queue_ingested_item(item, notify=False)
+            self._manual_import_delivered()
+            return
+        if error is not None:
+            LOGGER.warning("Could not ingest %s: %s", job.path, error)
+            self.tray.notify(_("Não foi possível recolher o ficheiro"), error)
+            if self.watcher is not None:
+                self.watcher.requeue(job.path)
             return
         if item is None:
-            if manual_candidate is not None:
-                self._manual_import_skipped += 1
             return
-        if manual_candidate is not None:
-            self._manual_imported += 1
-        self._queue_ingested_item(item, notify=manual_candidate is None)
+        self._queue_ingested_item(item, notify=True)
+
+    def _manual_import_delivered(self) -> None:
+        """Account one finished manual ingest and summarize when the batch lands."""
+
+        self._manual_import_pending = max(0, self._manual_import_pending - 1)
+        if (
+            self._manual_import_active
+            and self._manual_import_complete
+            and self._manual_import_pending == 0
+        ):
+            self._show_manual_import_summary()
 
     def _queue_ingested_item(self, item: InboxItem, *, notify: bool) -> None:
         """Classify an ingested item and queue the normal human decision prompt."""
@@ -593,7 +770,14 @@ class AppController(QObject):
     def _manual_import_finished(self, worker_skipped: int) -> None:
         if not self._manual_import_active:
             return
-        skipped = self._manual_import_skipped + worker_skipped
+        self._manual_import_worker_skipped += worker_skipped
+        self._manual_import_complete = True
+        if self._manual_import_pending > 0:
+            return
+        self._show_manual_import_summary()
+
+    def _show_manual_import_summary(self) -> None:
+        skipped = self._manual_import_skipped + self._manual_import_worker_skipped
         imported = self._manual_imported
         failed = self._manual_import_failed
         parts = [
@@ -785,65 +969,81 @@ class AppController(QObject):
         create_task: bool,
         due_date: date | None,
     ) -> None:
-        try:
-            document = self.filer.file_document(inbox_id, subject_id, kind, filename)
-        except FilingError as exc:
-            self.prompt_queue.appendleft(inbox_id)
+        job = _FileJob(inbox_id, subject_id, kind, filename, create_task, due_date)
+        self._submit_transfer(
+            "file",
+            job,
+            lambda: self.filer.file_document(inbox_id, subject_id, kind, filename),
+        )
+
+    def _finish_filed(self, job: _FileJob, result: object, error: str | None) -> None:
+        if not isinstance(result, FiledDocument):
+            self.prompt_queue.appendleft(job.inbox_id)
             self._show_next_prompt()
-            self.prompt.show_error(str(exc))
+            self.prompt.show_error(error or _("Não foi possível organizar o ficheiro."))
             self._refresh()
             return
-        if create_task:
+        document = result
+        if job.create_task:
             self.database.add_task(
-                f"Rever {Path(filename).stem}", subject_id, due_date, document.id
+                f"Rever {Path(job.filename).stem}", job.subject_id, job.due_date, document.id
             )
         self.indexer.submit(document)
-        subject = self.database.get_subject(subject_id)
+        subject = self.database.get_subject(job.subject_id)
         self._notify_filed(
             document.current_path.name,
-            f"{subject.name if subject else kind} / {kind}",
+            f"{subject.name if subject else job.kind} / {job.kind}",
         )
         self._refresh()
         QTimer.singleShot(120, self._show_next_prompt)
 
     def _return_item(self, inbox_id: int) -> None:
+        if inbox_id in self._return_in_flight:
+            return
+        self._return_in_flight.add(inbox_id)
         watcher = self.watcher
         observing = watcher is not None and watcher.running
         was_paused = watcher.paused if observing and watcher is not None else False
-        destination: Path | None = None
-        ignore_seconds = 30.0
         if observing and watcher is not None and not was_paused:
             watcher.set_paused(True)
-        try:
-            destination = self.filer.return_to_downloads(inbox_id)
-        except FilingError as exc:
+        job = _ReturnJob(
+            inbox_id=inbox_id,
+            watcher=watcher,
+            unpause=observing and not was_paused,
+        )
+        self._submit_transfer("return", job, lambda: self.filer.return_to_downloads(inbox_id))
+
+    def _finish_returned(self, job: _ReturnJob, result: object, error: str | None) -> None:
+        self._return_in_flight.discard(job.inbox_id)
+        watcher = job.watcher
+        destination: Path | None = result if isinstance(result, Path) else None
+        ignore_seconds = 30.0
+        if error is not None:
             pending_return = None
             with suppress(sqlite3.Error):
                 pending_return = next(
                     (
                         event
                         for event in self.database.list_pending_returns()
-                        if event.inbox_id == inbox_id
+                        if event.inbox_id == job.inbox_id
                     ),
                     None,
                 )
             if pending_return is not None:
                 destination = pending_return.destination_path
                 ignore_seconds = float("inf")
-            item = self.database.get_inbox_item(inbox_id)
+            item = self.database.get_inbox_item(job.inbox_id)
             if item is not None:
-                self.prompt_queue.appendleft(inbox_id)
+                self.prompt_queue.appendleft(job.inbox_id)
                 self._show_next_prompt()
-                self.prompt.show_error(str(exc))
+                self.prompt.show_error(error)
             else:
-                QMessageBox.warning(self.main_window, _("Não foi possível devolver"), str(exc))
-            return
-        finally:
-            if watcher is not None and destination is not None:
-                watcher.ignore_self_move(destination, seconds=ignore_seconds)
-            if observing and watcher is not None and not was_paused:
-                watcher.set_paused(False)
-        if destination is None:  # pragma: no cover - success assigns a path
+                QMessageBox.warning(self.main_window, _("Não foi possível devolver"), error)
+        if watcher is not None and destination is not None:
+            watcher.ignore_self_move(destination, seconds=ignore_seconds)
+        if watcher is not None and job.unpause:
+            watcher.set_paused(False)
+        if error is not None or destination is None:
             return
         self.tray.notify(
             _("Ficheiro devolvido"),
@@ -857,11 +1057,18 @@ class AppController(QObject):
         QTimer.singleShot(120, self._show_next_prompt)
 
     def _undo(self) -> None:
-        try:
-            item = self.filer.undo_latest_filing()
-        except FilingError as exc:
-            QMessageBox.warning(self.main_window, _("Não foi possível desfazer"), str(exc))
+        if self._undo_in_flight:
             return
+        self._undo_in_flight = True
+        self._submit_transfer("undo", _UndoJob(), self.filer.undo_latest_filing)
+
+    def _finish_undone(self, job: _UndoJob, result: object, error: str | None) -> None:
+        del job
+        self._undo_in_flight = False
+        if error is not None:
+            QMessageBox.warning(self.main_window, _("Não foi possível desfazer"), error)
+            return
+        item = result if isinstance(result, InboxItem) else None
         if item is None:
             self.tray.notify(
                 _("Nada para desfazer"),
@@ -1043,35 +1250,92 @@ class AppController(QObject):
             return
         subject_id, kind, create_task, due_date = dialog.values
         subject = next(entry for entry in subjects if entry.id == subject_id)
-        filed = 0
-        handled: list[int] = []
-        for item in items:
-            final_name = render_final_name(
-                self.config.filename_template,
-                subject_name=subject.name,
-                subject_code=subject.code,
-                kind=kind,
-                original_name=item.original_name,
-                when=item.detected_at,
+        if self._bulk_filing_in_flight:
+            self.main_window.inbox_page.set_import_status(
+                _("Já existe uma organização em curso; espera que termine.")
             )
+            return
+        self._bulk_filing_in_flight = True
+        planned = tuple(
+            _BulkItem(
+                inbox_id=item.id,
+                original_name=item.original_name,
+                final_name=render_final_name(
+                    self.config.filename_template,
+                    subject_name=subject.name,
+                    subject_code=subject.code,
+                    kind=kind,
+                    original_name=item.original_name,
+                    when=item.detected_at,
+                ),
+            )
+            for item in items
+        )
+        job = _BulkJob(
+            items=planned,
+            subject_id=subject_id,
+            kind=kind,
+            create_task=create_task,
+            due_date=due_date,
+            failures=tuple(failures),
+        )
+        count = len(planned)
+        self.main_window.inbox_page.set_import_status(
+            (
+                _("A organizar {count} ficheiros…")
+                if count != 1
+                else _("A organizar {count} ficheiro…")
+            ).format(count=count)
+        )
+        self._submit_transfer("bulk", job, lambda: self._execute_bulk(job))
+
+    def _execute_bulk(self, job: _BulkJob) -> _BulkResult:
+        """File one confirmed batch on a worker thread."""
+
+        handled: list[int] = []
+        failures: list[str] = list(job.failures)
+        documents: list[FiledDocument] = []
+        filed = 0
+        for item in job.items:
             try:
-                document = self.filer.file_document(item.id, subject_id, kind, final_name)
+                document = self.filer.file_document(
+                    item.inbox_id, job.subject_id, job.kind, item.final_name
+                )
             except FilingError as exc:
                 failures.append(f"{item.original_name}: {exc}")
                 continue
-            handled.append(item.id)
+            handled.append(item.inbox_id)
             filed += 1
-            if create_task:
+            if job.create_task:
                 self.database.add_task(
                     _("Rever {name}").format(name=Path(item.original_name).stem),
-                    subject_id,
-                    due_date,
+                    job.subject_id,
+                    job.due_date,
                     document.id,
                 )
+            documents.append(document)
+        return _BulkResult(
+            handled=tuple(handled),
+            filed=filed,
+            failures=tuple(failures),
+            documents=tuple(documents),
+        )
+
+    def _finish_bulk(self, job: _BulkJob, result: _BulkResult | None, error: str | None) -> None:
+        del job
+        self._bulk_filing_in_flight = False
+        if result is None:
+            self.main_window.inbox_page.set_import_status(
+                error or _("Não foi possível concluir a organização.")
+            )
+            return
+        for document in result.documents:
             self.indexer.submit(document)
-        self.prompt_queue = deque(item for item in self.prompt_queue if item not in handled)
-        if self.prompt.current_item_id in handled:
+        self.prompt_queue = deque(item for item in self.prompt_queue if item not in result.handled)
+        if self.prompt.current_item_id in result.handled:
             self.prompt.close()
+        filed = result.filed
+        failures = result.failures
         if failures:
             shown = "; ".join(failures[:3])
             if len(failures) > 3:
@@ -1150,6 +1414,9 @@ class AppController(QObject):
         self._manual_import_skipped = 0
         self._manual_import_failed = 0
         self._manual_import_deferred = 0
+        self._manual_import_pending = 0
+        self._manual_import_complete = False
+        self._manual_import_worker_skipped = 0
         self._manual_import_errors.clear()
         self.main_window.inbox_page.set_import_running(False)
 

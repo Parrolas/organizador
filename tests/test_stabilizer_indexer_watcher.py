@@ -332,9 +332,17 @@ def test_ingest_failure_requeues_the_path_for_another_attempt(
     try:
         controller._ingest_download(controller._watcher_generation, path)
 
+        deadline = monotonic() + 10.0
+        while not requeued or not notices:
+            if monotonic() >= deadline:
+                raise AssertionError("timed out waiting for the ingest outcome")
+            qt_app.processEvents()
+            sleep(0.01)
+
         assert requeued == [path]
         assert notices and notices[0][0][0] == "Não foi possível recolher o ficheiro"
     finally:
+        controller._shutdown_transfers()
         controller.indexer.shutdown()
         controller.tray.hide()
         controller.main_window.allow_close = True

@@ -313,6 +313,13 @@ EN_STRINGS: dict[str, str] = {
     "Organizar seleção ({count})": "Organize selection ({count})",
     "Organizar {count} ficheiro": "Organize {count} file",
     "Organizar {count} ficheiros": "Organize {count} files",
+    "A organizar {count} ficheiro…": "Organizing {count} file…",
+    "A organizar {count} ficheiros…": "Organizing {count} files…",
+    "Já existe uma organização em curso; espera que termine.": (
+        "A filing operation is already running; wait for it to finish."
+    ),
+    "Não foi possível concluir a organização.": "Could not complete the filing.",
+    "Não foi possível organizar o ficheiro.": "Could not organize the file",
     "Organização desfeita": "Organization undone",
     "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta.": (
         "An organization that cannot be undone while the file is missing."
@@ -1078,6 +1085,13 @@ ES_STRINGS: dict[str, str] = {
     "Organizar seleção ({count})": "Organizar selección ({count})",
     "Organizar {count} ficheiro": "Organizar {count} archivo",
     "Organizar {count} ficheiros": "Organizar {count} archivos",
+    "A organizar {count} ficheiro…": "Organizando {count} archivo…",
+    "A organizar {count} ficheiros…": "Organizando {count} archivos…",
+    "Já existe uma organização em curso; espera que termine.": (
+        "Ya hay una organización en curso; espera a que termine."
+    ),
+    "Não foi possível concluir a organização.": "No se pudo completar la organización.",
+    "Não foi possível organizar o ficheiro.": "No se pudo organizar el archivo",
     "Organização desfeita": "Organización deshecha",
     "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta.": (
         "Organización que no puede deshacerse mientras falte el archivo."
@@ -1882,6 +1896,13 @@ FR_STRINGS: dict[str, str] = {
     "Organizar seleção ({count})": "Ranger la sélection ({count})",
     "Organizar {count} ficheiro": "Ranger {count} fichier",
     "Organizar {count} ficheiros": "Ranger {count} fichiers",
+    "A organizar {count} ficheiro…": "Rangement de {count} fichier…",
+    "A organizar {count} ficheiros…": "Rangement de {count} fichiers…",
+    "Já existe uma organização em curso; espera que termine.": (
+        "Un rangement est déjà en cours ; attends qu'il se termine."
+    ),
+    "Não foi possível concluir a organização.": "Impossible de terminer le rangement.",
+    "Não foi possível organizar o ficheiro.": "Impossible de ranger le fichier",
     "Organização desfeita": "Rangement annulé",
     "Organização que não pode ser desfeita enquanto o ficheiro estiver em falta.": (
         "Rangement impossible à annuler tant que le fichier est manquant."
