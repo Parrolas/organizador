@@ -23,6 +23,35 @@ from organizador.reconcile import (
 )
 
 
+def test_scan_reports_subjects_sharing_one_windows_folder(
+    app_config: AppConfig, database: Database, subject: Subject
+) -> None:
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO subjects(name, code, color, keywords_json, folder_name, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "CÁLCULO CLONE",
+                "CAL101",
+                "#123456",
+                "[]",
+                "MAT101 - CÁLCULO I",
+                "2026-01-01T00:00:00",
+            ),
+        )
+        connection.commit()
+
+    report = scan(app_config, database)
+
+    assert len(report.subject_folder_collisions) == 1
+    finding = report.subject_folder_collisions[0]
+    assert finding.reason is FindingReason.SUBJECT_FOLDER_COLLISION
+    assert finding in findings(report)
+    assert finding in visible_findings(database, report)
+    assert dismiss_finding(database, finding) is True
+    assert finding not in visible_findings(database, scan(app_config, database))
+
+
 def _snapshot(root: Path) -> dict[Path, bytes]:
     return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 

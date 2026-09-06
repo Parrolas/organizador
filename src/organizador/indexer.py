@@ -14,7 +14,14 @@ from pypdf import PdfReader
 
 from organizador import ocr
 from organizador.db import Database
-from organizador.extractors import OFFICE_SUFFIXES, extract_docx, extract_pptx, extract_xlsx
+from organizador.extractors import (
+    MAX_EXTRACTION_CHARS,
+    OFFICE_SUFFIXES,
+    ExtractionBudget,
+    extract_docx,
+    extract_pptx,
+    extract_xlsx,
+)
 from organizador.models import ExistingDownload, FiledDocument
 
 LOGGER = logging.getLogger(__name__)
@@ -111,10 +118,12 @@ class DocumentIndexer:
             LOGGER.warning("Deferring index because the document is missing or unsafe: %s", path)
             return
         try:
-            current_size = path.stat().st_size
+            details = path.stat()
         except OSError:
             LOGGER.warning("Deferring index because the document cannot be statted: %s", path)
             return
+        current_size = details.st_size
+        current_mtime_ns = details.st_mtime_ns
         if current_size != document.size:
             LOGGER.info("Requeuing index after on-disk change: %s", path)
             self.database.refresh_file_size(
@@ -122,6 +131,7 @@ class DocumentIndexer:
                 current_size,
                 expected_path=document.current_path,
                 expected_record_token=document.record_token,
+                mtime_ns=current_mtime_ns,
             )
             # Let the refill pass queue the refreshed record; otherwise the new
             # size would never be extracted.
@@ -134,7 +144,13 @@ class DocumentIndexer:
         if suffix in INDEXABLE_SUFFIXES and current_size > MAX_INDEX_BYTES:
             LOGGER.warning("Skipping oversized document index: %s", path)
             self._store_name_only(document, subject_name, final_name)
-            self._mark_failed(document, state="too_large", error="")
+            self._mark_failed(
+                document,
+                state="too_large",
+                error="",
+                size=current_size,
+                mtime_ns=current_mtime_ns,
+            )
             return
         try:
             pages = self._extract_text(document, path, suffix)
@@ -158,9 +174,17 @@ class DocumentIndexer:
             capped,
             expected_path=document.current_path,
             expected_record_token=document.record_token,
+            size=current_size,
+            mtime_ns=current_mtime_ns,
         )
         if extract_error is not None:
-            self._mark_failed(document, state="failed", error=extract_error)
+            self._mark_failed(
+                document,
+                state="failed",
+                error=extract_error,
+                size=current_size,
+                mtime_ns=current_mtime_ns,
+            )
 
     def _store_name_only(self, document: FiledDocument, subject_name: str, final_name: str) -> None:
         self.database.replace_document_pages(
@@ -172,13 +196,23 @@ class DocumentIndexer:
             expected_record_token=document.record_token,
         )
 
-    def _mark_failed(self, document: FiledDocument, *, state: str, error: str) -> None:
+    def _mark_failed(
+        self,
+        document: FiledDocument,
+        *,
+        state: str,
+        error: str,
+        size: int | None = None,
+        mtime_ns: int | None = None,
+    ) -> None:
         self.database.mark_document_indexed(
             document.id,
             expected_path=document.current_path,
             expected_record_token=document.record_token,
             index_state=state,
             index_error=error,
+            size=size,
+            mtime_ns=mtime_ns,
         )
 
     def _extract_text(self, document: FiledDocument, path: Path, suffix: str) -> list[str]:
@@ -189,15 +223,18 @@ class DocumentIndexer:
         if suffix == ".pdf":
             return self._extract_pdf(path)
         if suffix in {".txt", ".md", ".csv"}:
-            return [path.read_text(encoding="utf-8", errors="replace")]
+            return [path.read_text(encoding="utf-8", errors="replace")[:MAX_EXTRACTION_CHARS]]
         if suffix == ".ipynb":
             payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
             cells = payload.get("cells", [])
-            return [
-                "".join(str(part) for part in cell.get("source", []))
-                for cell in cells
-                if isinstance(cell, dict)
-            ]
+            budget = ExtractionBudget()
+            texts: list[str] = []
+            for cell in cells:
+                if budget.exhausted:
+                    break
+                if isinstance(cell, dict):
+                    texts.append(budget.take("".join(str(part) for part in cell.get("source", []))))
+            return texts
         if suffix in OFFICE_SUFFIXES:
             if suffix == ".docx":
                 return extract_docx(path)
@@ -213,11 +250,12 @@ class DocumentIndexer:
                 reader.decrypt("")
             except Exception as exc:
                 raise OSError("PDF protegido por palavra-passe.") from exc
+        budget = ExtractionBudget()
         pages: list[str] = []
         for page in reader.pages:
-            if self._stop.is_set():
-                return []
-            pages.append((page.extract_text() or "").strip())
+            if self._stop.is_set() or budget.exhausted:
+                break
+            pages.append(budget.take((page.extract_text() or "").strip()))
         return self._ocr_blank_pages(path, pages)
 
     def _ocr_blank_pages(self, path: Path, pages: list[str]) -> list[str]:

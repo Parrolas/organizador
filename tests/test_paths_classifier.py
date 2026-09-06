@@ -20,7 +20,16 @@ from organizador.paths import (
     sanitise_component,
     sanitise_filename,
     unique_path,
+    windows_folder_key,
 )
+
+
+def test_windows_folder_key_folds_accents_with_case() -> None:
+    assert windows_folder_key("MAT101 - Cálculo I") == windows_folder_key("MAT101 - CÁLCULO I")
+    assert windows_folder_key("Cálculo") == windows_folder_key("calculo")
+    assert windows_folder_key("Física") == windows_folder_key("FISICA")
+    assert windows_folder_key("Cálculo") != windows_folder_key("Álgebra")
+    assert windows_folder_key("Cálculo I") != windows_folder_key("Cálculo II")
 
 
 def test_windows_components_remove_invalid_and_reserved_names() -> None:

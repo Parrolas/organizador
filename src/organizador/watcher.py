@@ -231,6 +231,34 @@ class DownloadWatcher:
             self._pending.add(key)
         self._queue.put((key, candidate))
 
+    def requeue(self, path: Path) -> None:
+        """Return a delivered-but-unmoved file to the stabilizer with backoff.
+
+        The worker marks a candidate done when it emits the ready signal,
+        before the controller actually moves the file. When that move fails,
+        the path stays known and sweeps ignore it; requeueing registers a
+        bounded retry so a transient failure is attempted again.
+        """
+
+        normalised = self._normalise_candidate(path)
+        if normalised is None:
+            return
+        _, key = normalised
+        with self._lock:
+            if key in self._pending:
+                return
+            self._known.add(key)
+            attempt = self._retry_attempts.get(key, 0)
+            if attempt < len(self._retry_delays):
+                self._retry_attempts[key] = attempt + 1
+                self._retry_after[key] = monotonic() + self._retry_delays[attempt]
+            else:
+                # No attempts left: hand over to the exhausted path so a later
+                # sweep notices when the file actually changes.
+                self._retry_after.pop(key, None)
+                self._retry_attempts.pop(key, None)
+                self._retry_exhausted[key] = ExistingDownload.capture(path)
+
     def enqueue_existing(self, candidates: Sequence[ExistingDownload]) -> int:
         """Queue one explicitly confirmed batch while enforcing the fixed safety cap."""
 

@@ -2,6 +2,23 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.11.0 - 2026-09-06
+
+### Fixed
+
+- Edited documents are reconsidered for search: the index now records each
+  file's size and modification time, a startup pass requeues changed files,
+  and the file list offers "Reindexar" for every document, not just failed
+  ones.
+- Text extraction stops at a bounded budget instead of expanding huge Office
+  documents in memory; oversized PDF pages are rendered at a reduced scale
+  or skipped within a pixel ceiling.
+- A temporary ingestion failure now retries automatically with backoff
+  instead of silently ignoring the file.
+- New subjects can no longer claim a folder that another subject already
+  owns under Windows naming rules; restoring a colliding subject is refused,
+  and existing collisions surface as a dismissable startup warning.
+
 ## 0.10.1 - 2026-09-05
 
 ### Fixed

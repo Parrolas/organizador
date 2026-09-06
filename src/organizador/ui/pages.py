@@ -560,6 +560,10 @@ class InboxPage(QWidget):
             FindingReason.UNSAFE_PATH: _(
                 "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado."
             ),
+            FindingReason.SUBJECT_FOLDER_COLLISION: _(
+                "Duas disciplinas partilham a mesma pasta no Windows. Os documentos "
+                "podem misturar-se; arquiva uma delas se for um engano."
+            ),
         }
         row = QFrame()
         row.setObjectName("ListRow")

@@ -60,6 +60,130 @@ def test_subject_update_and_archive(database: Database, subject: Subject) -> Non
     assert database.find_active_subject_conflicts(subject.id) == ()
 
 
+def test_legacy_database_gains_index_fingerprint_column(
+    database: Database,
+) -> None:
+    with database.connect() as connection:
+        connection.execute("ALTER TABLE files DROP COLUMN mtime_ns")
+        connection.commit()
+
+    assert "files.mtime_ns" in database.inspect_schema().missing_additions
+    database.initialize()
+
+    with database.connect() as connection:
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(files)").fetchall()
+        }
+    assert "mtime_ns" in columns
+    assert database.inspect_schema().missing_additions == ()
+
+
+def _indexed_text_file(database: Database, subject: Subject, path: Path, text: str) -> int:
+    path.write_text(text, encoding="utf-8")
+    item = database.add_inbox_item(
+        path, path.parent / "dl" / path.name, path.name, path.stat().st_size
+    )
+    filed = database.record_filing(item.id, subject.id, "Outros", path)
+    details = path.stat()
+    database.replace_document_pages(
+        filed.id,
+        subject.name,
+        path.name,
+        [text],
+        expected_path=path,
+        size=details.st_size,
+        mtime_ns=details.st_mtime_ns,
+    )
+    return filed.id
+
+
+def test_reset_stale_index_fingerprints_detects_edited_files(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "notas.txt"
+    file_id = _indexed_text_file(database, subject, path, "versão original")
+
+    assert database.reset_stale_index_fingerprints() == 0
+
+    path.write_text("versão original revista e alargada", encoding="utf-8")
+
+    assert database.reset_stale_index_fingerprints() == 1
+    refreshed = database.get_file(file_id)
+    assert refreshed is not None
+    assert refreshed.indexed_at is None
+    assert refreshed.index_state == ""
+    assert database.reset_stale_index_fingerprints() == 0
+
+
+def test_reset_stale_index_fingerprints_detects_same_size_edits(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    import os
+
+    path = tmp_path / "constante.txt"
+    file_id = _indexed_text_file(database, subject, path, "abcdefgh")
+
+    path.write_text("ABCDEFGH", encoding="utf-8")
+    os.utime(path, ns=(0, 0))
+
+    assert database.reset_stale_index_fingerprints() == 1
+    assert database.get_file(file_id) is not None
+
+
+def test_reset_stale_index_fingerprints_ignores_missing_files(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "sumido.txt"
+    file_id = _indexed_text_file(database, subject, path, "texto")
+    path.unlink()
+
+    assert database.reset_stale_index_fingerprints() == 0
+    assert database.get_file(file_id) is not None
+
+
+def test_add_subject_rejects_windows_folder_collision(database: Database, subject: Subject) -> None:
+    with pytest.raises(ValueError, match="já pertence"):
+        database.add_subject("Cópia", "MAT101", "#123456", (), "MAT101 - CÁLCULO I")
+
+    distinct = database.add_subject("Álgebra", "ALG101", "#123456", (), "ALG101 - Álgebra")
+
+    assert distinct.folder_name == "ALG101 - Álgebra"
+    assert database.count_subjects() == 2
+
+
+def test_subject_folder_conflicts_support_exclusion_and_restore_checks(
+    database: Database, subject: Subject
+) -> None:
+    own = database.find_subject_folder_conflicts(subject.folder_name)
+    assert own == (subject.name,)
+    assert database.find_subject_folder_conflicts(subject.folder_name, exclude_id=subject.id) == ()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO subjects(name, code, color, keywords_json, folder_name, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "CÁLCULO CLONE",
+                "CAL101",
+                "#123456",
+                "[]",
+                "MAT101 - CÁLCULO I",
+                "2026-01-01T00:00:00",
+            ),
+        )
+        connection.commit()
+        clone_id = int(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
+    try:
+        active_conflicts = database.find_subject_folder_conflicts(
+            subject.folder_name, active_only=True
+        )
+        assert sorted(active_conflicts) == sorted((subject.name, "CÁLCULO CLONE"))
+        assert database.find_active_subject_conflicts(clone_id) == (subject.name,)
+        database.archive_subject(clone_id)
+        assert database.find_active_subject_conflicts(clone_id) == (subject.name,)
+    finally:
+        database.delete_subject(clone_id)
+
+
 def test_unused_subject_can_be_deleted_during_setup_rollback(
     database: Database, subject: Subject
 ) -> None:

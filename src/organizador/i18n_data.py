@@ -277,6 +277,10 @@ EN_STRINGS: dict[str, str] = {
     "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado.": (
         "The recorded path is no longer a regular file. It was not followed or changed."
     ),
+    "Duas disciplinas partilham a mesma pasta no Windows. Os documentos podem misturar-se; arquiva uma delas se for um engano.": (
+        "Two subjects share the same folder on Windows. Documents may get mixed up; "
+        "archive one of them if it was a mistake."
+    ),
     "O ficheiro ou o registo mudou desde a verificação. Nada foi removido.": (
         "The file or the record changed since the scan. Nothing was removed."
     ),
@@ -1037,6 +1041,10 @@ ES_STRINGS: dict[str, str] = {
     "Não é da universidade": "No es de la universidad",
     "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado.": (
         "La ruta registrada ya no es un archivo normal. No fue seguida ni alterada."
+    ),
+    "Duas disciplinas partilham a mesma pasta no Windows. Os documentos podem misturar-se; arquiva uma delas se for um engano.": (
+        "Dos asignaturas comparten la misma carpeta en Windows. Los documentos pueden "
+        "mezclarse; archiva una de ellas si fue un error."
     ),
     "O ficheiro ou o registo mudou desde a verificação. Nada foi removido.": (
         "El archivo o el registro cambió desde la comprobación. Nada fue eliminado."
@@ -1836,6 +1844,10 @@ FR_STRINGS: dict[str, str] = {
     "Não é da universidade": "Pas pour l'université",
     "O caminho registado já não é um ficheiro normal. Não foi seguido nem alterado.": (
         "Le chemin enregistré n'est plus un fichier normal. Il n'a été ni suivi ni modifié."
+    ),
+    "Duas disciplinas partilham a mesma pasta no Windows. Os documentos podem misturar-se; arquiva uma delas se for um engano.": (
+        "Deux matières partagent le même dossier sur Windows. Les documents peuvent se "
+        "mélanger ; archive l'une d'elles s'il s'agit d'une erreur."
     ),
     "O ficheiro ou o registo mudou desde a verificação. Nada foi removido.": (
         "Le fichier ou l'enregistrement a changé depuis la vérification. Rien n'a été supprimé."

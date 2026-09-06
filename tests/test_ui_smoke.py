@@ -1523,6 +1523,41 @@ def test_subject_files_dialog_offers_reindex_for_failed_documents(
     dialog.close()
 
 
+def test_subject_files_dialog_offers_reindex_for_healthy_documents(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+) -> None:
+    del qt_app
+    path = app_config.university_root / subject.folder_name / "Outros" / "saudavel.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("derivadas saudáveis", encoding="utf-8")
+    candidate = ExistingDownload.capture(path)
+    assert candidate is not None
+    filed = database.adopt_subject_file(candidate, subject.id, "Outros")
+    document = database.get_file(filed.id)
+    assert document is not None
+    database.replace_document_pages(
+        filed.id, subject.name, path.name, ["derivadas saudáveis"], expected_path=path
+    )
+    stored = database.get_file(filed.id)
+    assert stored is not None
+    assert stored.index_state == ""
+
+    dialog = SubjectFilesDialog(subject, [dataclasses.replace(stored)], app_config.university_root)
+    requested: list[int] = []
+    dialog.reindex_requested.connect(requested.append)
+    buttons = {control.text(): control for control in dialog.findChildren(QPushButton)}
+
+    assert "Reindexar" in buttons
+    buttons["Reindexar"].click()
+
+    assert requested == [filed.id]
+    dialog.allow_close = True
+    dialog.close()
+
+
 def _search_combo_texts(combo: QComboBox) -> list[str]:
     return [combo.itemText(index) for index in range(combo.count())]
 

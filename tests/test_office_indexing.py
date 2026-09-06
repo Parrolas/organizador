@@ -13,7 +13,12 @@ from pptx import Presentation
 from pptx.util import Inches
 
 from organizador.db import Database
-from organizador.extractors import extract_docx, extract_pptx, extract_xlsx
+from organizador.extractors import (
+    ExtractionBudget,
+    extract_docx,
+    extract_pptx,
+    extract_xlsx,
+)
 from organizador.indexer import MAX_INDEX_BYTES, DocumentIndexer
 from organizador.models import FiledDocument, Subject
 
@@ -174,3 +179,39 @@ def test_oversized_office_document_is_not_loaded(
     refreshed = database.get_file(document.id)
     assert refreshed is not None
     assert refreshed.indexed_at is not None
+
+
+def test_extraction_budget_reports_exhaustion() -> None:
+    budget = ExtractionBudget(10)
+
+    assert budget.take("12345") == "12345"
+    assert budget.exhausted is False
+    assert budget.take("1234567890") == "12345"
+    assert budget.exhausted is True
+    assert budget.take("more") == ""
+
+
+def test_long_docx_stops_accumulating_at_the_budget(tmp_path: Path) -> None:
+    document = Document()
+    for _ in range(5):
+        document.add_paragraph("x" * 1000)
+    path = tmp_path / "grande.docx"
+    document.save(path)
+
+    pages = extract_docx(path, max_chars=2500)
+
+    assert pages[0].count("x") == 2500
+    assert sum(len(page) for page in pages) == 2500 + 2
+
+
+def test_long_workbook_stops_accumulating_at_the_budget(tmp_path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    for index in range(50):
+        sheet.append((f"linha {index}", "y" * 1000))
+    path = tmp_path / "grande.xlsx"
+    workbook.save(path)
+
+    pages = extract_xlsx(path, max_chars=1500)
+
+    assert sum(len(page) for page in pages) <= 1500 + 60

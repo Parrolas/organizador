@@ -8,8 +8,10 @@ from pathlib import Path
 from stat import S_IFLNK
 from threading import Event
 from time import monotonic, sleep
+from types import SimpleNamespace
 
 import pytest
+from PySide6.QtWidgets import QApplication
 from watchdog.events import FileCreatedEvent, FileMovedEvent
 
 from organizador.config import AppConfig
@@ -257,6 +259,88 @@ def test_exhausted_retry_budget_resets_only_after_file_identity_changes(
         watcher.stop()
 
 
+def test_requeue_schedules_bounded_ingest_retries(
+    app_config: AppConfig,
+) -> None:
+    candidate = app_config.downloads_dir / "transient.pdf"
+    candidate.write_bytes(b"delivered but unmoved")
+    watcher = DownloadWatcher(app_config, lambda _path: None, retry_delays=(60.0, 60.0))
+    try:
+        watcher.requeue(candidate)
+        assert len(watcher._retry_after) == 1
+        key = next(iter(watcher._retry_after))
+        assert watcher._retry_attempts[key] == 1
+
+        watcher.requeue(candidate)
+        assert watcher._retry_attempts[key] == 2
+
+        watcher.requeue(candidate)
+        assert key not in watcher._retry_after
+        assert key not in watcher._retry_attempts
+        assert key in watcher._retry_exhausted
+    finally:
+        watcher.stop()
+
+
+def test_expired_requeue_reaches_pending_through_the_sweep(
+    app_config: AppConfig,
+) -> None:
+    candidate = app_config.downloads_dir / "retry-me.pdf"
+    candidate.write_bytes(b"delivered but unmoved")
+    watcher = DownloadWatcher(app_config, lambda _path: None, retry_delays=(60.0,))
+    try:
+        watcher.requeue(candidate)
+        key = next(iter(watcher._retry_after))
+        watcher._retry_after[key] = 0.0
+
+        watcher._sweep_once()
+
+        assert key in watcher._pending
+        assert not watcher._queue.empty()
+    finally:
+        watcher.stop()
+
+
+def test_ingest_failure_requeues_the_path_for_another_attempt(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from organizador.controller import AppController
+    from organizador.filer import FilingError
+    from organizador.ui.tray import TrayIcon
+
+    del subject
+    controller = AppController(app_config)
+    notices: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        controller.tray, "notify", lambda *args, **kwargs: notices.append((args, kwargs))
+    )
+    monkeypatch.setattr(TrayIcon, "available", property(lambda self: True))
+    requeued: list[Path] = []
+    controller.watcher = SimpleNamespace(requeue=requeued.append)  # type: ignore[assignment]
+
+    def fail_ingest(path: Path, expected: object = None) -> None:
+        raise FilingError("disco temporariamente indisponível")
+
+    monkeypatch.setattr(controller.filer, "ingest", fail_ingest)
+    path = app_config.downloads_dir / "falha.pdf"
+    path.write_bytes(b"temporary ingestion failure")
+    qt_app.processEvents()
+    try:
+        controller._ingest_download(controller._watcher_generation, path)
+
+        assert requeued == [path]
+        assert notices and notices[0][0][0] == "Não foi possível recolher o ficheiro"
+    finally:
+        controller.indexer.shutdown()
+        controller.tray.hide()
+        controller.main_window.allow_close = True
+        controller.main_window.close()
+
+
 def test_confirmed_existing_batch_bypasses_pause_and_enforces_cap(
     app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -335,6 +419,32 @@ def test_indexer_rejects_new_work_after_shutdown(
     refreshed = database.get_file(file_id)
     assert refreshed is not None
     assert refreshed.indexed_at is None
+
+
+def test_edited_document_is_reconsidered_for_search(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    path = tmp_path / "editado.txt"
+    path.write_text("fotossintese original", encoding="utf-8")
+    file_id = _file_record(database, subject, path)
+    indexer = DocumentIndexer(database)
+    try:
+        document = database.get_file(file_id)
+        assert document is not None
+        indexer.index_document(document)
+        assert database.search("fotossintese")
+        assert not database.search("respiracao")
+
+        path.write_text("respiracao revista", encoding="utf-8")
+        assert database.reset_stale_index_fingerprints() == 1
+
+        reconsidered = database.get_file(file_id)
+        assert reconsidered is not None
+        indexer.index_document(reconsidered)
+        assert database.search("respiracao")
+        assert not database.search("fotossintese")
+    finally:
+        indexer.shutdown()
 
 
 def test_missing_document_remains_pending_for_future_indexing(

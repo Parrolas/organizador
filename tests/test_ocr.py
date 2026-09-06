@@ -164,6 +164,38 @@ def test_ocr_blank_pages_keeps_true_page_mapping_on_render_failure(
     assert filled == ["UM", "", "TRES"]
 
 
+def test_render_pdf_pages_clamps_oversized_pages(tmp_path: Path) -> None:
+    import io
+
+    from PIL import Image
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=3000, height=4000)
+    path = tmp_path / "largo.pdf"
+    with path.open("wb") as handle:
+        writer.write(handle)
+
+    rendered = ocr.render_pdf_pages(path)
+
+    image = Image.open(io.BytesIO(rendered[0]))
+    width, height = image.size
+    assert width * height <= ocr.MAX_RENDER_PIXELS
+    assert (width, height) == (3000, 4000)
+
+
+def test_render_pdf_pages_skips_unusable_pages(tmp_path: Path) -> None:
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100000, height=100000)
+    path = tmp_path / "gigante.pdf"
+    with path.open("wb") as handle:
+        writer.write(handle)
+
+    assert ocr.render_pdf_pages(path) == {}
+
+
 def test_indexer_never_calls_ocr_without_provider(
     database: Database, subject: Subject, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

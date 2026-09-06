@@ -19,6 +19,9 @@ LOGGER = logging.getLogger(__name__)
 
 MAX_OCR_PAGES = 40
 RENDER_SCALE = 2.0
+MIN_RENDER_SCALE = 0.5
+# Ceiling for one rendered page so an oversized page cannot exhaust memory.
+MAX_RENDER_PIXELS = 12_000_000
 
 LANGUAGE_TAGS: dict[str, tuple[str, ...]] = {
     "pt": ("pt-PT", "pt-BR"),
@@ -168,7 +171,12 @@ def render_pdf_pages(
     try:
         for index in range(min(len(document), max_pages)):
             try:
-                bitmap = document[index].render(scale=scale)
+                page = document[index]
+                render_scale = _render_scale(page, scale)
+                if render_scale is None:
+                    LOGGER.debug("Skipping oversized page %d of %s", index, path)
+                    continue
+                bitmap = page.render(scale=render_scale)
                 image = bitmap.to_pil()
                 buffer = io.BytesIO()
                 image.save(buffer, format="PNG")
@@ -178,6 +186,25 @@ def render_pdf_pages(
     finally:
         document.close()
     return rendered
+
+
+def _render_scale(page: Any, scale: float) -> float | None:
+    """Return a budget-respecting render scale, or ``None`` when unusable.
+
+    Pages that cannot be rendered legibly within the pixel budget are
+    skipped instead of exhausting memory.
+    """
+
+    try:
+        width_pt, height_pt = page.get_size()
+        pixels = float(width_pt) * float(height_pt) * scale * scale
+    except Exception:
+        LOGGER.debug("Could not read a PDF page size for scale clamping")
+        return scale
+    if pixels <= MAX_RENDER_PIXELS:
+        return scale
+    clamped = scale * (MAX_RENDER_PIXELS / pixels) ** 0.5
+    return clamped if clamped >= MIN_RENDER_SCALE else None
 
 
 def ocr_blank_pages(

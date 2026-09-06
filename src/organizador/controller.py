@@ -228,6 +228,9 @@ class AppController(QObject):
         try:
             report = scan_reconciliation(self.config, self.database)
             outcome = apply_reconciliation(self.database, report)
+            stale = self.database.reset_stale_index_fingerprints()
+            if stale:
+                LOGGER.info("Startup requeued %s edited document(s) for indexing", stale)
             subjects = self.database.list_subjects()
             for item in outcome.recovered_items:
                 guess = self._filing_guess(item.original_name, subjects)
@@ -432,6 +435,8 @@ class AppController(QObject):
                 self._manual_import_errors.append(f"{path.name}: {exc}")
             else:
                 self.tray.notify(_("Não foi possível recolher o ficheiro"), str(exc))
+                if self.watcher is not None:
+                    self.watcher.requeue(path)
             return
         if item is None:
             if manual_candidate is not None:
@@ -886,6 +891,9 @@ class AppController(QObject):
         try:
             subject = self.database.add_subject(name, code, color, keywords, folder)
             self.filer.ensure_subject_structure(subject)
+        except ValueError as exc:
+            QMessageBox.warning(self.main_window, _("Não foi possível criar"), str(exc))
+            return
         except (sqlite3.IntegrityError, OSError) as exc:
             QMessageBox.warning(
                 self.main_window,

@@ -80,6 +80,7 @@ class FindingReason(StrEnum):
     PENDING_UNDO_DESTINATION = "pending_undo_destination"
     LEGACY_INTERRUPTED_UNDO = "legacy_interrupted_undo"
     UNSAFE_PATH = "unsafe_path"
+    SUBJECT_FOLDER_COLLISION = "subject_folder_collision"
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +236,7 @@ class ReconciliationReport:
     legacy_interrupted_undos: tuple[InterruptedUndo, ...]
     unsafe_paths: tuple[Path, ...]
     untracked_subject_candidates: tuple[ExistingDownload, ...] = ()
+    subject_folder_collisions: tuple[ReconciliationFinding, ...] = ()
     truncated: bool = False
     incomplete: bool = False
 
@@ -254,6 +256,7 @@ class ReconciliationReport:
             + len(self.pending_undo_events)
             + len(self.legacy_interrupted_undos)
             + len(self.unsafe_paths)
+            + len(self.subject_folder_collisions)
         )
 
 

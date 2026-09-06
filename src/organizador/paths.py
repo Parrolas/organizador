@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import unicodedata
 from ctypes import wintypes
 from pathlib import Path
 from stat import S_ISREG
@@ -73,6 +74,23 @@ def normalise_path_key(path: Path) -> str:
     except (OSError, RuntimeError):
         resolved = path.absolute()
     return os.path.normcase(os.path.normpath(os.fspath(resolved)))
+
+
+def windows_folder_key(value: str) -> str:
+    """Return a comparison key matching Windows folder-name semantics.
+
+    NTFS compares names case-insensitively with ASCII-only accent handling
+    in the database but the file system folds accents with case
+    (``Cálculo`` and ``CÁLCULO`` resolve to the same directory), so folder
+    names must be compared after Unicode decomposition, diacritic removal
+    and case folding.
+    """
+
+    decomposed = unicodedata.normalize("NFKD", value)
+    stripped = "".join(
+        character for character in decomposed if unicodedata.category(character) != "Mn"
+    )
+    return stripped.casefold()
 
 
 def sanitise_component(value: str, *, fallback: str = "Sem nome", limit: int = 120) -> str:

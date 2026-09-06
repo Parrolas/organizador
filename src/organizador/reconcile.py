@@ -23,7 +23,7 @@ from organizador.models import (
     ReconciliationOutcome,
     ReconciliationReport,
 )
-from organizador.paths import normalise_path_key
+from organizador.paths import normalise_path_key, windows_folder_key
 
 LOGGER = logging.getLogger(__name__)
 SCAN_LIMIT = 500
@@ -37,6 +37,7 @@ DISMISSIBLE_FINDING_REASONS = frozenset(
         FindingReason.MISSING_DOCUMENT,
         FindingReason.BROKEN_UNDO_EVENT,
         FindingReason.UNSAFE_PATH,
+        FindingReason.SUBJECT_FOLDER_COLLISION,
     }
 )
 
@@ -178,6 +179,7 @@ def scan(config: AppConfig, database: Database) -> ReconciliationReport:
         for path in (event.source_path, event.destination_path):
             if _probe(path, state) is _ProbeState.UNSAFE:
                 unsafe_paths.add(path)
+    subject_folder_collisions = _subject_folder_collision_findings(config, database)
     return ReconciliationReport(
         inbox_orphans=tuple(
             candidate
@@ -195,9 +197,38 @@ def scan(config: AppConfig, database: Database) -> ReconciliationReport:
         legacy_interrupted_undos=tuple(legacy_undos),
         unsafe_paths=tuple(sorted(unsafe_paths, key=lambda path: str(path).casefold())),
         untracked_subject_candidates=tuple(untracked_subject_candidates),
+        subject_folder_collisions=subject_folder_collisions,
         truncated=state.truncated,
         incomplete=state.incomplete,
     )
+
+
+def _subject_folder_collision_findings(
+    config: AppConfig, database: Database
+) -> tuple[ReconciliationFinding, ...]:
+    """Flag active subjects whose folders collide under Windows name rules.
+
+    One finding per colliding folder keeps dismissals coherent: the reviewed
+    key covers the shared path, not each subject individually.
+    """
+
+    by_key: dict[str, list[str]] = {}
+    for subject in database.list_subjects(active_only=True):
+        by_key.setdefault(windows_folder_key(subject.folder_name), []).append(subject.name)
+    result: list[ReconciliationFinding] = []
+    for key in sorted(by_key):
+        names = sorted(by_key[key])
+        if len(names) < 2:
+            continue
+        folder = config.university_root / by_key[key][0]
+        result.append(
+            ReconciliationFinding(
+                folder,
+                FindingReason.SUBJECT_FOLDER_COLLISION,
+                document=None,
+            )
+        )
+    return tuple(result)
 
 
 def apply(database: Database, report: ReconciliationReport) -> ReconciliationOutcome:
@@ -424,6 +455,7 @@ def findings(report: ReconciliationReport) -> tuple[ReconciliationFinding, ...]:
     result.extend(
         ReconciliationFinding(path, FindingReason.UNSAFE_PATH) for path in report.unsafe_paths
     )
+    result.extend(report.subject_folder_collisions)
     return tuple(result)
 
 

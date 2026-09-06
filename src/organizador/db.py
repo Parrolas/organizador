@@ -24,7 +24,7 @@ from organizador.models import (
     StudyTask,
     Subject,
 )
-from organizador.paths import normalise_path_key
+from organizador.paths import normalise_path_key, windows_folder_key
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_VERSION = 6
@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS files (
     current_path TEXT NOT NULL UNIQUE,
     original_path TEXT NOT NULL,
     size INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL DEFAULT 0,
     filed_at TEXT NOT NULL,
     indexed_at TEXT,
     origin TEXT NOT NULL DEFAULT 'filed' CHECK (origin IN ('filed', 'adopted')),
@@ -214,7 +215,7 @@ _EXPECTED_INDEXES = (
 )
 _ADDITIVE_COLUMNS = {
     "events": ("subject_id", "kind"),
-    "files": ("origin", "record_token", "catalog_state", "index_state", "index_error"),
+    "files": ("origin", "record_token", "catalog_state", "index_state", "index_error", "mtime_ns"),
     "tasks": ("reminder_lead_days", "last_notified_on"),
 }
 
@@ -493,6 +494,8 @@ class Database:
             connection.execute("ALTER TABLE files ADD COLUMN index_state TEXT NOT NULL DEFAULT ''")
         if "index_error" not in columns:
             connection.execute("ALTER TABLE files ADD COLUMN index_error TEXT NOT NULL DEFAULT ''")
+        if "mtime_ns" not in columns:
+            connection.execute("ALTER TABLE files ADD COLUMN mtime_ns INTEGER NOT NULL DEFAULT 0")
 
     @staticmethod
     def _prepare_search_reindex(connection: sqlite3.Connection) -> None:
@@ -512,6 +515,12 @@ class Database:
         """Create and return a subject."""
 
         cleaned_keywords = tuple(dict.fromkeys(item.strip() for item in keywords if item.strip()))
+        conflicts = self.find_subject_folder_conflicts(folder_name)
+        if conflicts:
+            raise ValueError(
+                "A pasta desta disciplina já pertence a outra disciplina no Windows: "
+                f"{', '.join(conflicts)}. Escolhe um nome ou código que dê outra pasta."
+            )
         with self.connect() as connection:
             cursor = connection.execute(
                 """
@@ -535,6 +544,35 @@ class Database:
         if subject is None:  # pragma: no cover - defensive database invariant
             raise RuntimeError("A disciplina foi criada mas não pôde ser lida.")
         return subject
+
+    def find_subject_folder_conflicts(
+        self,
+        folder_name: str,
+        *,
+        exclude_id: int | None = None,
+        active_only: bool = False,
+    ) -> tuple[str, ...]:
+        """Return subject names whose folder resolves like ``folder_name`` on Windows.
+
+        SQLite uniqueness is ASCII-only, but NTFS folds accents with case, so
+        ``Cálculo`` and ``CÁLCULO`` would share one directory. Archived
+        subjects still reserve their folders because their documents keep
+        living in them.
+        """
+
+        candidate = windows_folder_key(folder_name)
+        query = "SELECT id, name, folder_name FROM subjects"
+        if active_only:
+            query += " WHERE active = 1"
+        conflicts: list[str] = []
+        with self.connect() as connection:
+            rows = connection.execute(query).fetchall()
+        for row in rows:
+            if exclude_id is not None and int(row["id"]) == exclude_id:
+                continue
+            if windows_folder_key(str(row["folder_name"])) == candidate:
+                conflicts.append(str(row["name"]))
+        return tuple(sorted(conflicts))
 
     def update_subject(
         self,
@@ -605,7 +643,13 @@ class Database:
                 """,
                 (subject_id, subject.name, subject.folder_name),
             ).fetchall()
-        return tuple(str(row["name"]) for row in rows)
+        conflicts = {str(row["name"]) for row in rows}
+        conflicts.update(
+            self.find_subject_folder_conflicts(
+                subject.folder_name, exclude_id=subject_id, active_only=True
+            )
+        )
+        return tuple(sorted(conflicts))
 
     def delete_subject(self, subject_id: int) -> None:
         """Delete an unused subject while rolling back failed first-run setup."""
@@ -1817,32 +1861,40 @@ class Database:
         *,
         expected_path: Path | None = None,
         expected_record_token: str | None = None,
+        size: int | None = None,
+        mtime_ns: int | None = None,
     ) -> None:
         """Replace all indexed pages for a document."""
 
+        assignment = "indexed_at = ?, index_state = '', index_error = ''"
+        values: list[object] = [_now()]
+        if size is not None and mtime_ns is not None:
+            assignment += ", size = ?, mtime_ns = ?"
+            values += [size, mtime_ns]
         with self.connect() as connection:
             if expected_path is not None:
                 token_clause = " AND record_token = ?" if expected_record_token is not None else ""
-                parameters: tuple[object, ...] = (_now(), file_id, str(expected_path))
+                values += [file_id, str(expected_path)]
                 if expected_record_token is not None:
-                    parameters += (expected_record_token,)
+                    values.append(expected_record_token)
                 updated = connection.execute(
                     f"""
-                    UPDATE files SET indexed_at = ?, index_state = '', index_error = ''
+                    UPDATE files SET {assignment}
                     WHERE id = ? AND current_path = ?{token_clause}
                       AND catalog_state = 'active'
                     """,
-                    parameters,
+                    tuple(values),
                 )
                 if updated.rowcount != 1:
                     return
             else:
+                values.append(file_id)
                 connection.execute(
-                    """
-                    UPDATE files SET indexed_at = ?, index_state = '', index_error = ''
+                    f"""
+                    UPDATE files SET {assignment}
                     WHERE id = ? AND catalog_state = 'active'
                     """,
-                    (_now(), file_id),
+                    tuple(values),
                 )
             connection.execute("DELETE FROM document_pages WHERE file_id = ?", (str(file_id),))
             connection.executemany(
@@ -1866,36 +1918,38 @@ class Database:
         expected_record_token: str | None = None,
         index_state: str = "",
         index_error: str = "",
+        size: int | None = None,
+        mtime_ns: int | None = None,
     ) -> None:
         """Mark a document handled even when it contains no extractable text."""
 
+        assignment = "indexed_at = ?, index_state = ?, index_error = ?"
+        values: list[object] = [_now(), index_state, index_error]
+        if size is not None and mtime_ns is not None:
+            assignment += ", size = ?, mtime_ns = ?"
+            values += [size, mtime_ns]
         with self.connect() as connection:
             if expected_path is not None:
                 token_clause = " AND record_token = ?" if expected_record_token is not None else ""
-                parameters: tuple[object, ...] = (
-                    _now(),
-                    index_state,
-                    index_error,
-                    file_id,
-                    str(expected_path),
-                )
+                values += [file_id, str(expected_path)]
                 if expected_record_token is not None:
-                    parameters += (expected_record_token,)
+                    values.append(expected_record_token)
                 connection.execute(
                     f"""
-                    UPDATE files SET indexed_at = ?, index_state = ?, index_error = ?
+                    UPDATE files SET {assignment}
                     WHERE id = ? AND current_path = ?{token_clause}
                       AND catalog_state = 'active'
                     """,
-                    parameters,
+                    tuple(values),
                 )
             else:
+                values.append(file_id)
                 connection.execute(
-                    """
-                    UPDATE files SET indexed_at = ?, index_state = ?, index_error = ?
+                    f"""
+                    UPDATE files SET {assignment}
                     WHERE id = ? AND catalog_state = 'active'
                     """,
-                    (_now(), index_state, index_error, file_id),
+                    tuple(values),
                 )
             connection.commit()
 
@@ -1977,36 +2031,79 @@ class Database:
         *,
         expected_path: Path | None = None,
         expected_record_token: str | None = None,
+        mtime_ns: int | None = None,
     ) -> None:
         """Record a new on-disk size and requeue the document for indexing."""
 
+        assignment = "size = ?, indexed_at = NULL"
+        values: list[object] = [size]
+        if mtime_ns is not None:
+            assignment += ", mtime_ns = ?"
+            values.append(mtime_ns)
         with self.connect() as connection:
             if expected_path is not None:
                 token_clause = " AND record_token = ?" if expected_record_token is not None else ""
-                parameters: tuple[object, ...] = (
-                    size,
-                    file_id,
-                    str(expected_path),
-                )
+                values += [file_id, str(expected_path)]
                 if expected_record_token is not None:
-                    parameters += (expected_record_token,)
+                    values.append(expected_record_token)
                 connection.execute(
                     f"""
-                    UPDATE files SET size = ?, indexed_at = NULL
+                    UPDATE files SET {assignment}
                     WHERE id = ? AND current_path = ?{token_clause}
                       AND catalog_state = 'active'
                     """,
-                    parameters,
+                    tuple(values),
                 )
             else:
+                values.append(file_id)
                 connection.execute(
-                    """
-                    UPDATE files SET size = ?, indexed_at = NULL
+                    f"""
+                    UPDATE files SET {assignment}
                     WHERE id = ? AND catalog_state = 'active'
                     """,
-                    (size, file_id),
+                    tuple(values),
                 )
             connection.commit()
+
+    def reset_stale_index_fingerprints(self) -> int:
+        """Requeue indexed documents whose file changed since extraction.
+
+        Startup calls this before the indexer refill pass so edited documents
+        are reconsidered instead of serving stale search text forever.
+        """
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, current_path, size, mtime_ns FROM files
+                WHERE catalog_state = 'active' AND indexed_at IS NOT NULL
+                """
+            ).fetchall()
+        reset = 0
+        for row in rows:
+            file_id = int(row["id"])
+            path = Path(str(row["current_path"]))
+            try:
+                details = path.stat()
+            except OSError:
+                continue  # missing files belong to reconciliation, not here
+            if int(details.st_size) == int(row["size"]) and int(details.st_mtime_ns) == int(
+                row["mtime_ns"]
+            ):
+                continue
+            with self.connect() as connection:
+                connection.execute(
+                    """
+                    UPDATE files
+                    SET size = ?, mtime_ns = ?, indexed_at = NULL,
+                        index_state = '', index_error = ''
+                    WHERE id = ? AND catalog_state = 'active'
+                    """,
+                    (int(details.st_size), int(details.st_mtime_ns), file_id),
+                )
+                connection.commit()
+            reset += 1
+        return reset
 
     def search(
         self,
