@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -14,6 +15,31 @@ OFFICE_SUFFIXES = frozenset({".docx", ".pptx", ".xlsx"})
 # its own limit afterwards, but extraction must stop early: a few kilobytes
 # of compressed Office XML can expand to millions of characters.
 MAX_EXTRACTION_CHARS = 2_000_000
+# Office packages are zip archives; the compressed size says nothing about
+# what the parsers must read into memory. Refuse bomb-shaped packages before
+# python-docx/pptx/openpyxl ever open them.
+MAX_OFFICE_EXPANDED_BYTES = 256 * 1024 * 1024
+MAX_OFFICE_MEMBERS = 10_000
+
+
+def office_expanded_size(path: Path) -> tuple[int, int] | None:
+    """Return the declared ``(uncompressed bytes, member count)`` of a package.
+
+    Failures return ``None`` so unreadable documents reach the normal parser
+    error path instead of being silently skipped.
+    """
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+    except (OSError, zipfile.BadZipFile):
+        return None
+    total = 0
+    for info in members:
+        if info.file_size < 0:
+            return None
+        total += info.file_size
+    return total, len(members)
 
 
 class ExtractionBudget:

@@ -1940,3 +1940,104 @@ def test_handshake_activation_failure_restores_pending_migration(
     finally:
         updater.abort_update_transaction(transaction)
         _close_controller(qt_app, controller)
+
+
+def test_handshake_acknowledges_health_before_closing_data_rollback(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from organizador.controller import StartupState
+    from organizador.recovery import RecoveryCoordinator
+
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        with controller.database.connect() as connection:
+            connection.execute("ALTER TABLE tasks DROP COLUMN reminder_lead_days")
+            connection.commit()
+        coordinator = RecoveryCoordinator(app_config.data_dir)
+        bundle = coordinator.prepare_migration()
+        assert bundle is not None
+
+        app = tmp_path / "Handshake App"
+        (app / "_internal").mkdir(parents=True)
+        (app / "Organizador.exe").write_bytes(b"candidate")
+        transaction = updater.create_update_transaction(app, "0.6.3", data_dir=app_config.data_dir)
+        state = StartupState(configured=True, services_ready=True)
+        order: list[str] = []
+
+        def noop_activate(
+            _state: StartupState, *, background: bool = False, smoke_test: bool = False
+        ) -> None:
+            return None
+
+        monkeypatch.setattr(controller, "activate", noop_activate)
+        monkeypatch.setattr(
+            updater, "mark_update_healthy", lambda *args, **kwargs: order.append("ack")
+        )
+        monkeypatch.setattr(coordinator, "mark_healthy", lambda *args, **kwargs: order.append("db"))
+
+        controller._commit_update_handshake(
+            transaction, bundle, coordinator, state, background=True
+        )
+
+        assert order == ["ack", "db"]
+    finally:
+        updater.abort_update_transaction(transaction)
+        _close_controller(qt_app, controller)
+
+
+def test_handshake_ack_failure_restores_data_rollback(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from organizador.controller import StartupState
+    from organizador.recovery import RecoveryCoordinator
+
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        with controller.database.connect() as connection:
+            connection.execute("ALTER TABLE tasks DROP COLUMN reminder_lead_days")
+            connection.commit()
+        coordinator = RecoveryCoordinator(app_config.data_dir)
+        bundle = coordinator.prepare_migration()
+        assert bundle is not None
+
+        app = tmp_path / "Handshake App"
+        (app / "_internal").mkdir(parents=True)
+        (app / "Organizador.exe").write_bytes(b"candidate")
+        transaction = updater.create_update_transaction(app, "0.6.3", data_dir=app_config.data_dir)
+        state = StartupState(configured=True, services_ready=True)
+        exits: list[int] = []
+        marked: list[bool] = []
+        restored: list[bool] = []
+
+        def noop_activate(
+            _state: StartupState, *, background: bool = False, smoke_test: bool = False
+        ) -> None:
+            return None
+
+        def fail_ack(*args: object, **kwargs: object) -> None:
+            raise OSError("disco cheio")
+
+        monkeypatch.setattr(controller, "activate", noop_activate)
+        monkeypatch.setattr(updater, "mark_update_healthy", fail_ack)
+        monkeypatch.setattr(
+            coordinator, "mark_healthy", lambda *args, **kwargs: marked.append(True)
+        )
+        monkeypatch.setattr(coordinator, "restore_pending", lambda: restored.append(True) or None)
+        monkeypatch.setattr(QApplication, "exit", lambda code=0: exits.append(code))
+
+        controller._commit_update_handshake(
+            transaction, bundle, coordinator, state, background=True
+        )
+
+        assert exits == [1]
+        assert restored == [True]
+        assert marked == []
+    finally:
+        updater.abort_update_transaction(transaction)
+        _close_controller(qt_app, controller)

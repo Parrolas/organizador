@@ -1084,6 +1084,50 @@ def test_real_powershell_helper_keeps_healthy_install_when_cleanup_fails(
         updater.release_installation_lock(transaction)
 
 
+def test_real_powershell_helper_keeps_healthy_install_when_receipt_write_fails(
+    tmp_path: Path,
+    sleeping_executable: Path,
+) -> None:
+    powershell = _powershell_path()
+    assert powershell is not None
+    app = _make_app_layout(tmp_path / "receipt % ç" / "App", executable=b"old executable")
+    data_dir = tmp_path / "receipt % ç data"
+    transaction = updater.create_update_transaction(
+        app,
+        "0.6.2",
+        data_dir=data_dir,
+        old_pid=2_147_483_647,
+        ready_timeout_seconds=10,
+        healthy_timeout_seconds=10,
+        move_retry_seconds=0.05,
+    )
+    _make_app_layout(transaction.staging_dir, executable=sleeping_executable.read_bytes())
+    updater.write_update_helper(transaction)
+    # A directory at the result path makes every receipt write fail.
+    transaction.result_path.mkdir()
+    helper = updater.launch_update_helper(transaction, powershell_executable=powershell)
+    try:
+        _wait_until(
+            lambda: transaction.rollback_dir.is_dir() and not transaction.staging_dir.exists()
+        )
+        updater.mark_update_ready(transaction.manifest_path, transaction.token, pid=555)
+        assert updater.wait_for_update_commit(
+            transaction.manifest_path,
+            transaction.token,
+            timeout_seconds=30,
+        )
+        updater.mark_update_healthy(transaction.manifest_path, transaction.token, pid=555)
+        assert _wait_helper(helper, transaction) == 0
+        assert (app / "Organizador.exe").read_bytes() == sleeping_executable.read_bytes()
+        assert not transaction.rollback_dir.exists()
+        assert not transaction.lock_path.exists()
+        assert transaction.result_path.is_dir()
+    finally:
+        if helper.poll() is None:
+            helper.terminate()
+        updater.release_installation_lock(transaction)
+
+
 def test_abort_update_transaction_discards_lock_staging_and_state(app_dir: Path) -> None:
     transaction = updater.create_update_transaction(app_dir, "0.6.2")
     transaction.staging_dir.mkdir(parents=True)

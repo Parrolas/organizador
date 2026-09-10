@@ -2,6 +2,24 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.13.1 - 2026-09-10
+
+### Fixed
+
+- A failure writing the update receipt after the new version reported healthy
+  can no longer trigger a rollback that leaves the installation without a
+  working executable.
+- The database rollback decision now follows the executable's: the app
+  acknowledges helper health before closing its migration backup, and a
+  failed acknowledgement restores the backup instead of leaving the two
+  decisions out of step.
+- Office documents whose contents would expand far beyond their compressed
+  size are indexed by name only instead of being loaded into memory.
+- A read failure after a filing committed no longer moves the document back
+  to the Inbox while the catalog records it as filed.
+- Downloads that arrive while a return temporarily pauses the watcher are
+  collected after the pause instead of being silently forgotten.
+
 ## 0.13.0 - 2026-09-10
 
 ### Added

@@ -46,12 +46,40 @@ def test_ingest_and_file_document_are_collision_safe(
     assert database.activity_summary().collisions_renamed == 1
 
 
+def test_filing_survives_a_catalog_read_failure(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _download(app_config)
+    item = filer.ingest(source)
+    assert item is not None
+
+    def fail_get_file(*args: object, **kwargs: object) -> NoReturn:
+        raise RuntimeError("leitura falhou depois do commit")
+
+    monkeypatch.setattr(database, "get_file", fail_get_file)
+
+    document = filer.file_document(item.id, subject.id, "Exercícios", "Ficha.pdf")
+
+    assert document.current_path.is_file()
+    assert not item.path.exists()
+    monkeypatch.undo()
+    stored = database.get_file(document.id)
+    assert stored is not None
+    assert stored.catalog_state == "active"
+    refreshed = database.get_inbox_item(item.id)
+    assert refreshed is not None
+    assert refreshed.status == "filed"
+
+
 def test_requested_extension_cannot_change_the_original(
     app_config: AppConfig, filer: FilingService, subject: Subject
 ) -> None:
     item = filer.ingest(_download(app_config, "notas.pdf"))
     assert item is not None
-
     document = filer.file_document(item.id, subject.id, "Slides", "Notas.exe")
 
     assert document.current_path.name == "Notas.pdf"

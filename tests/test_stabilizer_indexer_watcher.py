@@ -87,6 +87,55 @@ def test_native_watcher_ignores_a_file_returned_by_the_app(app_config: AppConfig
         watcher.stop()
 
 
+def test_paused_arrivals_are_released_after_resume(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready: list[Path] = []
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", lambda *_args, **_kwargs: True)
+    watcher = DownloadWatcher(app_config, ready.append)
+    watcher.start(observe=False)
+    try:
+        watcher.set_paused(True)
+        candidate = app_config.downloads_dir / "chegou-em-pausa.pdf"
+        candidate.write_bytes(b"paused arrival content")
+        watcher.enqueue(candidate)
+        watcher._sweep_once()
+        assert ready == []
+
+        watcher.set_paused(False)
+        deadline = monotonic() + 5.0
+        while not ready and monotonic() < deadline:
+            sleep(0.02)
+
+        assert [path.name for path in ready] == ["chegou-em-pausa.pdf"]
+    finally:
+        watcher.stop()
+
+
+def test_resume_does_not_requeue_an_ignored_return(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready: list[Path] = []
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", lambda *_args, **_kwargs: True)
+    watcher = DownloadWatcher(app_config, ready.append)
+    watcher.start(observe=False)
+    try:
+        returned = app_config.downloads_dir / "devolvido-em-pausa.pdf"
+        returned.write_bytes(b"returned by Organizador")
+        watcher.set_paused(True)
+        watcher.enqueue(returned)
+        watcher.ignore_self_move(returned)
+        watcher.set_paused(False)
+
+        sleep(0.3)
+        watcher._sweep_once()
+        watcher._sweep_once()
+
+        assert ready == []
+    finally:
+        watcher.stop()
+
+
 def test_watcher_uses_one_key_for_directory_aliases(
     app_config: AppConfig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -1315,6 +1315,7 @@ Set-StrictMode -Version 2.0
     $script:AppMoved = $false
     $script:StagingMoved = $false
     $script:CleanupDeferred = $false
+    $script:Healthy = $false
 $script:NewProcess = $null
 $script:StartedAt = [DateTime]::UtcNow.ToString('o')
 $script:Transaction = $null
@@ -1580,6 +1581,7 @@ try {
 
     $script:Phase = 'wait_healthy'
     Wait-ForMarker ([string]$script:Transaction.healthy_path) ([double]$script:Transaction.healthy_timeout_seconds) 'healthy'
+    $script:Healthy = $true
 
     $script:Phase = 'cleanup_rollback'
     try {
@@ -1596,6 +1598,13 @@ try {
     exit 0
 } catch {
     $failure = $_.Exception.Message
+    if ($script:Healthy) {
+        # The new version is running healthy; nothing after this point may
+        # roll it back. A receipt-write failure must leave the install alone.
+        try { Save-Result 'succeeded' $failure $null } catch { }
+        Release-Lock
+        exit 0
+    }
     $rollbackSucceeded = $null
     $status = 'failed'
     $needsRollback = ($null -ne $script:Transaction) -and ($script:AppMoved -or $script:StagingMoved)

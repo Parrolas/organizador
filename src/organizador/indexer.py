@@ -16,11 +16,14 @@ from organizador import ocr
 from organizador.db import Database
 from organizador.extractors import (
     MAX_EXTRACTION_CHARS,
+    MAX_OFFICE_EXPANDED_BYTES,
+    MAX_OFFICE_MEMBERS,
     OFFICE_SUFFIXES,
     ExtractionBudget,
     extract_docx,
     extract_pptx,
     extract_xlsx,
+    office_expanded_size,
 )
 from organizador.models import ExistingDownload, FiledDocument
 
@@ -152,6 +155,21 @@ class DocumentIndexer:
                 mtime_ns=current_mtime_ns,
             )
             return
+        if suffix in OFFICE_SUFFIXES:
+            expanded = office_expanded_size(path)
+            if expanded is not None and (
+                expanded[0] > MAX_OFFICE_EXPANDED_BYTES or expanded[1] > MAX_OFFICE_MEMBERS
+            ):
+                LOGGER.warning("Skipping Office package that expands too far: %s", path)
+                self._store_name_only(document, subject_name, final_name)
+                self._mark_failed(
+                    document,
+                    state="too_large",
+                    error="",
+                    size=current_size,
+                    mtime_ns=current_mtime_ns,
+                )
+                return
         try:
             pages = self._extract_text(document, path, suffix)
             extract_error: str | None = None

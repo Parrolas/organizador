@@ -2034,7 +2034,7 @@ class AppController(QObject):
         *,
         background: bool,
     ) -> None:
-        """Activate services, then close data rollback and acknowledge health."""
+        """Activate services, acknowledge health, then close data rollback."""
 
         try:
             self.activate(state, background=background)
@@ -2053,6 +2053,17 @@ class AppController(QObject):
             )
             QApplication.exit(1)
             return
+        try:
+            updater.mark_update_healthy(transaction.manifest_path, transaction.token)
+        except Exception:
+            # The helper still owns the binary rollback; keep the data
+            # rollback possible so both decisions stay aligned.
+            LOGGER.exception("Could not acknowledge update health to the helper")
+            if recovery_bundle is not None:
+                with suppress(Exception):
+                    coordinator.restore_pending()
+            QApplication.exit(1)
+            return
         if recovery_bundle is not None:
             try:
                 coordinator.mark_healthy(recovery_bundle)
@@ -2068,8 +2079,6 @@ class AppController(QObject):
                 )
                 QApplication.exit(1)
                 return
-        with suppress(Exception):
-            updater.mark_update_healthy(transaction.manifest_path, transaction.token)
 
     def _check_deadlines(self) -> None:
         today = date.today()

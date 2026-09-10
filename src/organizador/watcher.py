@@ -88,6 +88,7 @@ class DownloadWatcher:
         self._retry_after: dict[PathKey, float] = {}
         self._retry_attempts: dict[PathKey, int] = {}
         self._retry_exhausted: dict[PathKey, ExistingDownload | None] = {}
+        self._paused_seen: set[PathKey] = set()
         self._lock = Lock()
         self._stop = Event()
         self._paused = Event()
@@ -172,6 +173,7 @@ class DownloadWatcher:
             self._retry_after.clear()
             self._retry_attempts.clear()
             self._retry_exhausted.clear()
+            self._paused_seen.clear()
         if completed_skips is not None and self.on_import_complete is not None:
             self.on_import_complete(completed_skips)
 
@@ -180,8 +182,18 @@ class DownloadWatcher:
 
         if paused:
             self._paused.set()
-        else:
-            self._paused.clear()
+            return
+        with self._lock:
+            released = self._paused_seen
+            self._paused_seen = set()
+            self._known.difference_update(released)
+        self._paused.clear()
+        if released and self.active:
+            Thread(
+                target=self._sweep_once,
+                name="download-sweep-resume",
+                daemon=True,
+            ).start()
 
     def ignore_self_move(self, path: Path, *, seconds: float = 30.0) -> None:
         """Prevent a file returned by this app from being ingested again."""
@@ -206,6 +218,7 @@ class DownloadWatcher:
         with self._lock:
             if self._paused.is_set():
                 self._known.add(key)
+                self._paused_seen.add(key)
                 return
             now = monotonic()
             ignored_until = self._ignored_until.get(key)

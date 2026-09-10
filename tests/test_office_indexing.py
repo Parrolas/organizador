@@ -18,6 +18,7 @@ from organizador.extractors import (
     extract_docx,
     extract_pptx,
     extract_xlsx,
+    office_expanded_size,
 )
 from organizador.indexer import MAX_INDEX_BYTES, DocumentIndexer
 from organizador.models import FiledDocument, Subject
@@ -215,3 +216,49 @@ def test_long_workbook_stops_accumulating_at_the_budget(tmp_path: Path) -> None:
     pages = extract_xlsx(path, max_chars=1500)
 
     assert sum(len(page) for page in pages) <= 1500 + 60
+
+
+def _bomb_docx(path: Path, *, expanded_bytes: int) -> None:
+    import zipfile
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", "<w:document/>")
+        archive.writestr("word/media/anexo.bin", b"\0" * expanded_bytes)
+
+
+def test_office_expanded_size_reports_declared_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "pacote.docx"
+    _bomb_docx(path, expanded_bytes=2 * 1024 * 1024)
+
+    expanded = office_expanded_size(path)
+
+    assert expanded is not None
+    assert expanded[0] >= 2 * 1024 * 1024
+    assert expanded[1] == 2
+    assert office_expanded_size(tmp_path / "ausente.docx") is None
+
+
+def test_office_package_over_the_expansion_budget_is_not_parsed(
+    database: Database,
+    subject: Subject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "bomba.docx"
+    _bomb_docx(path, expanded_bytes=8 * 1024 * 1024)
+    document = _record_file(database, subject, path)
+    monkeypatch.setattr("organizador.indexer.MAX_OFFICE_EXPANDED_BYTES", 1024 * 1024)
+
+    def fail_on_parse(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("bomb-shaped packages must not be parsed")
+
+    monkeypatch.setattr("organizador.indexer.extract_docx", fail_on_parse)
+    indexer = DocumentIndexer(database)
+
+    indexer.index_document(document)
+    indexer.shutdown()
+
+    refreshed = database.get_file(document.id)
+    assert refreshed is not None
+    assert refreshed.indexed_at is not None
+    assert refreshed.index_state == "too_large"

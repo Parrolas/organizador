@@ -1235,10 +1235,11 @@ class Database:
                 )
             else:
                 connection.execute("DELETE FROM events WHERE id = ?", (pending_event_id,))
+            row = connection.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
+            if row is None:  # pragma: no cover - defensive database invariant
+                raise RuntimeError("O ficheiro foi organizado mas não pôde ser lido.")
+            document = self._file(row)
             connection.commit()
-        document = self.get_file(file_id)
-        if document is None:  # pragma: no cover - defensive database invariant
-            raise RuntimeError("O ficheiro foi organizado mas não pôde ser lido.")
         return document
 
     def adopt_subject_file(
