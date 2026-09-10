@@ -36,8 +36,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_update_release_e2e.ps1 `
 
 - Tag force-move (`git tag -f` + `--force` push) is only safe **before** the release is published — published assets are immutable (CI throws if the release exists).
 - **Never auto-promote a prerelease to stable.** Manual-bridge policy: the v0.6.1 updater silently no-ops on non-ASCII install paths, so stable (currently v0.8.1) must stay ahead only when proven safe. `updater.check_latest_release` targets `/releases/latest` (stable only) — prerelease-to-prerelease OTA does not happen by design.
-- `gh` CLI token is expired (401): git push works, but release edits (promotion) need the browser.
-- CI failure logs return 403. If local gates pass but CI fails, ask the user to paste the failing log before touching product code. Reproduce with a fresh venv + `pip install -e ".[dev]"`.
+- `gh` CLI is authenticated and can read CI logs: `gh run view <id> --log-failed` works when the API returns 403 for ad-hoc requests. Prefer it before asking the user to paste logs.
+- Reproduce a failing CI gate with a fresh venv + `pip install -e ".[dev]"` before touching product code.
 
 ## Hard-won gotchas
 
@@ -49,6 +49,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_update_release_e2e.ps1 `
 - **File moves are journal-first**: every move writes a DB event before touching the filesystem; `reconcile.py` recovers interrupted moves at startup (including `ingest_pending`). Never move user files outside `filer.py`.
 - **File transfers run on one FIFO worker thread** (controller `_submit_transfer` + claims); conflicting filing/return/undo/bulk requests are rejected while a claim overlaps. Only the `_finish_*` handlers may touch Qt widgets, the tray, or the prompt. UI callbacks marshal via the `transfer_finished` signal.
 - **Windows integration is native COM (pywin32), not PowerShell**: `windows_shell.py` writes shortcuts with AUMID + toast activator; `startup.py` registers the `organizador://` protocol and unregisters only entries that still point at the current exe. Smoke tests and CI set `ORGANIZADOR_DISABLE_WINDOWS_INTEGRATION=1`. The installer E2E (`run_installer_e2e.py`) refuses accounts with existing Organizador data — run it only in CI/disposable accounts.
+- **Packaged smoke startups must never show blocking UI** (CI runners have no tray): persisted update results are skipped when `smoke_test=True`. A modal `QMessageBox` fallback would hang the process for the full timeout.
+- **Inno uninstallers are two-phase**: the first process can exit before the second-phase cleanup runs, so tests must wait for the payload file to disappear (not the exe, which is deleted earlier) after invoking an uninstaller.
+- **`updater.extract_to_staging` consumes (deletes) its input archive** by design. Tests driving it with release artifacts must extract a copy; the installer E2E preserves the published zip this way.
 - The update helper's PowerShell script is embedded in `updater.py`; validate changes with the real-PowerShell integration tests in `tests/test_updater.py` (session fixture compiles a C# sleeper exe).
 
 ## Layout
