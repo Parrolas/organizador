@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
     """Persistent navigation shell; closing hides it while the tray keeps running."""
 
     hidden_to_tray = Signal()
+    quit_requested = Signal()
 
     def __init__(
         self, database: Database, config: AppConfig, parent: QWidget | None = None
@@ -53,6 +54,7 @@ class MainWindow(QMainWindow):
         self.database = database
         self.config = config
         self.allow_close = False
+        self.quit_on_close = False
         self.setWindowTitle("Organizador")
         self.setMinimumSize(980, 660)
         self.resize(1180, 760)
@@ -197,5 +199,8 @@ class MainWindow(QMainWindow):
             event.accept()
             return
         event.ignore()
+        if self.quit_on_close:
+            self.quit_requested.emit()
+            return
         self.hide()
         self.hidden_to_tray.emit()

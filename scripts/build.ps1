@@ -1,13 +1,27 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$OutputRoot = "",
+    [string]$SigningCertificateThumbprint = "",
+    [string]$SignTool = "signtool.exe",
+    [string]$TimestampUrl = "http://timestamp.digicert.com"
+)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $EntryPoint = Join-Path $Root "src\organizador\main.py"
-$Distribution = Join-Path $Root "dist\Organizador"
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    $OutputRoot = Join-Path $Root "artifacts"
+}
+elseif (-not [System.IO.Path]::IsPathRooted($OutputRoot)) {
+    $OutputRoot = Join-Path $Root $OutputRoot
+}
+$OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+$BuildRoot = Join-Path $OutputRoot "build"
+$AssetRoot = Join-Path $BuildRoot "assets"
+$Distribution = Join-Path $OutputRoot "Organizador"
 $Executable = Join-Path $Distribution "Organizador.exe"
-$VersionInfo = Join-Path $Root "build\version_info.txt"
+$VersionInfo = Join-Path $BuildRoot "version_info.txt"
 
 if (-not (Test-Path -LiteralPath $Python)) {
     throw "Ambiente não encontrado. Executa primeiro .\scripts\setup.ps1"
@@ -35,9 +49,9 @@ Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
 & $Python (Join-Path $Root "scripts\generate_version_info.py") $VersionInfo
 if ($LASTEXITCODE -ne 0) { throw "Não foi possível gerar os metadados de versão" }
 
-& $Python (Join-Path $Root "scripts\generate_icon.py")
+& $Python (Join-Path $Root "scripts\generate_icon.py") --output-dir $AssetRoot
 if ($LASTEXITCODE -ne 0) { throw "Não foi possível gerar o ícone da aplicação" }
-$AppIcon = Join-Path $Root "assets\icon.ico"
+$AppIcon = Join-Path $AssetRoot "icon.ico"
 if (-not (Test-Path -LiteralPath $AppIcon)) { throw "Ícone em falta: $AppIcon" }
 
 & $Python -m PyInstaller `
@@ -46,20 +60,28 @@ if (-not (Test-Path -LiteralPath $AppIcon)) { throw "Ícone em falta: $AppIcon" 
     --windowed `
     --onedir `
     --icon $AppIcon `
-    --add-data ((Join-Path $Root "assets") + ";assets") `
+    --add-data ($AssetRoot + ";assets") `
     --noupx `
     --name "Organizador" `
     --paths (Join-Path $Root "src") `
     --hidden-import "watchdog.observers.winapi" `
     --version-file $VersionInfo `
-    --specpath (Join-Path $Root "build") `
-    --workpath (Join-Path $Root "build\pyinstaller") `
-    --distpath (Join-Path $Root "dist") `
+    --specpath $BuildRoot `
+    --workpath (Join-Path $BuildRoot "pyinstaller") `
+    --distpath $OutputRoot `
     $EntryPoint
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller falhou" }
 
 if (-not (Test-Path -LiteralPath $Executable)) {
     throw "O executável esperado não foi criado: $Executable"
+}
+
+if ($SigningCertificateThumbprint) {
+    if ($SigningCertificateThumbprint -notmatch '^[0-9a-fA-F]{40}$') { throw "Invalid signing thumbprint" }
+    & $SignTool sign /sha1 $SigningCertificateThumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $Executable
+    if ($LASTEXITCODE -ne 0) { throw "Application signing failed" }
+    & $SignTool verify /pa $Executable
+    if ($LASTEXITCODE -ne 0) { throw "Application signature verification failed" }
 }
 
 $SmokeRoot = Join-Path $env:TEMP ("organizador-smoke-" + [guid]::NewGuid().ToString("N"))
@@ -69,6 +91,7 @@ try {
     $SmokeProcess = Start-Process `
         -FilePath $Executable `
         -ArgumentList $SmokeArguments `
+        -WindowStyle Hidden `
         -Wait `
         -PassThru
     if ($SmokeProcess.ExitCode -ne 0) {
@@ -106,7 +129,12 @@ if ($ManifestCheck.version -ne $Version) {
     throw "O manifesto da atualização não coincide com a versão"
 }
 
-$ReleaseDirectory = Join-Path $Root "dist\releases"
+$ManagedFiles = @(Get-ChildItem -LiteralPath $Distribution -Recurse -File | ForEach-Object {
+    $_.FullName.Substring($Distribution.Length + 1)
+}) + "runtime-files.txt"
+[IO.File]::WriteAllLines((Join-Path $Distribution "runtime-files.txt"), $ManagedFiles, $ManifestEncoding)
+
+$ReleaseDirectory = Join-Path $OutputRoot "releases"
 New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
 $ArchiveName = "Organizador-$Version-windows-x64.zip"
 $Archive = Join-Path $ReleaseDirectory $ArchiveName

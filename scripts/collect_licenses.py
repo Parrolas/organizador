@@ -24,6 +24,9 @@ PACKAGES = (
     "XlsxWriter",
     "typing_extensions",
     "pyinstaller",
+    "pywin32",
+    "winrt-Windows.UI.Notifications",
+    "winrt-Windows.Data.Xml.Dom",
     "pypdfium2",
     "winrt-runtime",
     "winrt-Windows.Foundation",
@@ -35,6 +38,8 @@ PACKAGES = (
 )
 NOTICE_NAMES = ("license", "licence", "copying", "notice", "authors")
 MANUALLY_DOCUMENTED_PACKAGES = {
+    "winrt-Windows.UI.Notifications",
+    "winrt-Windows.Data.Xml.Dom",
     "PySide6-Essentials",
     "shiboken6",
     "pypdfium2",

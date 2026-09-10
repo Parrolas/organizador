@@ -70,6 +70,8 @@ class FindingReason(StrEnum):
     """Stable persistence keys for findings that require a human decision."""
 
     UNTRACKED_SUBJECT_FILE = "untracked_subject_file"
+    PENDING_INGEST_SOURCE = "pending_ingest_source"
+    PENDING_INGEST_DESTINATION = "pending_ingest_destination"
     MISSING_DOCUMENT = "missing_document"
     BROKEN_UNDO_EVENT = "broken_undo_event"
     PENDING_FILING_SOURCE = "pending_filing_source"
@@ -239,6 +241,7 @@ class ReconciliationReport:
     subject_folder_collisions: tuple[ReconciliationFinding, ...] = ()
     truncated: bool = False
     incomplete: bool = False
+    pending_ingest_events: tuple[HistoryEvent, ...] = ()
 
     @property
     def finding_count(self) -> int:
@@ -257,6 +260,7 @@ class ReconciliationReport:
             + len(self.legacy_interrupted_undos)
             + len(self.unsafe_paths)
             + len(self.subject_folder_collisions)
+            + len(self.pending_ingest_events)
         )
 
 

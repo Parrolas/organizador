@@ -64,6 +64,7 @@ def scan(config: AppConfig, database: Database) -> ReconciliationReport:
     state = _ScanState()
     inbox_items = database.list_inbox_for_reconciliation()
     documents = database.list_files()
+    pending_ingests = tuple(database.list_pending_ingests())
     pending_filings = tuple(database.list_pending_filings())
     pending_returns = tuple(database.list_pending_returns())
     pending_undos = tuple(database.list_pending_undos())
@@ -78,6 +79,9 @@ def scan(config: AppConfig, database: Database) -> ReconciliationReport:
         if item.status in {"pending", "error", "filing", "returning"}
     }
     known_inbox_paths.update(normalise_path_key(event.destination_path) for event in pending_undos)
+    known_inbox_paths.update(
+        normalise_path_key(event.destination_path) for event in pending_ingests
+    )
     tracked_document_paths = {normalise_path_key(document.current_path) for document in documents}
     tracked_document_paths.update(
         normalise_path_key(event.destination_path) for event in pending_filings
@@ -175,7 +179,7 @@ def scan(config: AppConfig, database: Database) -> ReconciliationReport:
             if undo_probes[event.id] is _ProbeState.UNSAFE
         ),
     }
-    for event in (*pending_filings, *pending_returns, *pending_undos):
+    for event in (*pending_filings, *pending_returns, *pending_undos, *pending_ingests):
         for path in (event.source_path, event.destination_path):
             if _probe(path, state) is _ProbeState.UNSAFE:
                 unsafe_paths.add(path)
@@ -200,6 +204,7 @@ def scan(config: AppConfig, database: Database) -> ReconciliationReport:
         subject_folder_collisions=subject_folder_collisions,
         truncated=state.truncated,
         incomplete=state.incomplete,
+        pending_ingest_events=pending_ingests,
     )
 
 
@@ -241,6 +246,21 @@ def apply(database: Database, report: ReconciliationReport) -> ReconciliationOut
     cancelled_undo_event_ids: list[int] = []
     completed_operation_event_ids: list[int] = []
     cancelled_operation_event_ids: list[int] = []
+
+    for pending in report.pending_ingest_events:
+        source = _probe(pending.source_path)
+        destination = _probe(pending.destination_path)
+        item = database.get_inbox_item(pending.inbox_id) if pending.inbox_id is not None else None
+        if (
+            source is _ProbeState.MISSING
+            and isinstance(destination, ExistingDownload)
+            and item is not None
+            and destination.size == item.size
+        ):
+            recovered_items.append(database.complete_ingest(pending.id))
+        elif isinstance(source, ExistingDownload) and destination is _ProbeState.MISSING:
+            database.cancel_ingest(pending.id)
+            cancelled_operation_event_ids.append(pending.id)
 
     for pending in report.pending_filing_events:
         source = _probe(pending.source_path)
@@ -371,6 +391,17 @@ def findings(report: ReconciliationReport) -> tuple[ReconciliationFinding, ...]:
     """Expand a report into independently reviewable path/reason pairs."""
 
     result: list[ReconciliationFinding] = []
+    for event in report.pending_ingest_events:
+        result.extend(
+            (
+                ReconciliationFinding(
+                    event.source_path, FindingReason.PENDING_INGEST_SOURCE, event.id
+                ),
+                ReconciliationFinding(
+                    event.destination_path, FindingReason.PENDING_INGEST_DESTINATION, event.id
+                ),
+            )
+        )
     untracked_candidates = {
         candidate.path: candidate for candidate in report.untracked_subject_candidates
     }

@@ -9,6 +9,16 @@ runtime, and the parity tests keep the three languages aligned.
 from __future__ import annotations
 
 EN_STRINGS: dict[str, str] = {
+    "Notificação indisponível": "Notification unavailable",
+    "A notificação expirou ou algum ficheiro já não está disponível. Consulta os ficheiros na app.": "The notification expired or a file is no longer available. Browse your files in the app.",
+    "A terminar o Organizador": "Closing Organizador",
+    "A concluir {count} operações de ficheiros antes de sair…": "Finishing {count} file operations before closing…",
+    "Espera que as operações de ficheiros terminem antes de guardar.": "Wait for file operations to finish before saving.",
+    "Atualização em espera": "Update waiting",
+    "Espera que as operações de ficheiros terminem antes de atualizar.": "Wait for file operations to finish before updating.",
+    "Não foi possível preparar a recolha do ficheiro.": "Could not prepare the file transfer into the inbox.",
+    "Download com recolha interrompida; o original foi mantido para revisão.": "Download transfer interrupted; the original was kept for review.",
+    "Cópia por verificar; pode estar incompleta. Compara com o original em Downloads.": "Unverified copy; it may be incomplete. Compare it with the original in Downloads.",
     " Os outros {count} ficam em Downloads para um próximo lote.": (
         " The other {count} stay in Downloads for a later batch."
     ),
@@ -775,6 +785,16 @@ EN_STRINGS: dict[str, str] = {
 }
 
 ES_STRINGS: dict[str, str] = {
+    "Notificação indisponível": "Notificación no disponible",
+    "A notificação expirou ou algum ficheiro já não está disponível. Consulta os ficheiros na app.": "La notificación ha caducado o algún archivo ya no está disponible. Consulta tus archivos en la app.",
+    "A terminar o Organizador": "Cerrando Organizador",
+    "A concluir {count} operações de ficheiros antes de sair…": "Terminando {count} operaciones de archivos antes de salir…",
+    "Espera que as operações de ficheiros terminem antes de guardar.": "Espera a que terminen las operaciones de archivos antes de guardar.",
+    "Atualização em espera": "Actualización en espera",
+    "Espera que as operações de ficheiros terminem antes de atualizar.": "Espera a que terminen las operaciones de archivos antes de actualizar.",
+    "Não foi possível preparar a recolha do ficheiro.": "No se pudo preparar el traslado del archivo a la bandeja de entrada.",
+    "Download com recolha interrompida; o original foi mantido para revisão.": "Traslado de descarga interrumpido; se conservó el original para su revisión.",
+    "Cópia por verificar; pode estar incompleta. Compara com o original em Downloads.": "Copia sin verificar; puede estar incompleta. Compárala con el original en Descargas.",
     " Os outros {count} ficam em Downloads para um próximo lote.": (
         " Los otros {count} se quedan en Descargas para otro lote."
     ),
@@ -1580,6 +1600,16 @@ ES_STRINGS: dict[str, str] = {
 }
 
 FR_STRINGS: dict[str, str] = {
+    "Notificação indisponível": "Notification indisponible",
+    "A notificação expirou ou algum ficheiro já não está disponível. Consulta os ficheiros na app.": "La notification a expiré ou un fichier n'est plus disponible. Consultez vos fichiers dans l'application.",
+    "A terminar o Organizador": "Fermeture d'Organizador",
+    "A concluir {count} operações de ficheiros antes de sair…": "Fin de {count} opérations de fichiers avant la fermeture…",
+    "Espera que as operações de ficheiros terminem antes de guardar.": "Attendez la fin des opérations de fichiers avant d'enregistrer.",
+    "Atualização em espera": "Mise à jour en attente",
+    "Espera que as operações de ficheiros terminem antes de atualizar.": "Attendez la fin des opérations de fichiers avant la mise à jour.",
+    "Não foi possível preparar a recolha do ficheiro.": "Impossible de préparer le transfert du fichier dans la boîte de réception.",
+    "Download com recolha interrompida; o original foi mantido para revisão.": "Transfert du téléchargement interrompu ; l'original a été conservé pour vérification.",
+    "Cópia por verificar; pode estar incompleta. Compara com o original em Downloads.": "Copie non vérifiée ; elle peut être incomplète. Comparez-la à l'original dans Téléchargements.",
     " Os outros {count} ficam em Downloads para um próximo lote.": (
         " Les autres {count} restent dans Téléchargements pour un prochain lot."
     ),

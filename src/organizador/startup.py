@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 import sys
 from contextlib import suppress
 from pathlib import Path
+
+from organizador import __version__
+from organizador.windows_shell import UNINSTALL_KEY, create_shortcut, shortcut_target
 
 try:
     import winreg
@@ -82,11 +84,16 @@ def refresh_launch_at_login() -> bool:
     return True
 
 
-def refresh_windows_integration() -> None:
+def refresh_windows_integration() -> bool:
     """Refresh the login entry and Start Menu shortcut for this installation."""
 
+    if os.environ.get("ORGANIZADOR_DISABLE_WINDOWS_INTEGRATION") == "1":
+        return False
     refresh_launch_at_login()
-    ensure_start_menu_shortcut()
+    shortcut_ready = ensure_start_menu_shortcut()
+    protocol_ready = register_notification_protocol()
+    refresh_installed_version()
+    return shortcut_ready and protocol_ready
 
 
 def start_menu_shortcut_path(programs_dir: Path | None = None) -> Path:
@@ -98,53 +105,83 @@ def start_menu_shortcut_path(programs_dir: Path | None = None) -> Path:
     return base / "Microsoft" / "Windows" / "Start Menu" / "Programs" / SHORTCUT_NAME
 
 
-def _ps_single_quote(value: str) -> str:
-    """Escape a value for a PowerShell single-quoted string literal."""
-
-    return value.replace("'", "''")
-
-
-def shortcut_command(target: Path, shortcut: Path) -> str:
-    """Build the PowerShell command that writes the Start Menu shortcut."""
-
-    return (
-        "$ws = New-Object -ComObject WScript.Shell; "
-        f"$s = $ws.CreateShortcut('{_ps_single_quote(str(shortcut))}'); "
-        f"$s.TargetPath = '{_ps_single_quote(str(target))}'; "
-        f"$s.WorkingDirectory = '{_ps_single_quote(str(target.parent))}'; "
-        f"$s.IconLocation = '{_ps_single_quote(str(target))},0'; "
-        "$s.Description = 'Organizador - estudo local'; "
-        "$s.Save()"
-    )
-
-
 def ensure_start_menu_shortcut(programs_dir: Path | None = None) -> bool:
-    """Create or refresh the Start Menu shortcut so Windows search finds the app.
-
-    Only meaningful for the packaged executable; source runs return False.
-    The shortcut is always rewritten so a moved folder or a fresh update
-    self-heals on the next launch.
-    """
-
+    """Create the notification-aware shortcut using COM, without a shell process."""
     if not getattr(sys, "frozen", False) or os.name != "nt":
         return False
-    target = Path(sys.executable)
     shortcut = start_menu_shortcut_path(programs_dir)
-    command = shortcut_command(target, shortcut)
     try:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode != 0:
-            LOGGER.warning("Could not create the Start Menu shortcut: %s", result.stderr.strip())
-            return False
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        LOGGER.warning("Could not create the Start Menu shortcut: %s", exc)
+        create_shortcut(Path(sys.executable), shortcut)
+    except Exception:
+        LOGGER.warning("Could not create the Start Menu shortcut", exc_info=True)
         return False
-    if not shortcut.is_file():
+    return shortcut.is_file()
+
+
+def register_notification_protocol() -> bool:
+    """Register only a fixed executable command, never a shell or arbitrary target."""
+    if not getattr(sys, "frozen", False) or winreg is None:
         return False
-    LOGGER.info("Start Menu shortcut ready at %s", shortcut)
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\organizador") as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:Organizador")
+            winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
+        with winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER, r"Software\Classes\organizador\shell\open\command"
+        ) as key:
+            winreg.SetValueEx(
+                key,
+                "",
+                0,
+                winreg.REG_SZ,
+                f'"{Path(sys.executable)}" --notification-uri "%1"',
+            )
+    except OSError:
+        LOGGER.warning("Could not register notification activation", exc_info=True)
+        return False
     return True
+
+
+def refresh_installed_version() -> None:
+    """Update metadata only when the uninstaller owns this exact runtime folder."""
+    if not getattr(sys, "frozen", False) or winreg is None:
+        return
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, UNINSTALL_KEY, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE
+        ) as key:
+            root, _ = winreg.QueryValueEx(key, "InstallLocation")
+            if (Path(root) / "app").resolve() != Path(sys.executable).resolve().parent:
+                return
+            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, __version__)
+    except OSError:
+        return
+
+
+def unregister_windows_integration() -> None:
+    """Remove registrations only if they still point to this executable."""
+    if not getattr(sys, "frozen", False) or winreg is None:
+        return
+    expected = f'"{Path(sys.executable)}"'
+    with suppress(OSError):
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            command, _ = winreg.QueryValueEx(key, VALUE_NAME)
+        if command == expected + " --background":
+            set_launch_at_login(False)
+    protocol = r"Software\Classes\organizador"
+    with suppress(OSError):
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, protocol + r"\shell\open\command") as key:
+            command, _ = winreg.QueryValueEx(key, "")
+        if command == expected + ' --notification-uri "%1"':
+            for suffix in (r"\shell\open\command", r"\shell\open", r"\shell", ""):
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, protocol + suffix)
+            with suppress(Exception):
+                from winrt.windows.ui.notifications import ToastNotificationManager
+
+                from organizador.windows_shell import AUMID
+
+                ToastNotificationManager.history.clear_with_id(AUMID)
+    shortcut = start_menu_shortcut_path()
+    with suppress(Exception):
+        if shortcut_target(shortcut).resolve() == Path(sys.executable).resolve():
+            shortcut.unlink()

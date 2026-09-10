@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSystemTrayIcon
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QProgressDialog, QSystemTrayIcon
 
-from organizador import ocr, updater
+from organizador import notifications, ocr, updater
 from organizador.classifier import guess_filing
-from organizador.config import AppConfig, parse_extensions
+from organizador.config import AppConfig, default_data_dir, parse_extensions
 from organizador.db import Database
 from organizador.filer import FilingError, FilingService, render_final_name
 from organizador.i18n import _
@@ -36,6 +36,7 @@ from organizador.models import (
     ReconciliationFinding,
     Subject,
 )
+from organizador.paths import normalise_path_key
 from organizador.reconcile import (
     adopt_untracked_subject_file,
     dismiss_finding,
@@ -54,12 +55,14 @@ from organizador.ui.dialogs import (
     SubjectFilesDialog,
 )
 from organizador.ui.main_window import MainWindow
+from organizador.ui.notification_dialog import NotificationFilesDialog
 from organizador.ui.pages import SettingsPayload
 from organizador.ui.prompt import FilingPrompt
 from organizador.ui.theme import apply_theme, get_theme
 from organizador.ui.tray import TrayIcon
 from organizador.updater import UpdateCheckResult, UpdateInfo, UpdateTransaction
 from organizador.watcher import DownloadWatcher
+from organizador.windows_shell import reveal_files
 
 LOGGER = logging.getLogger(__name__)
 
@@ -164,6 +167,7 @@ class AppController(QObject):
     transfer_finished = Signal(object)
     update_check_finished = Signal(object, bool, int)
     update_install_finished = Signal(object)
+    windows_integration_ready = Signal(bool)
 
     def __init__(self, config: AppConfig, database: Database | None = None) -> None:
         super().__init__()
@@ -204,16 +208,25 @@ class AppController(QObject):
         self.main_window = MainWindow(self.database, config)
         self.prompt = FilingPrompt(config.prompt_timeout_seconds)
         self.tray = TrayIcon(self)
+        self._native_notifications = False
+        self._notification_dialog: NotificationFilesDialog | None = None
+        self.windows_integration_ready.connect(self._set_native_notifications)
         self._connect_signals()
 
         self.reminder_timer = QTimer(self)
         self.reminder_timer.setInterval(60_000)
         self.reminder_timer.timeout.connect(self._check_deadlines)
 
-        self._transfer_gate = threading.Semaphore(8)
+        self._transfer_queue: deque[tuple[str, object, Callable[[], object]]] = deque()
         self._transfer_threads: set[threading.Thread] = set()
         self._transfer_lock = threading.Lock()
+        self._transfer_claims: set[tuple[str, str]] = set()
+        self._pending_transfers = 0
+        self._shutting_down = False
+        self._shutdown_complete = False
+        self._shutdown_progress: QProgressDialog | None = None
         self._return_in_flight: set[int] = set()
+        self._return_pause_owner: DownloadWatcher | None = None
         self._undo_in_flight = False
         self._bulk_filing_in_flight = False
 
@@ -223,7 +236,7 @@ class AppController(QObject):
         self._intake_notice_timer.setInterval(_INTAKE_NOTICE_WINDOW_MS)
         self._intake_notice_timer.timeout.connect(self._flush_intake_notices)
 
-        self._filed_pending: list[tuple[str, str]] = []
+        self._filed_pending: list[tuple[str, str, FiledDocument | None]] = []
         self._filed_notice_timer = QTimer(self)
         self._filed_notice_timer.setSingleShot(True)
         self._filed_notice_timer.setInterval(_FILED_NOTICE_WINDOW_MS)
@@ -243,8 +256,7 @@ class AppController(QObject):
         if not isinstance(application, QApplication):  # pragma: no cover - invariant
             raise RuntimeError("QApplication must exist before AppController")
         if not self.tray.available:
-            application.setQuitOnLastWindowClosed(True)
-            self.main_window.allow_close = True
+            self.main_window.quit_on_close = True
         else:
             self.tray.show()
 
@@ -287,11 +299,16 @@ class AppController(QObject):
                 self._begin_update_check(automatic=True)
             self._handle_legacy_rollback_bridge()
             self._show_pending_update_result()
-        threading.Thread(
-            target=refresh_windows_integration,
-            name="start-menu-shortcut",
-            daemon=True,
-        ).start()
+        if (
+            not smoke_test
+            and updater.is_frozen()
+            and self.config.data_dir.resolve() == default_data_dir().resolve()
+        ):
+            threading.Thread(
+                target=self._prepare_windows_integration,
+                name="windows-integration",
+                daemon=True,
+            ).start()
 
         self._refresh()
         if background and state.configured and not smoke_test:
@@ -371,7 +388,11 @@ class AppController(QObject):
         )
 
     def shutdown(self) -> None:
-        """Stop worker threads before terminating Qt."""
+        """Stop intake and keep Qt alive until all accepted transfers finish."""
+
+        if self._shutting_down:
+            return
+        self._shutting_down = True
 
         if self._update_installing and not self._update_restart_armed:
             # The helper is not supervising yet; ask the worker to abort cleanly
@@ -379,14 +400,39 @@ class AppController(QObject):
             # and the helper completes the update after this process exits.
             self._abort_update_install = True
         self.reminder_timer.stop()
-        self._watcher_generation += 1
+        self._intake_notice_timer.stop()
+        self._filed_notice_timer.stop()
         if self.watcher is not None:
             self.watcher.stop()
             self.watcher = None
+        self.prompt.timer.stop()
+        self.prompt.hide()
+        self._poll_shutdown()
+
+    def _poll_shutdown(self) -> None:
+        if self._shutdown_complete:
+            return
+        if self._pending_transfers:
+            if self._shutdown_progress is None:
+                self._shutdown_progress = QProgressDialog(self.main_window)
+                self._shutdown_progress.setWindowTitle(_("A terminar o Organizador"))
+                self._shutdown_progress.setCancelButton(None)
+                self._shutdown_progress.setRange(0, 0)
+                self._shutdown_progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+            self._shutdown_progress.setLabelText(
+                _("A concluir {count} operações de ficheiros antes de sair…").format(
+                    count=self._pending_transfers
+                )
+            )
+            self._shutdown_progress.show()
+            QTimer.singleShot(50, self._poll_shutdown)
+            return
+        self._shutdown_complete = True
+        self._watcher_generation += 1
         self._reset_manual_import_state()
         self.indexer.shutdown()
-        self._shutdown_transfers()
-        self.prompt.hide()
+        if self._shutdown_progress is not None:
+            self._shutdown_progress.close()
         self.tray.hide()
         self.main_window.allow_close = True
         self.main_window.close()
@@ -414,6 +460,7 @@ class AppController(QObject):
         self.update_check_finished.connect(self._on_update_check_finished)
         self.update_install_finished.connect(self._on_update_install_finished)
         self.main_window.hidden_to_tray.connect(self._hidden_to_tray)
+        self.main_window.quit_requested.connect(self.shutdown)
 
         self.main_window.home_page.open_path.connect(self._open_path)
         self.main_window.home_page.open_university.connect(
@@ -449,26 +496,55 @@ class AppController(QObject):
         self.prompt.later_requested.connect(self._prompt_finished)
         self.prompt.return_requested.connect(self._return_item)
 
-    def _submit_transfer(self, kind: str, job: object, work: Callable[[], object]) -> None:
-        """Run a blocking file transfer on a daemon worker thread.
+    @staticmethod
+    def _job_claims(job: object) -> set[tuple[str, str]]:
+        if isinstance(job, _IngestJob):
+            return {("path", normalise_path_key(job.path))}
+        if isinstance(job, (_FileJob, _ReturnJob)):
+            return {("inbox", str(job.inbox_id))}
+        if isinstance(job, _BulkJob):
+            return {("inbox", str(item.inbox_id)) for item in job.items}
+        if isinstance(job, _UndoJob):
+            return {("undo", "latest")}
+        return set()
 
-        The outcome is marshalled back to the GUI thread through
-        ``transfer_finished``; only the finish handlers may touch widgets,
-        the tray, or the prompt.
-        """
-
-        thread = threading.Thread(
-            target=self._run_transfer,
-            args=(kind, job, work),
-            name=f"transfer-{kind}",
-            daemon=True,
+    def _can_transfer(self, job: object) -> bool:
+        if isinstance(job, _UndoJob) and any(key[0] == "inbox" for key in self._transfer_claims):
+            return False
+        if (
+            isinstance(job, (_FileJob, _ReturnJob, _BulkJob))
+            and ("undo", "latest") in self._transfer_claims
+        ):
+            return False
+        return not (
+            self._shutting_down
+            or self._update_installing
+            or self._job_claims(job) & self._transfer_claims
         )
-        with self._transfer_lock:
-            self._transfer_threads.add(thread)
-        thread.start()
 
-    def _run_transfer(self, kind: str, job: object, work: Callable[[], object]) -> None:
-        with self._transfer_gate:
+    def _submit_transfer(self, kind: str, job: object, work: Callable[[], object]) -> bool:
+        """Accept one operation into a FIFO queue with at most one file mover."""
+
+        if not self._can_transfer(job):
+            return False
+        self._transfer_claims.update(self._job_claims(job))
+        self._pending_transfers += 1
+        with self._transfer_lock:
+            self._transfer_queue.append((kind, job, work))
+            if self._transfer_threads:
+                return True
+            thread = threading.Thread(target=self._run_transfers, name="file-transfers")
+            self._transfer_threads.add(thread)
+            thread.start()
+        return True
+
+    def _run_transfers(self) -> None:
+        while True:
+            with self._transfer_lock:
+                if not self._transfer_queue:
+                    self._transfer_threads.discard(threading.current_thread())
+                    return
+                kind, job, work = self._transfer_queue.popleft()
             try:
                 result = work()
             except FilingError as exc:
@@ -480,17 +556,10 @@ class AppController(QObject):
                 )
             else:
                 outcome = _TransferOutcome(kind=kind, job=job, result=result, error=None)
-        with self._transfer_lock:
-            self._transfer_threads.discard(threading.current_thread())
-        self.transfer_finished.emit(outcome)
+            self.transfer_finished.emit(outcome)
 
     def _shutdown_transfers(self, timeout: float = 10.0) -> None:
-        """Wait briefly for running transfers, then let the process exit.
-
-        Daemon worker threads never block interpreter shutdown; the
-        journal-first filer design makes an interrupted move recoverable on
-        the next launch through reconciliation.
-        """
+        """Bounded worker wait for test cleanup; normal exit uses Qt polling."""
 
         deadline = time.monotonic() + timeout
         while True:
@@ -507,6 +576,13 @@ class AppController(QObject):
         if not isinstance(outcome, _TransferOutcome):
             LOGGER.error("Ignoring malformed transfer outcome")
             return
+        self._transfer_claims.difference_update(self._job_claims(outcome.job))
+        try:
+            self._deliver_transfer(outcome)
+        finally:
+            self._pending_transfers = max(0, self._pending_transfers - 1)
+
+    def _deliver_transfer(self, outcome: _TransferOutcome) -> None:
         job = outcome.job
         if outcome.kind == "ingest" and isinstance(job, _IngestJob):
             self._finish_ingested(job, outcome.result, outcome.error)
@@ -573,7 +649,7 @@ class AppController(QObject):
         generation: int,
         candidate: Path | ExistingDownload,
     ) -> None:
-        if generation != self._watcher_generation:
+        if self._shutting_down or self._update_installing or generation != self._watcher_generation:
             return
         if isinstance(candidate, ExistingDownload):
             expected: ExistingDownload | None = candidate
@@ -582,9 +658,16 @@ class AppController(QObject):
             expected = None
             path = candidate
         job = _IngestJob(generation=generation, path=path, expected=expected)
+        if not self._can_transfer(job):
+            return
         if expected is not None:
             self._manual_import_pending += 1
-        self._submit_transfer("ingest", job, lambda: self.filer.ingest(path, expected=expected))
+        snapshot = expected or ExistingDownload.capture(path)
+        self._submit_transfer(
+            "ingest",
+            job,
+            lambda: self.filer.ingest(path, expected=snapshot) if snapshot is not None else None,
+        )
 
     def _finish_ingested(self, job: _IngestJob, result: object, error: str | None) -> None:
         manual = job.expected is not None
@@ -609,6 +692,8 @@ class AppController(QObject):
                 self.watcher.requeue(job.path)
             return
         if item is None:
+            if self.watcher is not None and job.path.exists():
+                self.watcher.requeue(job.path)
             return
         self._queue_ingested_item(item, notify=True)
 
@@ -639,7 +724,7 @@ class AppController(QObject):
     def _queue_intake_notice(self, name: str) -> None:
         """Collect intake names and surface one toast per batching window."""
 
-        if self.config.quiet_intake:
+        if self.config.quiet_intake or self._shutting_down:
             return
         self._intake_notice_names.append(name)
         if not self._intake_notice_timer.isActive():
@@ -657,22 +742,70 @@ class AppController(QObject):
             message = _("{count} ficheiros estão prontos para organizar.").format(count=len(names))
         self.tray.notify(_("Novo material na Caixa de Entrada"), message)
 
-    def _notify_filed(self, name: str, destination: str) -> None:
+    def _prepare_windows_integration(self) -> None:
+        self.windows_integration_ready.emit(bool(refresh_windows_integration()))
+
+    def _set_native_notifications(self, ready: bool) -> None:
+        self._native_notifications = ready
+
+    def _filed_toast(self, title: str, message: str, documents: list[FiledDocument]) -> None:
+        if self._native_notifications and documents:
+            try:
+                uri = notifications.save_action(self.database, documents)
+                if notifications.show_toast(title, message, uri):
+                    return
+            except Exception:
+                LOGGER.warning("Could not prepare filing notification", exc_info=True)
+        self.tray.notify(title, message)
+
+    def activate_notification(self, uri: str) -> None:
+        if self._shutting_down:
+            return
+        documents, missing = notifications.resolve_action(self.database, uri)
+        if missing:
+            self.show_main()
+            QMessageBox.information(
+                self.main_window,
+                _("Notificação indisponível"),
+                _(
+                    "A notificação expirou ou algum ficheiro já não está disponível. "
+                    "Consulta os ficheiros na app."
+                ),
+            )
+        if not documents:
+            return
+        if len({document.current_path.parent for document in documents}) == 1:
+            try:
+                reveal_files([document.current_path for document in documents])
+                return
+            except Exception:
+                LOGGER.warning("Could not reveal notification files", exc_info=True)
+        self.show_main()
+        if self._notification_dialog is not None:
+            self._notification_dialog.close()
+        self._notification_dialog = NotificationFilesDialog(documents, self.main_window)
+        self._notification_dialog.reveal_requested.connect(self._reveal_path)
+        self._notification_dialog.show()
+
+    def _notify_filed(
+        self, name: str, destination: str, document: FiledDocument | None = None
+    ) -> None:
         """Surface filing toasts: first is immediate, the rest join a batch."""
 
-        if self.config.quiet_intake:
+        if self.config.quiet_intake or self._shutting_down:
             return
         now = time.monotonic()
         if not self._filed_pending and now - self._last_filed_notice >= _FILED_IMMEDIATE_WINDOW_S:
-            self.tray.notify(
+            self._filed_toast(
                 _("Ficheiro organizado"),
                 _("{name} foi guardado em {destination}.").format(
                     name=name, destination=destination
                 ),
+                [document] if document is not None else [],
             )
             self._last_filed_notice = now
             return
-        self._filed_pending.append((name, destination))
+        self._filed_pending.append((name, destination, document))
         if not self._filed_notice_timer.isActive():
             self._filed_notice_timer.start()
 
@@ -683,22 +816,26 @@ class AppController(QObject):
         if not pending or self.config.quiet_intake:
             return
         if len(pending) == 1:
-            name, destination = pending[0]
-            self.tray.notify(
+            name, destination, document = pending[0]
+            self._filed_toast(
                 _("Ficheiro organizado"),
                 _("{name} foi guardado em {destination}.").format(
                     name=name, destination=destination
                 ),
+                [document] if document is not None else [],
             )
             self._last_filed_notice = time.monotonic()
             return
         self._last_filed_notice = time.monotonic()
-        self.tray.notify(
+        self._filed_toast(
             _("Ficheiros organizados"),
             _("{count} ficheiros organizados").format(count=len(pending)),
+            [document for _, _, document in pending if document is not None],
         )
 
     def _import_existing_downloads(self) -> None:
+        if self._shutting_down or self._update_installing:
+            return
         watcher = self.watcher
         if watcher is None or not watcher.active:
             QMessageBox.warning(
@@ -941,10 +1078,16 @@ class AppController(QObject):
             self._show_next_prompt()
 
     def _show_next_prompt(self) -> None:
-        if self.prompt.current_item_id is not None:
+        if (
+            self._shutting_down
+            or self._update_installing
+            or self.prompt.current_item_id is not None
+        ):
             return
         while self.prompt_queue:
             inbox_id = self.prompt_queue.popleft()
+            if ("inbox", str(inbox_id)) in self._transfer_claims:
+                continue
             item = self.database.get_inbox_item(inbox_id)
             if item is None or item.status not in {"pending", "error"} or not item.path.is_file():
                 continue
@@ -978,6 +1121,9 @@ class AppController(QObject):
 
     def _finish_filed(self, job: _FileJob, result: object, error: str | None) -> None:
         if not isinstance(result, FiledDocument):
+            if self._shutting_down:
+                LOGGER.error("Filing failed during shutdown: %s", error)
+                return
             self.prompt_queue.appendleft(job.inbox_id)
             self._show_next_prompt()
             self.prompt.show_error(error or _("Não foi possível organizar o ficheiro."))
@@ -993,12 +1139,13 @@ class AppController(QObject):
         self._notify_filed(
             document.current_path.name,
             f"{subject.name if subject else job.kind} / {job.kind}",
+            document,
         )
         self._refresh()
         QTimer.singleShot(120, self._show_next_prompt)
 
     def _return_item(self, inbox_id: int) -> None:
-        if inbox_id in self._return_in_flight:
+        if not self._can_transfer(_ReturnJob(inbox_id, None, False)):
             return
         self._return_in_flight.add(inbox_id)
         watcher = self.watcher
@@ -1006,6 +1153,7 @@ class AppController(QObject):
         was_paused = watcher.paused if observing and watcher is not None else False
         if observing and watcher is not None and not was_paused:
             watcher.set_paused(True)
+            self._return_pause_owner = watcher
         job = _ReturnJob(
             inbox_id=inbox_id,
             watcher=watcher,
@@ -1033,7 +1181,9 @@ class AppController(QObject):
                 destination = pending_return.destination_path
                 ignore_seconds = float("inf")
             item = self.database.get_inbox_item(job.inbox_id)
-            if item is not None:
+            if self._shutting_down:
+                LOGGER.error("Return failed during shutdown: %s", error)
+            elif item is not None:
                 self.prompt_queue.appendleft(job.inbox_id)
                 self._show_next_prompt()
                 self.prompt.show_error(error)
@@ -1041,8 +1191,10 @@ class AppController(QObject):
                 QMessageBox.warning(self.main_window, _("Não foi possível devolver"), error)
         if watcher is not None and destination is not None:
             watcher.ignore_self_move(destination, seconds=ignore_seconds)
-        if watcher is not None and job.unpause:
-            watcher.set_paused(False)
+        if not self._return_in_flight and self._return_pause_owner is not None:
+            if not self._shutting_down:
+                self._return_pause_owner.set_paused(False)
+            self._return_pause_owner = None
         if error is not None or destination is None:
             return
         self.tray.notify(
@@ -1057,7 +1209,7 @@ class AppController(QObject):
         QTimer.singleShot(120, self._show_next_prompt)
 
     def _undo(self) -> None:
-        if self._undo_in_flight:
+        if not self._can_transfer(_UndoJob()):
             return
         self._undo_in_flight = True
         self._submit_transfer("undo", _UndoJob(), self.filer.undo_latest_filing)
@@ -1066,6 +1218,9 @@ class AppController(QObject):
         del job
         self._undo_in_flight = False
         if error is not None:
+            if self._shutting_down:
+                LOGGER.error("Undo failed during shutdown: %s", error)
+                return
             QMessageBox.warning(self.main_window, _("Não foi possível desfazer"), error)
             return
         item = result if isinstance(result, InboxItem) else None
@@ -1227,6 +1382,8 @@ class AppController(QObject):
         self.main_window.search_page.refresh_index_status()
 
     def _organise_selection(self, inbox_ids: object) -> None:
+        if self._shutting_down or self._update_installing:
+            return
         if not isinstance(inbox_ids, (tuple, list)):
             return
         items: list[InboxItem] = []
@@ -1279,6 +1436,12 @@ class AppController(QObject):
             due_date=due_date,
             failures=tuple(failures),
         )
+        if not self._can_transfer(job):
+            self._bulk_filing_in_flight = False
+            self.main_window.inbox_page.set_import_status(
+                _("Já existe uma organização em curso; espera que termine.")
+            )
+            return
         count = len(planned)
         self.main_window.inbox_page.set_import_status(
             (
@@ -1331,6 +1494,12 @@ class AppController(QObject):
             return
         for document in result.documents:
             self.indexer.submit(document)
+        if result.documents and not self.config.quiet_intake and not self._shutting_down:
+            self._filed_toast(
+                _("Ficheiros organizados"),
+                _("{count} ficheiros organizados").format(count=len(result.documents)),
+                list(result.documents),
+            )
         self.prompt_queue = deque(item for item in self.prompt_queue if item not in result.handled)
         if self.prompt.current_item_id in result.handled:
             self.prompt.close()
@@ -1357,6 +1526,11 @@ class AppController(QObject):
         self._refresh()
 
     def _save_settings(self, values: SettingsPayload) -> None:
+        if self._pending_transfers or self._shutting_down or self._update_installing:
+            self.main_window.settings_page.set_status(
+                _("Espera que as operações de ficheiros terminem antes de guardar."), error=True
+            )
+            return
         if self._manual_import_active or (
             self.watcher is not None and self.watcher.manual_import_running
         ):
@@ -1438,6 +1612,9 @@ class AppController(QObject):
         self.config.initialized = previous.initialized
 
     def _set_paused(self, paused: bool) -> None:
+        if self._return_in_flight:
+            self.tray.set_paused(True)
+            return
         if self.watcher is not None and self.watcher.running:
             self.watcher.set_paused(paused)
         else:
@@ -1632,6 +1809,12 @@ class AppController(QObject):
         )
 
     def _install_pending_update(self) -> None:
+        if self._pending_transfers or self._manual_import_active or self._shutting_down:
+            self.tray.notify(
+                _("Atualização em espera"),
+                _("Espera que as operações de ficheiros terminem antes de atualizar."),
+            )
+            return
         info = self._pending_update
         if info is None or self._update_installing or self._update_checking:
             return

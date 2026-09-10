@@ -1,5 +1,8 @@
 # Organizador
 
+For the new Windows Setup installer and clickable filing notifications, see
+[Windows installation](docs/windows-installation.md).
+
 Aplicação local para Windows 11 que vigia Downloads, pede a classificação dos
 ficheiros académicos e mantém uma biblioteca pesquisável por disciplina,
 tópico e tipo de conteúdo.
@@ -165,9 +168,21 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
 O script executa lint, verificação de formato, mypy, testes, PyInstaller e um
 arranque de diagnóstico do pacote. Depois adiciona as licenças e produz:
 
-- `dist\Organizador\Organizador.exe`
-- `dist\releases\Organizador-<versão>-windows-x64.zip`
-- `dist\releases\Organizador-<versão>-windows-x64.zip.sha256`
+- `artifacts\Organizador\Organizador.exe`
+- `artifacts\releases\Organizador-<versão>-windows-x64.zip`
+- `artifacts\releases\Organizador-<versão>-windows-x64.zip.sha256`
+
+O build local não substitui a instalação em `dist\Organizador` nem altera os
+ícones guardados no código. Usa `-OutputRoot <pasta>` para escolher outra pasta;
+o CI de release usa explicitamente `-OutputRoot dist`.
+
+Ao sair, as operações de ficheiros já aceites terminam antes de fechar a app.
+Enquanto estiverem em curso, guardar definições ou instalar uma atualização
+fica bloqueado com uma explicação. Cópias interrompidas durante a recolha
+ficam para revisão manual na Caixa de Entrada.
+
+O [roteiro de uma semana de uso](docs/daily-use-checklist.md) ajuda a registar
+problemas concretos antes de escolher a próxima melhoria.
 
 As dependências exatas da versão são fixadas em `constraints-release.txt`.
 `pyproject.toml` é a fonte única das dependências diretas. `defusedxml` é mantido

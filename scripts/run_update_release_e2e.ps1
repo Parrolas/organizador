@@ -213,7 +213,7 @@ try {
 
     # 4. The installed legacy exe launches cleanly on its own.
     Write-Evidence "Legacy smoke run"
-    $Smoke = Start-Process -FilePath (Join-Path $Install "Organizador.exe") -ArgumentList ('--smoke-test --data-dir "' + $FirstData + '"') -Wait -PassThru
+    $Smoke = Start-Process -FilePath (Join-Path $Install "Organizador.exe") -ArgumentList ('--smoke-test --data-dir "' + $FirstData + '"') -WindowStyle Hidden -Wait -PassThru
     if ($Smoke.ExitCode -ne 0) { Fail "Legacy smoke run failed" }
 
     # 5. A corrupt payload must never reach the swap.
@@ -239,7 +239,7 @@ try {
     Write-Evidence "Starting legacy exe (self-exiting smoke) and preparing the legacy swap"
     $CandidateSha = "$CandidateZip.sha256"
     if (-not (Test-Path -LiteralPath $CandidateSha)) { Fail "Candidate checksum sidecar is missing" }
-    $OldExe = Start-Process -FilePath (Join-Path $Install "Organizador.exe") -ArgumentList ('--smoke-test --data-dir "' + $FirstData + '"') -PassThru
+    $OldExe = Start-Process -FilePath (Join-Path $Install "Organizador.exe") -ArgumentList ('--smoke-test --data-dir "' + $FirstData + '"') -WindowStyle Hidden -PassThru
     $PrepareOut = Invoke-LegacyPython "prepare" $PrepareCode @{
         "ORGANIZADOR_E2E_ZIP" = ([System.Uri]$CandidateZip).AbsoluteUri
         "ORGANIZADOR_E2E_SHA" = ([System.Uri]$CandidateSha).AbsoluteUri
@@ -261,14 +261,17 @@ try {
     )
     $SavedLocal = $env:LOCALAPPDATA
     $SavedRoaming = $env:APPDATA
+    $SavedIntegration = $env:ORGANIZADOR_DISABLE_WINDOWS_INTEGRATION
     $env:LOCALAPPDATA = $FakeLocal
     $env:APPDATA = $FakeRoaming
+    $env:ORGANIZADOR_DISABLE_WINDOWS_INTEGRATION = "1"
     try {
         $LaunchOut = Invoke-LegacyPython "launch" $LaunchCode @{ "ORGANIZADOR_E2E_SCRIPT" = $SwapScript }
     }
     finally {
         $env:LOCALAPPDATA = $SavedLocal
         $env:APPDATA = $SavedRoaming
+        $env:ORGANIZADOR_DISABLE_WINDOWS_INTEGRATION = $SavedIntegration
     }
     Write-Evidence $LaunchOut
 
@@ -303,7 +306,7 @@ try {
     if ($Alive.Count -gt 0) { Fail ("Candidate did not shut down: " + ($Alive -join ",")) }
 
     Write-Evidence "Candidate smoke run"
-    $CandidateSmoke = Start-Process -FilePath (Join-Path $Install "Organizador.exe") -ArgumentList ('--smoke-test --data-dir "' + $SmokeData + '"') -Wait -PassThru
+    $CandidateSmoke = Start-Process -FilePath (Join-Path $Install "Organizador.exe") -ArgumentList ('--smoke-test --data-dir "' + $SmokeData + '"') -WindowStyle Hidden -Wait -PassThru
     if ($CandidateSmoke.ExitCode -ne 0) { Fail "Candidate smoke run failed" }
 
     $Sentinel = Get-Content -LiteralPath (Join-Path $FakeLocal "Organizador\sentinel.txt") -Raw

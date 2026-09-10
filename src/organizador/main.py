@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import ctypes
 import hashlib
+import json
 import logging
 import sys
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
@@ -20,9 +22,12 @@ from organizador.controller import AppController
 from organizador.db import Database, DatabaseHealthError, NewerDatabaseError
 from organizador.i18n import _, set_language
 from organizador.logging_setup import configure_logging, log_uncaught_exception
+from organizador.notifications import notification_token
 from organizador.recovery import RecoveryBundle, RecoveryCoordinator, RecoveryError
+from organizador.startup import refresh_windows_integration, unregister_windows_integration
 from organizador.ui.icons import app_icon
 from organizador.ui.theme import apply_theme, get_theme
+from organizador.windows_shell import AppMutex
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +36,7 @@ class SingleInstance(QObject):
     """Notify the running process instead of starting a second file watcher."""
 
     show_requested = Signal()
+    notification_requested = Signal(str)
 
     def __init__(self, data_dir: Path) -> None:
         super().__init__()
@@ -38,16 +44,43 @@ class SingleInstance(QObject):
         self.name = f"organizador-{digest}"
         self.server = QLocalServer(self)
         self.server.newConnection.connect(self._receive)
+        self._activation_handler: Callable[[str], None] | None = None
+        self._queued_activations: list[str] = []
+        self.notification_requested.connect(self._dispatch_notification)
 
-    def acquire(self) -> bool:
+    def _dispatch_notification(self, uri: str) -> None:
+        if self._activation_handler is None:
+            self._queued_activations.append(uri)
+        else:
+            self._activation_handler(uri)
+
+    def set_notification_handler(self, handler: Callable[[str], None]) -> None:
+        """Hold activations received during startup until the catalog is ready."""
+        self._activation_handler = handler
+        queued, self._queued_activations = self._queued_activations, []
+        for uri in queued:
+            QTimer.singleShot(0, lambda value=uri: handler(value))
+
+    def acquire(self, notification_uri: str | None = None) -> bool:
         """Listen for future launches or ask an existing process to show itself."""
 
         probe = QLocalSocket()
         probe.connectToServer(self.name)
         if probe.waitForConnected(250):
-            probe.write(b"show")
+            message = (
+                json.dumps({"notification": notification_uri}).encode("utf-8")
+                if notification_uri is not None
+                else b"show"
+            )
+            probe.write(message)
+            probe.flush()
             probe.waitForBytesWritten(250)
+            # Keep the pipe alive until the server consumes its activation.
+            # Disconnecting immediately can discard pending writes on Windows.
+            probe.waitForReadyRead(2000)
             probe.disconnectFromServer()
+            if probe.state() != QLocalSocket.LocalSocketState.UnconnectedState:
+                probe.waitForDisconnected(500)
             return False
         QLocalServer.removeServer(self.name)
         return self.server.listen(self.name)
@@ -58,9 +91,22 @@ class SingleInstance(QObject):
             if socket is None:
                 continue
             socket.waitForReadyRead(100)
-            socket.readAll()
+            payload = bytes(socket.readAll().data())
+            socket.write(b"received")
+            socket.flush()
+            socket.waitForBytesWritten(250)
             socket.disconnectFromServer()
-            self.show_requested.emit()
+            socket.deleteLater()
+            if payload == b"show":
+                self.show_requested.emit()
+            elif len(payload) <= 4096:
+                try:
+                    data = json.loads(payload)
+                    uri = data.get("notification") if isinstance(data, dict) else None
+                except (ValueError, UnicodeError):
+                    continue
+                if isinstance(uri, str) and notification_token(uri) is not None:
+                    self.notification_requested.emit(uri)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,6 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--background", action="store_true", help="Arrancar apenas no tabuleiro do sistema"
     )
+    parser.add_argument("--notification-uri", help=argparse.SUPPRESS)
+    parser.add_argument("--register-integration", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--unregister-integration", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--data-dir", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--update-manifest", type=Path, help=argparse.SUPPRESS)
@@ -143,6 +192,15 @@ def main(argv: list[str] | None = None) -> int:
     """Create Qt, enforce one instance and run the application."""
 
     arguments = build_parser().parse_args(argv)
+    if arguments.notification_uri and notification_token(arguments.notification_uri) is None:
+        return 2
+    if arguments.register_integration or arguments.unregister_integration:
+        if not updater.is_frozen() or arguments.notification_uri:
+            return 2
+        if arguments.unregister_integration:
+            unregister_windows_integration()
+            return 0
+        return 0 if refresh_windows_integration() else 1
     target_data_dir = arguments.data_dir or default_data_dir()
     sys.excepthook = log_uncaught_exception
     _set_app_user_model_id()
@@ -157,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
     application.setOrganizationName(APP_NAME)
     application.setQuitOnLastWindowClosed(False)
     application.setWindowIcon(app_icon())
+    if updater.is_frozen() and not arguments.smoke_test:
+        mutex = AppMutex()
+        application.aboutToQuit.connect(mutex.close)
 
     if logging_error is not None:
         QMessageBox.critical(
@@ -189,17 +250,26 @@ def main(argv: list[str] | None = None) -> int:
     # the per-user database, so a data-dir guard must reject a second copy
     # before it can watch, migrate or recover the same files.
     instance = SingleInstance(target_data_dir)
-    if not arguments.smoke_test and not instance.acquire():
+    acquired = True
+    if not arguments.smoke_test:
+        acquired = (
+            instance.acquire(arguments.notification_uri)
+            if arguments.notification_uri
+            else instance.acquire()
+        )
+    if not acquired:
         return 0
 
     # One installation, one updater: frozen processes rendezvous on the
     # install folder so two profiles can never update the same binaries
     # concurrently.
     install_dir = updater.app_directory()
+    install_instance = SingleInstance(install_dir) if install_dir is not None else None
     if (
         install_dir is not None
         and not arguments.smoke_test
-        and not SingleInstance(install_dir).acquire()
+        and install_instance is not None
+        and not install_instance.acquire(arguments.notification_uri)
     ):
         return 0
 
@@ -278,6 +348,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     instance.show_requested.connect(controller.show_main)
+    instance.set_notification_handler(controller.activate_notification)
+    if install_instance is not None:
+        install_instance.show_requested.connect(controller.show_main)
+        install_instance.set_notification_handler(controller.activate_notification)
 
     if update_arguments is not None:
         manifest_path = update_arguments[0]
@@ -318,7 +392,10 @@ def main(argv: list[str] | None = None) -> int:
             return int(application.exec())
 
     try:
-        controller.start(background=arguments.background, smoke_test=arguments.smoke_test)
+        controller.start(
+            background=arguments.background or bool(arguments.notification_uri),
+            smoke_test=arguments.smoke_test,
+        )
     except Exception as exc:
         LOGGER.exception("Application failed to start after migration")
         if bundle is not None:
@@ -353,6 +430,8 @@ def main(argv: list[str] | None = None) -> int:
         coordinator.prune_healthy_backups()
     if arguments.smoke_test:
         QTimer.singleShot(900, controller.shutdown)
+    elif arguments.notification_uri:
+        QTimer.singleShot(0, lambda: controller.activate_notification(arguments.notification_uri))
     exit_code = application.exec()
     return int(exit_code)
 

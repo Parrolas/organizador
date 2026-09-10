@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -164,6 +165,13 @@ class FilingService:
                 if expected is not None
                 else None
             )
+        except OSError as exc:
+            raise FilingError(str(exc)) from exc
+        try:
+            pending = self.database.begin_ingest(source, destination, size)
+        except Exception as exc:
+            raise FilingError(_("Não foi possível preparar a recolha do ficheiro.")) from exc
+        try:
             move_without_overwrite(source, destination, expected_identity=expected_identity)
         except IncompleteMoveError as exc:
             raise FilingError(
@@ -173,13 +181,16 @@ class FilingService:
                 ).format(name=source.name, leftover=exc.leftover_path)
             ) from exc
         except OSError as exc:
+            if source.is_file() and not destination.exists():
+                with suppress(Exception):
+                    self.database.cancel_ingest(pending.id)
             raise FilingError(
                 _("{name} mudou ou ainda está a ser usado e ficou em Downloads.").format(
                     name=source.name
                 )
             ) from exc
         try:
-            item = self.database.add_inbox_item(destination, source, source.name, size)
+            item = self.database.complete_ingest(pending.id)
         except Exception as exc:
             rollback = unique_path(source.parent, source.name)
             try:
@@ -190,6 +201,8 @@ class FilingService:
                 raise FilingError(
                     leftover.format(name=source.name, destination=destination)
                 ) from rollback_error
+            with suppress(Exception):
+                self.database.cancel_ingest(pending.id)
             returned = _(
                 "Não foi possível registar {name}; foi devolvido a Downloads como {returned}."
             )

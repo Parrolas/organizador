@@ -2,6 +2,36 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.13.0 - 2026-09-10
+
+### Added
+
+- Persistent Windows filing notifications reveal their documents in Explorer,
+  including after the app exits. Batches spanning folders open a document list.
+- A per-user Setup executable creates shortcuts and an Installed Apps entry.
+  Its uninstall files survive in-app updates, and user data is preserved.
+- Optional trusted-certificate signing for the executable, Setup and uninstaller.
+
+### Fixed
+
+- Start Menu registration uses native COM instead of launching PowerShell.
+- Notification activation is forwarded to the running instance without creating
+  a second watcher. Stale notifications cannot open reused catalog records.
+- Packaged smoke tests skip real Windows integration registration.
+- Accepted transfers run in one FIFO queue. Conflicting filing, return, undo
+  and bulk requests are rejected until their prior operation is handled.
+- Normal exit keeps the interface responsive while accepted transfers finish;
+  settings and updates wait until queued work and its UI completion finish.
+- Download ingestion records its recovery entry before copying. Interrupted
+  copies stay in manual review instead of becoming ordinary inbox documents.
+
+### Development
+
+- Local builds default to `artifacts/`, leaving the live `dist/Organizador`
+  installation and committed icon assets untouched. Release CI explicitly
+  selects `dist` as its output directory.
+- Added a one-week daily-use checklist in `docs/daily-use-checklist.md`.
+
 ## 0.12.0 - 2026-09-06
 
 ### Fixed

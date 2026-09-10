@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -52,11 +53,14 @@ def _square_logo(source: Path) -> Image.Image:
 def main(argv: list[str] | None = None) -> int:
     """Write assets/icon-square.png and assets/icon.ico from assets/icon.png."""
 
-    del argv
     root = Path(__file__).resolve().parent.parent
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output-dir", type=Path, default=root / "assets")
+    args = parser.parse_args(argv)
     source = root / "assets" / "icon.png"
-    square_path = root / "assets" / "icon-square.png"
-    target = root / "assets" / "icon.ico"
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    square_path = args.output_dir / "icon-square.png"
+    target = args.output_dir / "icon.ico"
     if not source.is_file():
         print(f"Missing logo source: {source}", file=sys.stderr)
         return 1

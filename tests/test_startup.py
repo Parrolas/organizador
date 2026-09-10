@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import pythoncom
+from win32com.propsys import propsys
+from win32com.shell import shell
 
 from organizador import startup
 
@@ -49,32 +52,46 @@ def test_ensure_shortcut_refreshes_an_existing_file(
     assert shortcut.read_bytes().startswith(b"\x4c\x00\x00\x00")
 
 
-def test_ensure_shortcut_reports_failure_when_powershell_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_shortcut_failure_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(startup.sys, "frozen", True, raising=False)
 
-    class _Failure:
-        returncode = 1
-        stderr = "access denied"
+    def fail(*args: object) -> None:
+        raise OSError("access denied")
 
-    def fake_run(*_args: object, **_kwargs: object) -> _Failure:
-        return _Failure()
-
-    monkeypatch.setattr(startup.subprocess, "run", fake_run)
-
+    monkeypatch.setattr(startup, "create_shortcut", fail)
     assert startup.ensure_start_menu_shortcut(tmp_path) is False
 
 
-def test_shortcut_command_escapes_apostrophes_in_paths(tmp_path: Path) -> None:
-    target = tmp_path / "Student's Menu" / "App" / "Organizador.exe"
-    shortcut = tmp_path / "Student's Menu" / "Organizador.lnk"
+def test_native_shortcut_preserves_unicode_and_notification_identity(tmp_path: Path) -> None:
+    from organizador.windows_shell import AUMID, TOAST_CLSID, create_shortcut, shortcut_target
 
-    command = startup.shortcut_command(target, shortcut)
-
-    assert "Student's" not in command
-    assert "Student''s" in command
-    assert command.count("'") % 2 == 0
+    target = tmp_path / "José's material & notas" / "Organizador.exe"
+    shortcut = tmp_path / "Menu" / "Organizador.lnk"
+    create_shortcut(target, shortcut)
+    assert shortcut_target(shortcut) == target
+    pythoncom.CoInitialize()
+    try:
+        link = pythoncom.CoCreateInstance(
+            shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink
+        )
+        link.QueryInterface(pythoncom.IID_IPersistFile).Load(str(shortcut))
+        properties = link.QueryInterface(propsys.IID_IPropertyStore)
+        assert (
+            properties.GetValue(
+                propsys.PSGetPropertyKeyFromName("System.AppUserModel.ID")
+            ).GetValue()
+            == AUMID
+        )
+        assert (
+            str(
+                properties.GetValue(
+                    propsys.PSGetPropertyKeyFromName("System.AppUserModel.ToastActivatorCLSID")
+                ).GetValue()
+            )
+            == TOAST_CLSID
+        )
+    finally:
+        pythoncom.CoUninitialize()
 
 
 def test_refresh_launch_at_login_rewrites_a_stale_entry(
@@ -163,3 +180,11 @@ def test_refresh_windows_integration_refreshes_both_surfaces(
     startup.refresh_windows_integration()
 
     assert calls == ["run", "shortcut"]
+
+
+def test_isolated_update_suppresses_all_machine_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ORGANIZADOR_DISABLE_WINDOWS_INTEGRATION", "1")
+    monkeypatch.setattr(startup, "refresh_launch_at_login", lambda: pytest.fail("registry write"))
+    assert startup.refresh_windows_integration() is False

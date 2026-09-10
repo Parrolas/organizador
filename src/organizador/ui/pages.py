@@ -527,6 +527,12 @@ class InboxPage(QWidget):
     def _finding_row(self, finding: ReconciliationFinding) -> QFrame:
         path = finding.path
         details = {
+            FindingReason.PENDING_INGEST_SOURCE: _(
+                "Download com recolha interrompida; o original foi mantido para revisão."
+            ),
+            FindingReason.PENDING_INGEST_DESTINATION: _(
+                "Cópia por verificar; pode estar incompleta. Compara com o original em Downloads."
+            ),
             FindingReason.UNTRACKED_SUBJECT_FILE: _(
                 "Encontrado numa disciplina sem registo. Não foi movido nem alterado."
             ),

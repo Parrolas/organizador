@@ -97,6 +97,12 @@ class DatabaseHealth:
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS notification_actions (
+    token TEXT PRIMARY KEY,
+    expires_at REAL NOT NULL,
+    documents_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS subjects (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -197,6 +203,7 @@ CREATE INDEX IF NOT EXISTS idx_events_undo ON events(undone_at, created_at DESC)
 """
 
 _EXPECTED_TABLES = (
+    "notification_actions",
     "subjects",
     "inbox",
     "files",
@@ -727,6 +734,85 @@ class Database:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM inbox WHERE id = ?", (inbox_id,)).fetchone()
         return self._inbox(row) if row else None
+
+    def begin_ingest(self, source: Path, destination: Path, size: int) -> HistoryEvent:
+        """Reserve a recovery-only inbox row before touching a downloaded file."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            pending = connection.execute(
+                "SELECT source_path FROM events WHERE action = 'ingest_pending'"
+            ).fetchall()
+            source_key = normalise_path_key(source)
+            if any(normalise_path_key(Path(row["source_path"])) == source_key for row in pending):
+                raise LookupError("Este download já tem uma recolha por concluir.")
+            now = _now()
+            cursor = connection.execute(
+                """
+                INSERT INTO inbox(path, original_path, original_name, size, detected_at, status)
+                VALUES (?, ?, ?, ?, ?, 'recovery')
+                """,
+                (str(destination), str(source), source.name, size, now),
+            )
+            inbox_id = cursor.lastrowid
+            event = connection.execute(
+                """
+                INSERT INTO events(action, source_path, destination_path, inbox_id, created_at)
+                VALUES ('ingest_pending', ?, ?, ?, ?)
+                """,
+                (str(source), str(destination), inbox_id, now),
+            )
+            row = connection.execute(
+                "SELECT * FROM events WHERE id = ?", (event.lastrowid,)
+            ).fetchone()
+            connection.commit()
+        return self._event(row)
+
+    def complete_ingest(self, event_id: int) -> InboxItem:
+        """Publish an ingested file only after its move has completed."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            event = connection.execute(
+                "SELECT inbox_id FROM events WHERE id = ? AND action = 'ingest_pending'",
+                (event_id,),
+            ).fetchone()
+            if event is None:
+                raise LookupError("A recolha pendente já não existe.")
+            inbox_id = int(event["inbox_id"])
+            connection.execute(
+                "UPDATE inbox SET status = 'pending', last_error = '' WHERE id = ?",
+                (inbox_id,),
+            )
+            connection.execute("UPDATE events SET action = 'ingest' WHERE id = ?", (event_id,))
+            connection.commit()
+        item = self.get_inbox_item(inbox_id)
+        if item is None:
+            raise LookupError("O ficheiro recolhido já não existe no catálogo.")
+        return item
+
+    def cancel_ingest(self, event_id: int) -> None:
+        """Discard a reservation after verifying that its move did not persist."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            event = connection.execute(
+                "SELECT inbox_id FROM events WHERE id = ? AND action = 'ingest_pending'",
+                (event_id,),
+            ).fetchone()
+            if event is not None:
+                connection.execute("DELETE FROM events WHERE id = ?", (event_id,))
+                connection.execute(
+                    "DELETE FROM inbox WHERE id = ? AND status = 'recovery'", (event["inbox_id"],)
+                )
+            connection.commit()
+
+    def list_pending_ingests(self) -> list[HistoryEvent]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM events WHERE action = 'ingest_pending' ORDER BY id"
+            ).fetchall()
+        return [self._event(row) for row in rows]
 
     def find_active_inbox_by_path(self, path: Path) -> InboxItem | None:
         """Find an existing active inbox record for a path."""

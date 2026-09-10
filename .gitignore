@@ -9,6 +9,7 @@ __pycache__/
 htmlcov/
 build/
 dist/
+artifacts/
 e2e-public/
 update-e2e-evidence-*.log
 *.spec

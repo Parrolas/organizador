@@ -29,6 +29,9 @@ No Qt or PySide source files were modified for this distribution.
 
 ## Python libraries
 
+Native Windows shell integration uses pywin32 312. Its exact license is
+included under `packages/pywin32-312`; project: https://github.com/mhammond/pywin32.
+
 | Component | Version | License | Project |
 | --- | --- | --- | --- |
 | defusedxml | 0.7.1 | PSF-2.0 | https://github.com/tiran/defusedxml |
@@ -60,7 +63,8 @@ terms are documented here.
 - Python/WinRT projections 3.2.1 (`winrt-runtime`, `winrt-Windows.Foundation`,
   `winrt-Windows.Foundation.Collections`, `winrt-Windows.Globalization`,
   `winrt-Windows.Graphics.Imaging`, `winrt-Windows.Media.Ocr`,
-  `winrt-Windows.Storage.Streams`): MIT License. Project:
+  `winrt-Windows.Storage.Streams`, `winrt-Windows.UI.Notifications`,
+  `winrt-Windows.Data.Xml.Dom`): MIT License. Project:
   https://github.com/pywinrt/pywinrt
 
   Permission is hereby granted, free of charge, to any person obtaining a

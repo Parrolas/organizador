@@ -49,6 +49,7 @@ class TrayIcon(QObject):
         self.settings_action.triggered.connect(self.settings_requested)
         self.quit_action.triggered.connect(self.quit_requested)
         self.tray.activated.connect(self._activated)
+        self.tray.messageClicked.connect(self.open_requested)
 
     @property
     def available(self) -> bool:
