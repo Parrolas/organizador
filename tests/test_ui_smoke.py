@@ -573,6 +573,30 @@ def test_startup_reconciles_before_watcher_and_indexer(
     controller.main_window.close()
 
 
+def test_smoke_start_skips_pending_update_notifications(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    database: Database,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del database, subject
+    controller = AppController(app_config)
+    shown: list[bool] = []
+    monkeypatch.setattr(controller, "_restart_watcher", lambda: None)
+    monkeypatch.setattr(controller, "_show_pending_update_result", lambda: shown.append(True))
+
+    controller.start(smoke_test=True)
+    qt_app.processEvents()
+
+    assert shown == []
+    controller.reminder_timer.stop()
+    controller.indexer.shutdown()
+    controller.tray.hide()
+    controller.main_window.allow_close = True
+    controller.main_window.close()
+
+
 def test_incomplete_return_is_ignored_by_the_live_watcher(
     qt_app: QApplication,
     app_config: AppConfig,

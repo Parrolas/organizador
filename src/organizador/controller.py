@@ -298,7 +298,8 @@ class AppController(QObject):
             if self.config.check_updates_on_launch:
                 self._begin_update_check(automatic=True)
             self._handle_legacy_rollback_bridge()
-            self._show_pending_update_result()
+            if not smoke_test:
+                self._show_pending_update_result()
         if (
             not smoke_test
             and updater.is_frozen()
