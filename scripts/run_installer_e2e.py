@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import shutil
 import subprocess
 import tempfile
 import time
 import winreg
+from collections.abc import Callable
 from pathlib import Path
 
 import organizador.updater as updater
@@ -28,6 +30,16 @@ def run(executable: Path, *arguments: str, expected: int = 0) -> None:
     )
     if result.returncode != expected:
         raise RuntimeError(f"{executable.name} exited {result.returncode}")
+
+
+def _wait_until(predicate: Callable[[], bool], timeout: float = 60.0) -> None:
+    """Inno uninstallers may hand off to a second phase that outlives the first process."""
+
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            raise AssertionError("timed out waiting for the uninstaller to finish")
+        time.sleep(0.1)
 
 
 def verify_artifact(path: Path) -> None:
@@ -69,6 +81,9 @@ def main() -> None:
     install = root / "installed"
     downloads = root / "downloads"
     downloads.mkdir(parents=True, exist_ok=True)
+    # Extraction consumes its input archive; preserve the release artifact.
+    update_archive = root / args.zip.name
+    shutil.copy2(args.zip.resolve(), update_archive)
     config = AppConfig(
         data_dir=data,
         downloads_dir=downloads,
@@ -111,7 +126,7 @@ def main() -> None:
         data_dir=data,
         old_pid=2_147_483_647,
     )
-    updater.extract_to_staging(args.zip.resolve(), transaction.staging_dir)
+    updater.extract_to_staging(update_archive, transaction.staging_dir)
     marker = transaction.staging_dir / "added-by-update.txt"
     marker.write_text("managed update file", encoding="utf-8")
     with (transaction.staging_dir / "runtime-files.txt").open("a", encoding="utf-8") as stream:
@@ -148,7 +163,7 @@ def main() -> None:
         "/NORESTART",
         f"/LOG={root / 'uninstall.log'}",
     )
-    assert not (executable.parent / marker.name).exists()
+    _wait_until(lambda: not (executable.parent / marker.name).exists())
     assert not executable.exists()
     assert document.current_path.read_bytes() == original_bytes
     assert config.database_path.is_file()
@@ -157,6 +172,7 @@ def main() -> None:
     run(executable, "--smoke-test", "--data-dir", str(data))
     assert database.get_file(document.id) is not None
     run(uninstaller, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+    _wait_until(lambda: not executable.exists())
     print("PASS: install, migration, reinstall, real update, uninstall and data reuse", flush=True)
     print(f"Fixture data and logs retained in disposable account: {root}", flush=True)
 
