@@ -67,9 +67,11 @@ def main() -> None:
     verify_artifact(args.zip)
     root = Path(tempfile.mkdtemp(prefix="organizador-install-e2e-"))
     install = root / "installed"
+    downloads = root / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
     config = AppConfig(
         data_dir=data,
-        downloads_dir=root / "downloads",
+        downloads_dir=downloads,
         university_root=root / "coursework",
         initialized=True,
         check_updates_on_launch=False,
