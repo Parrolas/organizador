@@ -262,3 +262,21 @@ def test_office_package_over_the_expansion_budget_is_not_parsed(
     assert refreshed is not None
     assert refreshed.indexed_at is not None
     assert refreshed.index_state == "too_large"
+
+
+def test_sparse_workbook_stops_at_the_cell_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "primeiro"
+    sheet["XFD1048576"] = "ultimo"
+    path = tmp_path / "disperso.xlsx"
+    workbook.save(path)
+    monkeypatch.setattr("organizador.extractors.MAX_EXTRACTED_CELLS", 50_000)
+
+    pages = extract_xlsx(path)
+
+    text = "\n".join(pages)
+    assert "primeiro" in text
+    assert "ultimo" not in text

@@ -2,6 +2,23 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.13.2 - 2026-09-10
+
+### Fixed
+
+- The updated application now validates the migrated data while the helper can
+  still roll the binary back; only then does it acknowledge health and close
+  the data rollback window. The two rollback decisions can no longer disagree
+  when validation fails.
+- Spreadsheet extraction stops after a bounded number of visited cells, so a
+  tiny sheet declaring an enormous sparse range can no longer occupy the
+  indexing worker.
+- Inbox ingestion reads its record inside the database transaction, removing
+  the read-after-commit window that could return a file to Downloads while a
+  pending Inbox entry stayed behind.
+- A download that was stabilizing when a watcher pause began is queued again
+  after the pause instead of being silently discarded.
+
 ## 0.13.1 - 2026-09-10
 
 ### Fixed

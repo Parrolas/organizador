@@ -330,6 +330,7 @@ class DownloadWatcher:
                 path = candidate
             delivered = False
             retry = False
+            paused_interrupted = False
             try:
                 unchanged_before = manual_candidate is None or manual_candidate.still_matches()
                 stable = unchanged_before and wait_until_stable(
@@ -350,6 +351,8 @@ class DownloadWatcher:
                     and not self._paused.is_set()
                 ):
                     retry = True
+                elif manual_candidate is None and not self._stop.is_set() and self._paused.is_set():
+                    paused_interrupted = True
             except Exception:
                 LOGGER.exception("Failed while handling download candidate %s", path)
             finally:
@@ -357,7 +360,10 @@ class DownloadWatcher:
                 retries_exhausted = False
                 with self._lock:
                     self._pending.discard(key)
-                    if delivered:
+                    if paused_interrupted:
+                        self._known.add(key)
+                        self._paused_seen.add(key)
+                    elif delivered:
                         self._retry_after.pop(key, None)
                         self._retry_attempts.pop(key, None)
                         self._retry_exhausted.pop(key, None)

@@ -136,6 +136,43 @@ def test_resume_does_not_requeue_an_ignored_return(
         watcher.stop()
 
 
+def test_pause_during_stabilization_requeues_after_resume(
+    app_config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready: list[Path] = []
+    holders: list[DownloadWatcher] = []
+    paused_once = False
+
+    def pause_then_stable(*_args: object, **_kwargs: object) -> bool:
+        nonlocal paused_once
+        if not paused_once:
+            paused_once = True
+            holders[0].set_paused(True)
+        return True
+
+    monkeypatch.setattr("organizador.watcher.wait_until_stable", pause_then_stable)
+    watcher = DownloadWatcher(app_config, ready.append)
+    holders.append(watcher)
+    watcher.start(observe=False)
+    try:
+        candidate = app_config.downloads_dir / "pausado-a-estabilizar.pdf"
+        candidate.write_bytes(b"stabilizing when pause began")
+        watcher.enqueue(candidate)
+        deadline = monotonic() + 5.0
+        while watcher._pending and monotonic() < deadline:
+            sleep(0.02)
+        assert ready == []
+
+        watcher.set_paused(False)
+        deadline = monotonic() + 5.0
+        while not ready and monotonic() < deadline:
+            sleep(0.02)
+
+        assert [path.name for path in ready] == ["pausado-a-estabilizar.pdf"]
+    finally:
+        watcher.stop()
+
+
 def test_watcher_uses_one_key_for_directory_aliases(
     app_config: AppConfig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

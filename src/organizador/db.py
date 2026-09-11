@@ -785,10 +785,11 @@ class Database:
                 (inbox_id,),
             )
             connection.execute("UPDATE events SET action = 'ingest' WHERE id = ?", (event_id,))
+            row = connection.execute("SELECT * FROM inbox WHERE id = ?", (inbox_id,)).fetchone()
+            if row is None:
+                raise LookupError("O ficheiro recolhido já não existe no catálogo.")
+            item = self._inbox(row)
             connection.commit()
-        item = self.get_inbox_item(inbox_id)
-        if item is None:
-            raise LookupError("O ficheiro recolhido já não existe no catálogo.")
         return item
 
     def cancel_ingest(self, event_id: int) -> None:

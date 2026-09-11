@@ -20,6 +20,9 @@ MAX_EXTRACTION_CHARS = 2_000_000
 # python-docx/pptx/openpyxl ever open them.
 MAX_OFFICE_EXPANDED_BYTES = 256 * 1024 * 1024
 MAX_OFFICE_MEMBERS = 10_000
+# Spreadsheets can declare enormous sparse dimensions; the cell budget bounds
+# the walk itself, because empty cells consume no text budget.
+MAX_EXTRACTED_CELLS = 2_000_000
 
 
 def office_expanded_size(path: Path) -> tuple[int, int] | None:
@@ -127,13 +130,15 @@ def extract_xlsx(path: Path, *, max_chars: int = MAX_EXTRACTION_CHARS) -> list[s
     workbook = load_workbook(str(path), read_only=True, data_only=False, keep_links=False)
     try:
         pages: list[str] = []
+        visited = 0
         for worksheet in workbook.worksheets:
-            if budget.exhausted:
+            if budget.exhausted or visited > MAX_EXTRACTED_CELLS:
                 break
             rows = [budget.take(worksheet.title)]
             for row in worksheet.iter_rows(values_only=True):
-                if budget.exhausted:
+                if budget.exhausted or visited > MAX_EXTRACTED_CELLS:
                     break
+                visited += len(row)
                 values = [budget.take(_cell_text(value)) for value in row]
                 if any(values):
                     rows.append("\t".join(values).rstrip())

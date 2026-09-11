@@ -2034,7 +2034,7 @@ class AppController(QObject):
         *,
         background: bool,
     ) -> None:
-        """Activate services, acknowledge health, then close data rollback."""
+        """Activate, validate the migration, acknowledge health, then close data rollback."""
 
         try:
             self.activate(state, background=background)
@@ -2053,6 +2053,25 @@ class AppController(QObject):
             )
             QApplication.exit(1)
             return
+        if recovery_bundle is not None:
+            # Validate while the helper can still roll the binary back, so a
+            # data failure never leaves the two rollback decisions misaligned.
+            try:
+                coordinator.validate_migrated(recovery_bundle)
+            except Exception:
+                LOGGER.exception("Migrated data failed validation before acknowledgement")
+                with suppress(Exception):
+                    coordinator.restore_pending()
+                QMessageBox.critical(
+                    self.main_window,
+                    _("Não foi possível concluir a atualização"),
+                    _(
+                        "Os dados migrados não puderam ser validados. "
+                        "A versão anterior foi mantida para recuperação manual."
+                    ),
+                )
+                QApplication.exit(1)
+                return
         try:
             updater.mark_update_healthy(transaction.manifest_path, transaction.token)
         except Exception:
@@ -2068,15 +2087,9 @@ class AppController(QObject):
             try:
                 coordinator.mark_healthy(recovery_bundle)
             except Exception:
-                LOGGER.exception("Could not mark the migrated data healthy")
-                QMessageBox.critical(
-                    self.main_window,
-                    _("Não foi possível concluir a atualização"),
-                    _(
-                        "Os dados migrados não puderam ser validados. "
-                        "A versão anterior foi mantida para recuperação manual."
-                    ),
-                )
+                # The binary stays; startup recovery restores the pending
+                # data backup and migrates again on the next launch.
+                LOGGER.exception("Could not close the migration rollback window")
                 QApplication.exit(1)
                 return
 

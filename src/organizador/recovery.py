@@ -169,8 +169,8 @@ class RecoveryCoordinator:
         self._transition(bundle_path, PENDING_MARKER, FAILED_MARKER)
         return validated.bundle
 
-    def mark_healthy(self, bundle: RecoveryBundle) -> None:
-        """Atomically prevent restoration after the application health point."""
+    def validate_migrated(self, bundle: RecoveryBundle) -> None:
+        """Verify the migrated data without closing the restoration window."""
 
         bundle_path = self._owned_bundle_path(bundle.path)
         pending = bundle_path / PENDING_MARKER
@@ -189,6 +189,16 @@ class RecoveryCoordinator:
         inspection = Database(self.database_path).inspect_schema()
         if not inspection.is_current:
             raise RecoveryError("The migrated database has not reached the current healthy schema.")
+
+    def mark_healthy(self, bundle: RecoveryBundle) -> None:
+        """Atomically prevent restoration after the application health point."""
+
+        bundle_path = self._owned_bundle_path(bundle.path)
+        pending = bundle_path / PENDING_MARKER
+        healthy = bundle_path / HEALTHY_MARKER
+        if healthy.is_file() and not (pending.exists() or pending.is_symlink()):
+            return
+        self.validate_migrated(bundle)
         self._transition(bundle_path, PENDING_MARKER, HEALTHY_MARKER)
 
     def prune_healthy_backups(self) -> tuple[Path, ...]:

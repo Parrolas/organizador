@@ -75,6 +75,33 @@ def test_filing_survives_a_catalog_read_failure(
     assert refreshed.status == "filed"
 
 
+def test_ingestion_survives_a_catalog_read_failure(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _download(app_config)
+
+    def fail_get_inbox_item(*args: object, **kwargs: object) -> NoReturn:
+        raise RuntimeError("leitura falhou depois do commit")
+
+    monkeypatch.setattr(database, "get_inbox_item", fail_get_inbox_item)
+
+    item = filer.ingest(source)
+
+    assert item is not None
+    assert item.status == "pending"
+    assert item.path.is_file()
+    assert item.path.parent == app_config.inbox_dir
+    assert not source.exists()
+    monkeypatch.undo()
+    stored = database.get_inbox_item(item.id)
+    assert stored is not None
+    assert stored.status == "pending"
+    assert database.list_pending_ingests() == []
+
+
 def test_requested_extension_cannot_change_the_original(
     app_config: AppConfig, filer: FilingService, subject: Subject
 ) -> None:

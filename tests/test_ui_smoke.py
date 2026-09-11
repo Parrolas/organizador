@@ -1959,6 +1959,7 @@ def test_handshake_acknowledges_health_before_closing_data_rollback(
         coordinator = RecoveryCoordinator(app_config.data_dir)
         bundle = coordinator.prepare_migration()
         assert bundle is not None
+        controller.database.initialize()
 
         app = tmp_path / "Handshake App"
         (app / "_internal").mkdir(parents=True)
@@ -1972,17 +1973,91 @@ def test_handshake_acknowledges_health_before_closing_data_rollback(
         ) -> None:
             return None
 
+        real_validate = coordinator.validate_migrated
+
+        def record_validate(bundle_arg: object) -> None:
+            order.append("validate")
+            real_validate(bundle_arg)  # type: ignore[arg-type]
+
         monkeypatch.setattr(controller, "activate", noop_activate)
+        monkeypatch.setattr(coordinator, "validate_migrated", record_validate)
         monkeypatch.setattr(
             updater, "mark_update_healthy", lambda *args, **kwargs: order.append("ack")
         )
         monkeypatch.setattr(coordinator, "mark_healthy", lambda *args, **kwargs: order.append("db"))
+        monkeypatch.setattr(QApplication, "exit", lambda code=0: order.append("exit"))
+        monkeypatch.setattr(
+            QMessageBox, "critical", lambda *args, **kwargs: QMessageBox.StandardButton.Ok
+        )
 
         controller._commit_update_handshake(
             transaction, bundle, coordinator, state, background=True
         )
 
-        assert order == ["ack", "db"]
+        assert order == ["validate", "ack", "db"]
+    finally:
+        updater.abort_update_transaction(transaction)
+        _close_controller(qt_app, controller)
+
+
+def test_handshake_validation_failure_skips_ack_and_restores(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from organizador.controller import StartupState
+    from organizador.recovery import RecoveryCoordinator
+
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        with controller.database.connect() as connection:
+            connection.execute("ALTER TABLE tasks DROP COLUMN reminder_lead_days")
+            connection.commit()
+        coordinator = RecoveryCoordinator(app_config.data_dir)
+        bundle = coordinator.prepare_migration()
+        assert bundle is not None
+
+        app = tmp_path / "Handshake App"
+        (app / "_internal").mkdir(parents=True)
+        (app / "Organizador.exe").write_bytes(b"candidate")
+        transaction = updater.create_update_transaction(app, "0.6.3", data_dir=app_config.data_dir)
+        state = StartupState(configured=True, services_ready=True)
+        exits: list[int] = []
+        acknowledged: list[bool] = []
+        marked: list[bool] = []
+        restored: list[bool] = []
+
+        def noop_activate(
+            _state: StartupState, *, background: bool = False, smoke_test: bool = False
+        ) -> None:
+            return None
+
+        def fail_validation(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("migração inválida")
+
+        monkeypatch.setattr(controller, "activate", noop_activate)
+        monkeypatch.setattr(coordinator, "validate_migrated", fail_validation)
+        monkeypatch.setattr(
+            updater, "mark_update_healthy", lambda *args, **kwargs: acknowledged.append(True)
+        )
+        monkeypatch.setattr(
+            coordinator, "mark_healthy", lambda *args, **kwargs: marked.append(True)
+        )
+        monkeypatch.setattr(coordinator, "restore_pending", lambda: restored.append(True) or None)
+        monkeypatch.setattr(QApplication, "exit", lambda code=0: exits.append(code))
+        monkeypatch.setattr(
+            QMessageBox, "critical", lambda *args, **kwargs: QMessageBox.StandardButton.Ok
+        )
+
+        controller._commit_update_handshake(
+            transaction, bundle, coordinator, state, background=True
+        )
+
+        assert exits == [1]
+        assert restored == [True]
+        assert acknowledged == []
+        assert marked == []
     finally:
         updater.abort_update_transaction(transaction)
         _close_controller(qt_app, controller)
@@ -2024,12 +2099,16 @@ def test_handshake_ack_failure_restores_data_rollback(
             raise OSError("disco cheio")
 
         monkeypatch.setattr(controller, "activate", noop_activate)
+        monkeypatch.setattr(coordinator, "validate_migrated", lambda *args, **kwargs: None)
         monkeypatch.setattr(updater, "mark_update_healthy", fail_ack)
         monkeypatch.setattr(
             coordinator, "mark_healthy", lambda *args, **kwargs: marked.append(True)
         )
         monkeypatch.setattr(coordinator, "restore_pending", lambda: restored.append(True) or None)
         monkeypatch.setattr(QApplication, "exit", lambda code=0: exits.append(code))
+        monkeypatch.setattr(
+            QMessageBox, "critical", lambda *args, **kwargs: QMessageBox.StandardButton.Ok
+        )
 
         controller._commit_update_handshake(
             transaction, bundle, coordinator, state, background=True
