@@ -1827,6 +1827,48 @@ class Database:
             connection.commit()
         return cursor.rowcount == 1
 
+    def redirect_filing_destination(
+        self,
+        event_id: int,
+        file_id: int,
+        previous_path: Path,
+        new_path: Path,
+        pending_event_id: int,
+    ) -> bool:
+        """Point the catalog and filing history at a rolled-back undo destination."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            event = connection.execute(
+                """
+                SELECT id FROM events
+                WHERE id = ? AND action = 'file' AND undone_at IS NULL
+                  AND file_id = ? AND destination_path = ?
+                """,
+                (event_id, file_id, str(previous_path)),
+            ).fetchone()
+            marker = connection.execute(
+                "SELECT id FROM events WHERE id = ? AND action = 'undo_pending'",
+                (pending_event_id,),
+            ).fetchone()
+            if event is None or marker is None:
+                connection.rollback()
+                return False
+            updated = connection.execute(
+                "UPDATE files SET current_path = ? WHERE id = ? AND current_path = ?",
+                (str(new_path), file_id, str(previous_path)),
+            )
+            if updated.rowcount != 1:
+                connection.rollback()
+                return False
+            connection.execute(
+                "UPDATE events SET destination_path = ? WHERE id = ?",
+                (str(new_path), event_id),
+            )
+            connection.execute("DELETE FROM events WHERE id = ?", (pending_event_id,))
+            connection.commit()
+        return True
+
     def complete_pending_undo(self, pending: HistoryEvent) -> InboxItem | None:
         """Commit an undo whose prepared filesystem move already completed."""
 

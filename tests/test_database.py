@@ -1024,3 +1024,24 @@ def test_browse_documents_lists_by_filter_without_query(database: Database, tmp_
     assert browsed[0].title == "cinematica.txt"
     assert browsed[0].page == 0
     assert browsed[0].snippet == ""
+
+
+def test_redirect_filing_destination_requires_the_pending_marker(
+    database: Database, subject: Subject, tmp_path: Path
+) -> None:
+    file_id = _file_record(database, subject, tmp_path)
+    event = database.latest_undoable_filing()
+    assert event is not None
+    new_path = tmp_path / "subject" / "renomeado.txt"
+
+    assert (
+        database.redirect_filing_destination(
+            event.id, file_id, event.destination_path, new_path, 999_999
+        )
+        is False
+    )
+
+    stored = database.get_file(file_id)
+    assert stored is not None
+    assert stored.current_path == event.destination_path
+    assert database.list_undoable_filings() == [event]

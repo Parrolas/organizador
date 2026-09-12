@@ -2,6 +2,24 @@
 
 All notable changes to Organizador are recorded here.
 
+## 0.13.3 - 2026-09-12
+
+### Fixed
+
+- A failed undo that rolled the document back under an alternative name now
+  redirects the catalog and the filing history to that name, so a later undo
+  can no longer move an unrelated file.
+- Startup recovery only completes interrupted filings, returns and undos when
+  the destination size matches the recorded document; inconsistent
+  destinations stay flagged for manual review instead of being accepted.
+- Downloads arriving while an update is being prepared are retained and
+  collected again if the update fails instead of being silently forgotten.
+
+### Development
+
+- Calendar tests use date-relative offsets so fixed days of the month can no
+  longer collide with the test's reference date.
+
 ## 0.13.2 - 2026-09-10
 
 ### Fixed

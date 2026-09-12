@@ -229,6 +229,8 @@ class AppController(QObject):
         self._return_pause_owner: DownloadWatcher | None = None
         self._undo_in_flight = False
         self._bulk_filing_in_flight = False
+        self._deferred_downloads: list[tuple[int, Path | ExistingDownload]] = []
+        self._deferred_download_keys: set[str] = set()
 
         self._intake_notice_names: list[str] = []
         self._intake_notice_timer = QTimer(self)
@@ -650,7 +652,14 @@ class AppController(QObject):
         generation: int,
         candidate: Path | ExistingDownload,
     ) -> None:
-        if self._shutting_down or self._update_installing or generation != self._watcher_generation:
+        if self._shutting_down or generation != self._watcher_generation:
+            return
+        if self._update_installing:
+            path = candidate.path if isinstance(candidate, ExistingDownload) else candidate
+            key = normalise_path_key(path)
+            if key not in self._deferred_download_keys:
+                self._deferred_download_keys.add(key)
+                self._deferred_downloads.append((generation, candidate))
             return
         if isinstance(candidate, ExistingDownload):
             expected: ExistingDownload | None = candidate
@@ -669,6 +678,15 @@ class AppController(QObject):
             job,
             lambda: self.filer.ingest(path, expected=snapshot) if snapshot is not None else None,
         )
+
+    def _release_deferred_downloads(self) -> None:
+        """Reconsider arrivals that update preparation put on hold."""
+
+        deferred = self._deferred_downloads
+        self._deferred_downloads = []
+        self._deferred_download_keys.clear()
+        for generation, candidate in deferred:
+            self._ingest_download(generation, candidate)
 
     def _finish_ingested(self, job: _IngestJob, result: object, error: str | None) -> None:
         manual = job.expected is not None
@@ -1910,6 +1928,7 @@ class AppController(QObject):
                     message,
                     icon=QSystemTrayIcon.MessageIcon.Warning,
                 )
+                self._release_deferred_downloads()
                 return
             self._update_restart_armed = True
             self.tray.set_update_state(
@@ -1931,6 +1950,7 @@ class AppController(QObject):
             message,
             icon=QSystemTrayIcon.MessageIcon.Warning,
         )
+        self._release_deferred_downloads()
 
     def _wait_for_helper_ready(self, transaction: UpdateTransaction, deadline: float) -> None:
         """Restart once the helper supervises, or abort the handoff on timeout."""
@@ -1954,6 +1974,7 @@ class AppController(QObject):
                 _("Não foi possível iniciar o assistente de atualização."),
                 icon=QSystemTrayIcon.MessageIcon.Warning,
             )
+            self._release_deferred_downloads()
             return
         QTimer.singleShot(150, lambda: self._wait_for_helper_ready(transaction, deadline))
 

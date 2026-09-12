@@ -265,12 +265,15 @@ def apply(database: Database, report: ReconciliationReport) -> ReconciliationOut
     for pending in report.pending_filing_events:
         source = _probe(pending.source_path)
         destination = _probe(pending.destination_path)
+        item = database.get_inbox_item(pending.inbox_id) if pending.inbox_id is not None else None
         if (
             source is _ProbeState.MISSING
             and isinstance(destination, ExistingDownload)
             and pending.inbox_id is not None
+            and item is not None
             and pending.subject_id is not None
             and pending.kind in FILE_KINDS
+            and destination.size == item.size
         ):
             try:
                 database.record_filing(
@@ -296,10 +299,13 @@ def apply(database: Database, report: ReconciliationReport) -> ReconciliationOut
     for pending in report.pending_return_events:
         source = _probe(pending.source_path)
         destination = _probe(pending.destination_path)
+        item = database.get_inbox_item(pending.inbox_id) if pending.inbox_id is not None else None
         if (
             source is _ProbeState.MISSING
             and isinstance(destination, ExistingDownload)
             and pending.inbox_id is not None
+            and item is not None
+            and destination.size == item.size
         ):
             try:
                 database.record_return(
@@ -323,7 +329,13 @@ def apply(database: Database, report: ReconciliationReport) -> ReconciliationOut
     for pending in report.pending_undo_events:
         source = _probe(pending.source_path)
         restored = _probe(pending.destination_path)
-        if source is _ProbeState.MISSING and isinstance(restored, ExistingDownload):
+        document = database.get_file(pending.file_id) if pending.file_id is not None else None
+        if (
+            source is _ProbeState.MISSING
+            and isinstance(restored, ExistingDownload)
+            and document is not None
+            and restored.size == document.size
+        ):
             item = database.complete_pending_undo(pending)
             if item is not None:
                 recovered_items.append(item)

@@ -396,10 +396,29 @@ class FilingService:
             except OSError:
                 LOGGER.exception("Failed to roll back an undo operation")
             else:
-                try:
-                    self.database.cancel_pending_undo(pending.id)
-                except Exception:
-                    LOGGER.exception("Failed to cancel the rolled-back undo")
+                redirected = False
+                if event.file_id is not None:
+                    try:
+                        redirected = self.database.redirect_filing_destination(
+                            event.id,
+                            event.file_id,
+                            event.destination_path,
+                            rollback,
+                            pending.id,
+                        )
+                    except Exception:
+                        LOGGER.exception("Failed to redirect the filing after a rolled-back undo")
+                if not redirected:
+                    LOGGER.error(
+                        "The rolled-back undo left the catalog pointing at %s while the "
+                        "document is at %s",
+                        event.destination_path,
+                        rollback,
+                    )
+                    try:
+                        self.database.cancel_pending_undo(pending.id)
+                    except Exception:
+                        LOGGER.exception("Failed to cancel the rolled-back undo")
             raise FilingError(_("Não foi possível atualizar o histórico ao desfazer.")) from exc
         self._register_collision(collided)
         if event.inbox_id is None:  # pragma: no cover - schema invariant

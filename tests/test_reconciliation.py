@@ -262,7 +262,7 @@ def test_prepared_undo_is_completed_after_a_crash_between_move_and_commit(
     document = filer.file_document(item.id, subject.id, "Slides", source.name)
     event = database.latest_undoable_filing()
     assert event is not None
-    document.current_path.write_bytes(b"edited after filing" * 40)
+    document.current_path.write_bytes(b"edited after filing" * 20)
     restored_path = event.source_path
     pending = database.begin_filing_undo(event, restored_path)
     document.current_path.replace(restored_path)
@@ -379,6 +379,80 @@ def test_prepared_filing_is_completed_after_a_post_move_crash(
     assert repeated.change_count == 0
     assert len(database.list_files()) == 1
     assert database.activity_summary().operations_recovered == 1
+
+
+def test_prepared_filing_with_a_size_mismatch_is_left_for_review(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+) -> None:
+    source = app_config.downloads_dir / "arquivo-tamanho.pdf"
+    source.write_bytes(b"pending filing" * 20)
+    item = filer.ingest(source)
+    assert item is not None
+    destination = app_config.university_root / subject.folder_name / "Slides" / source.name
+    pending = database.begin_document_filing(item.id, subject.id, "Slides", destination)
+    item.path.replace(destination)
+    destination.write_bytes(b"tiny")
+
+    report = scan(app_config, database)
+    outcome = apply(database, report)
+
+    assert outcome.completed_operation_event_ids == ()
+    assert database.list_pending_filings() == [pending]
+    assert database.list_files() == []
+    reasons = {finding.reason for finding in findings(report)}
+    assert FindingReason.PENDING_FILING_SOURCE in reasons
+    assert FindingReason.PENDING_FILING_DESTINATION in reasons
+
+
+def test_prepared_undo_with_a_size_mismatch_is_left_for_review(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+) -> None:
+    source = app_config.downloads_dir / "desfazer-tamanho.pdf"
+    source.write_bytes(b"undo size mismatch" * 20)
+    item = filer.ingest(source)
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Slides", source.name)
+    event = database.latest_undoable_filing()
+    assert event is not None
+    pending = database.begin_filing_undo(event, event.source_path)
+    document.current_path.unlink()
+    event.source_path.write_bytes(b"x")
+
+    report = scan(app_config, database)
+    outcome = apply(database, report)
+
+    assert outcome.completed_undo_event_ids == ()
+    assert database.list_pending_undos() == [pending]
+    stored = database.get_file(document.id)
+    assert stored is not None
+    assert stored.current_path == document.current_path
+
+
+def test_prepared_return_with_a_size_mismatch_is_left_for_review(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+) -> None:
+    source = app_config.downloads_dir / "devolucao-tamanho.pdf"
+    source.write_bytes(b"pending return" * 20)
+    item = filer.ingest(source)
+    assert item is not None
+    destination = app_config.downloads_dir / source.name
+    pending = database.begin_return(item.id, destination)
+    item.path.replace(destination)
+    destination.write_bytes(b"tiny")
+
+    report = scan(app_config, database)
+    outcome = apply(database, report)
+
+    assert outcome.completed_operation_event_ids == ()
+    assert database.list_pending_returns() == [pending]
 
 
 def test_prepared_return_is_completed_after_a_post_move_crash(

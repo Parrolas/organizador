@@ -13,7 +13,7 @@ import pytest
 from organizador.config import AppConfig
 from organizador.db import Database
 from organizador.filer import FilingError, FilingService, render_final_name
-from organizador.models import FilingHint, Subject
+from organizador.models import FilingHint, HistoryEvent, Subject
 from organizador.paths import IncompleteMoveError
 
 
@@ -215,6 +215,50 @@ def test_undo_restores_latest_document_to_inbox(
     assert restored.path.parent == app_config.inbox_dir
     assert not document.current_path.exists()
     assert filer.database.list_pending_undos() == []
+
+
+def test_failed_undo_redirects_the_catalog_to_the_rollback_destination(
+    app_config: AppConfig,
+    database: Database,
+    filer: FilingService,
+    subject: Subject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = filer.ingest(_download(app_config, "aula.pdf"))
+    assert item is not None
+    document = filer.file_document(item.id, subject.id, "Slides", "Aula.pdf")
+    original_bytes = document.current_path.read_bytes()
+
+    def sabotaged_mark(event: HistoryEvent, restored_path: Path) -> None:
+        del restored_path
+        Path(event.destination_path).write_bytes(b"unrelated replacement")
+        raise RuntimeError("histórico indisponível")
+
+    monkeypatch.setattr(database, "mark_filing_undone", sabotaged_mark)
+
+    with pytest.raises(FilingError):
+        filer.undo_latest_filing()
+
+    folder = app_config.university_root / subject.folder_name / "Slides"
+    replacement = folder / "Aula.pdf"
+    rolled_back = folder / "Aula (2).pdf"
+    assert replacement.read_bytes() == b"unrelated replacement"
+    assert rolled_back.read_bytes() == original_bytes
+
+    stored = database.get_file(document.id)
+    assert stored is not None
+    assert stored.current_path == rolled_back
+    assert [event.destination_path for event in database.list_undoable_filings()] == [rolled_back]
+    assert database.list_pending_undos() == []
+
+    monkeypatch.undo()
+
+    restored = filer.undo_latest_filing()
+
+    assert restored is not None
+    assert restored.path.read_bytes() == original_bytes
+    assert database.get_file(document.id) is None
+    assert replacement.read_bytes() == b"unrelated replacement"
 
 
 def test_undo_never_skips_a_missing_newest_document(

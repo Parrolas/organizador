@@ -1088,10 +1088,10 @@ def test_tasks_page_calendar_marks_days_by_deadline_state(
     subject: Subject,
 ) -> None:
     today = date.today()
-    overdue = database.add_task("Atrasada", subject.id, today.replace(day=1))
+    overdue = database.add_task("Atrasada", subject.id, today - timedelta(days=3))
     today_task = database.add_task("Hoje", subject.id, today)
-    future = database.add_task("Futura", subject.id, today.replace(day=27))
-    completed = database.add_task("Feita", subject.id, today.replace(day=12))
+    future = database.add_task("Futura", subject.id, today + timedelta(days=3))
+    completed = database.add_task("Feita", subject.id, today + timedelta(days=1))
     database.set_task_completed(completed.id, True)
     window = MainWindow(database, app_config)
     page = window.tasks_page
@@ -1128,7 +1128,7 @@ def test_tasks_page_calendar_click_filters_and_toggle_clears(
     today = date.today()
     database.add_task("Um", subject.id, today)
     database.add_task("Dois", subject.id, today)
-    database.add_task("Outro dia", subject.id, today.replace(day=15))
+    database.add_task("Outro dia", subject.id, today + timedelta(days=5))
     window = MainWindow(database, app_config)
     page = window.tasks_page
 
@@ -1888,6 +1888,33 @@ def test_stale_check_result_is_ignored_and_install_waits_for_quiet(
 
         assert controller._pending_update is info
         assert controller._update_checking is True
+    finally:
+        _close_controller(qt_app, controller)
+
+
+def test_downloads_during_update_preparation_are_deferred_and_released(
+    qt_app: QApplication,
+    app_config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _notices = _watched_controller(qt_app, app_config, monkeypatch)
+    try:
+        path = app_config.downloads_dir / "durante-atualizacao.pdf"
+        path.write_bytes(b"download during update preparation")
+        controller._update_installing = True
+
+        controller._ingest_download(controller._watcher_generation, path)
+        controller._ingest_download(controller._watcher_generation, path)
+
+        assert controller.database.count_inbox_items() == 0
+        assert path.is_file()
+        assert [candidate for _, candidate in controller._deferred_downloads] == [path]
+
+        controller._on_update_install_finished("falha simulada")
+        _pump_until(qt_app, lambda: controller.database.count_inbox_items() == 1)
+
+        assert not path.exists()
+        assert controller._deferred_downloads == []
     finally:
         _close_controller(qt_app, controller)
 
